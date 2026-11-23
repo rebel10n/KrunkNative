@@ -54,6 +54,17 @@ static void purchase_done(void *user, const int status, const cJSON *json) {
         if (cJSON_IsString(junk)) account_ui_set_junk(junk->valuestring);
         const cJSON *kr = cJSON_GetObjectItem(data, "kr");
         if (cJSON_IsNumber(kr)) account_ui_set_funds(kr->valuedouble);
+        // the reward skins go to the account at once, as v10's purchase does (addSkin(skin_id, amount || 1),
+        // deob-10.0.7.js:116289-116296): a bought spin ticket counts on the open wheel
+        const cJSON *rw;
+        cJSON_ArrayForEach(rw, cJSON_GetObjectItem(data, "rewards")) {
+            const cJSON *type = cJSON_GetObjectItem(rw, "type"), *skin = cJSON_GetObjectItem(rw, "skin_id");
+            if (!cJSON_IsString(type) || strcmp(type->valuestring, "skin") || !cJSON_IsNumber(skin) || skin->valueint <= 0) continue;
+            const cJSON *amount = cJSON_GetObjectItem(rw, "amount");
+            const int n = cJSON_IsNumber(amount) && amount->valueint > 0 ? amount->valueint : 1;
+            for (int k = 0; k < n && k < 1000; k++) account_add_skin(skin->valueint);
+        }
+        store_ui_owned_changed();
         KN_LOG_DEBUG1("[junkshop] bought product %d: junk %s\n", product, cJSON_IsString(junk) ? junk->valuestring : "?");
         fflush(stdout);
     } else {
@@ -314,6 +325,29 @@ void junk_shop_bundle_buy(const int bundle_id) {
     snprintf(path, sizeof path, "/api/shop/bundles/purchase?token=%s", t);
     snprintf(body, sizeof body, "{\"bundle_id\":%d}", bundle_id);
     v10_send("POST", path, body, bundle_purchase_done, (void *) (intptr_t) bundle_id);
+}
+
+const cJSON *junk_shop_catalog(void) {
+    char t[256], path[400];
+    v10_url_token(t, sizeof t);
+    snprintf(path, sizeof path, "/api/shop/displays?tag=limited%s%s", t[0] ? "&token=" : "", t);
+    const V10Req *r = v10_get(path, SHOP_TTL_MS); // asks when nothing fresh is cached
+    const cJSON *data = r && r->status == 200 && r->json ? cJSON_GetObjectItem(r->json, "data") : NULL;
+    return cJSON_IsObject(data) ? data : NULL;
+}
+
+int junk_shop_catalog_buy(const int display_id, const char *price_ref) {
+    const cJSON *products = cJSON_GetObjectItem(junk_shop_catalog(), "products"), *pr;
+    cJSON_ArrayForEach(pr, products) {
+        const cJSON *price;
+        cJSON_ArrayForEach(price, cJSON_GetObjectItem(pr, "prices")) {
+            const char *ref = cJSON_GetStringValue(cJSON_GetObjectItem(price, "price_ref"));
+            if (!ref || !price_ref || strcmp(ref, price_ref)) continue;
+            junk_shop_buy(display_id, (int) cJSON_GetNumberValue(cJSON_GetObjectItem(pr, "id")));
+            return 1;
+        }
+    }
+    return 0;
 }
 
 void junk_shop_buy(const int display_id, const int product_id) {

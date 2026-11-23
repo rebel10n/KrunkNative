@@ -40,6 +40,7 @@
 #include <v10_ui.h>        // v10_view_push: the Premium Benefits modal
 #include <kio_checkout.h>  // krunker.io's real-money purchases (showPurchase, premiumPopup, directPurchase, bundles)
 #include <krunker_net.h>   // the krunker.io account's Free KR spin (AD_FINISHED "fkr") on the official game socket
+#include <krunker_checkout.h> // krunker_checkout_parse_catalog: showPurchase("catalog:...") on Box Office
 #include <html_dom.h>
 #include <i18n.h>
 #include <time.h>
@@ -90,40 +91,42 @@ static int pool_rarity(const StorePool *p) {
     return -1;
 }
 
+// a UiWheel of store data's wheel `w` (a store.wheels entry or a TICKET item's spinWheel)
+static void ui_wheel_fill(UiWheel *u, const StoreWheel *w, const StoreSpins *sp) {
+    memset(u, 0, sizeof(*u));
+    u->src = w;
+    u->name = w->name;
+    u->head_col = w->head_col[0] ? w->head_col : "#fff";
+    u->price_t = w->price_t[0] ? w->price_t : NULL;
+    u->price = w->price;
+    u->multi = w->multi;
+    u->icons = w->icons;
+    u->free = w->free;
+    u->kr = w->kr;
+    u->min_lvl = w->min_lvl;
+    u->ticket = w->ticket;
+    u->ticket_only = w->ticket_only;
+    u->big_rar = w->big_rar;
+    u->season = w->season;
+    u->hide = w->hide;
+    u->locked = !store_wheel_open(w, (int64_t) time(NULL) * 1000);
+    if (w->pool_count > 0) {
+        for (int k = 0; k < w->pool_count && k < w->slices; k++) {
+            const int r = pool_rarity(store_spins_pool(sp, w->pools[k]));
+            if (r >= 0 && r < 7) u->rarities[r] += w->weights[k];
+        }
+    } else {
+        for (int k = 0; k < w->slices && k < 7; k++) u->rarities[k] = w->weights[k];
+    }
+}
+
 static void wheels_load(void) {
     const StoreSpins *sp = ui_spins();
     if (g_ui_wheel_count >= 0 && g_ui_wheels_from == sp) return;
     g_ui_wheels_from = sp;
     g_ui_wheel_count = 0;
-    for (int i = 0; i < sp->wheel_count && g_ui_wheel_count < UI_WHEELS_MAX; i++) {
-        const StoreWheel *w = &sp->wheels[i];
-        UiWheel *u = &g_ui_wheels[g_ui_wheel_count++];
-        memset(u, 0, sizeof(*u));
-        u->src = w;
-        u->name = w->name;
-        u->head_col = w->head_col[0] ? w->head_col : "#fff";
-        u->price_t = w->price_t[0] ? w->price_t : NULL;
-        u->price = w->price;
-        u->multi = w->multi;
-        u->icons = w->icons;
-        u->free = w->free;
-        u->kr = w->kr;
-        u->min_lvl = w->min_lvl;
-        u->ticket = w->ticket;
-        u->ticket_only = w->ticket_only;
-        u->big_rar = w->big_rar;
-        u->season = w->season;
-        u->hide = w->hide;
-        u->locked = !store_wheel_open(w, (int64_t) time(NULL) * 1000);
-        if (w->pool_count > 0) {
-            for (int k = 0; k < w->pool_count && k < w->slices; k++) {
-                const int r = pool_rarity(store_spins_pool(sp, w->pools[k]));
-                if (r >= 0 && r < 7) u->rarities[r] += w->weights[k];
-            }
-        } else {
-            for (int k = 0; k < w->slices && k < 7; k++) u->rarities[k] = w->weights[k];
-        }
-    }
+    for (int i = 0; i < sp->wheel_count && g_ui_wheel_count < UI_WHEELS_MAX; i++)
+        ui_wheel_fill(&g_ui_wheels[g_ui_wheel_count++], &sp->wheels[i], sp);
 }
 
 static int wheel_count(void) {
@@ -216,10 +219,33 @@ static const struct { int skin; UiWheel w; } k_ticket_wheels[] = {
 // store.freeKR[rarity].kr[0]: the Free KR wheel's prizes
 static const int k_free_kr[] = {5, 10, 20, 500};
 
+// the other TICKET items' own spinWheel (skins.json), made into wheels as prizeWheel does (deob-10.0.7.js:224216-224219):
+// the Paint Ticket's Paint Wheel (7792, a pool wheel: paintPoolEpic / Contraband / Unobtainable), which the brain spins
+// from the same object. Rebuilt when store.spins changes (its pools).
+#define UI_OWN_WHEELS 8
+static struct { int skin; const StoreSpins *from; StoreWheel src; UiWheel w; } g_own_wheels[UI_OWN_WHEELS];
+static int g_own_wheel_next;
+
 static const UiWheel *ticket_wheel(const int skin) {
     for (size_t i = 0; i < sizeof(k_ticket_wheels) / sizeof(k_ticket_wheels[0]); i++)
         if (k_ticket_wheels[i].skin == skin) return &k_ticket_wheels[i].w;
-    return NULL;
+    const cJSON *own = skin >= 0 ? cJSON_GetObjectItemCaseSensitive(ui_loadout_skin_json(skin), "spinWheel") : NULL;
+    if (!cJSON_IsObject(own)) return NULL;
+    const StoreSpins *sp = ui_spins();
+    int slot = -1;
+    for (int i = 0; i < UI_OWN_WHEELS; i++)
+        if (g_own_wheels[i].w.src && g_own_wheels[i].skin == skin) {
+            if (g_own_wheels[i].from == sp) return &g_own_wheels[i].w;
+            slot = i;
+        }
+    if (slot < 0) slot = g_own_wheel_next++ % UI_OWN_WHEELS;
+    g_own_wheels[slot].w.src = NULL;
+    if (store_wheel_parse(own, &g_own_wheels[slot].src) != 0) return NULL;
+    if (g_own_wheels[slot].src.ticket < 0) g_own_wheels[slot].src.ticket = skin;
+    ui_wheel_fill(&g_own_wheels[slot].w, &g_own_wheels[slot].src, sp);
+    g_own_wheels[slot].skin = skin;
+    g_own_wheels[slot].from = sp;
+    return &g_own_wheels[slot].w;
 }
 
 static int store_window_handle(const char *name, const HtmlArg *args, int argc);
@@ -262,6 +288,10 @@ static struct {
     int win_slice;              // the slice that fills the wheel: the item's pool on a pool wheel, else its rarity (:228566)
     int win_kr;                 // its KR (Free KR wheel)
     int has_item;               // a result is loaded
+    // iiîîìîî: the won items' instances (the spin's sixth value, sorted with them), their m: wear (-1 none), serial
+    // (0 none), paint (0xRRGGBB, -1 none) (deob-10.0.7.js:224680-224697)
+    double inst_wear[SPIN_ITEMS], inst_serial[SPIN_ITEMS];
+    int32_t inst_paint[SPIN_ITEMS];
 } g_wheel = {.win_skin = -1, .win_rarity = -1, .win_slice = -1};
 static SpinWheelDraw g_wheel_draw;
 
@@ -316,16 +346,18 @@ static void spin_kr(void) {
     set_html("spinKR", html);
 }
 
-// account.skins[ind].cnt (0 for none / guests)
+// account.getSkinCount(ind): the cnt of every entry of the index, its stack and its copies (deob-10.0.7.js:115340-115345;
+// 0 for none / guests)
 static int owned_count(const int skin) {
     const AccountInfo *acc = active_account();
     const cJSON *skins = acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL;
     const cJSON *e;
+    int n = 0;
     cJSON_ArrayForEach(e, skins) {
         const cJSON *ind = cJSON_GetObjectItem(e, "ind"), *cnt = cJSON_GetObjectItem(e, "cnt");
-        if (cJSON_IsNumber(ind) && ind->valueint == skin) return cJSON_IsNumber(cnt) ? cnt->valueint : 1;
+        if (cJSON_IsNumber(ind) && ind->valueint == skin) n += cJSON_IsNumber(cnt) ? cnt->valueint : 1;
     }
-    return 0;
+    return n;
 }
 
 // the account's spin tickets (acc.skins of type TICKET, v10 windows[13] viewTickets / the
@@ -656,6 +688,53 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
     if (auto_spin) spin_button_click();
 }
 
+// iîìiiïî(wear, i18n) (deob-10.0.7.js:24598-24608, the tiers :16478-16494): the wear's tier name, the last past them
+static const char *wear_name(const double wear) {
+    static const double max[] = {0.1, 0.3, 0.6};
+    static const char *const keys[] = {"wear_flawless", "wear_tested", "wear_trashed", "wear_wrecked"};
+    static const char *const names[] = {"Flawless", "Tested", "Trashed", "Wrecked"};
+    int i = 0;
+    while (i < 3 && !(wear < max[i])) i++;
+    return i18n_tr(keys[i], names[i]);
+}
+
+// store.catalog's key (a price_ref) of a product whose rewards include skin `skin` ({type "skin", id}), and its
+// display_ids[0] as v10 writes it ("undefined" when it has none). store.catalog (windows[13].gen,
+// deob-10.0.7.js:220836-220856) holds the "premium" and "limited" displays' available products by their available
+// real price's price_ref: krunker.io's display (kio_store_catalog). Box Office has no payments, so its catalogue is its
+// "limited" display's products by their available price (junk_shop_catalog: the KR-priced official products).
+static int catalog_of_skin(const int skin, char *key, const size_t key_n, char *display, const size_t display_n) {
+    const int kio = kio_store_active();
+    const cJSON *products = cJSON_GetObjectItem(kio ? kio_store_catalog() : junk_shop_catalog(), "products"), *pr;
+    cJSON_ArrayForEach(pr, products) {
+        if (!cJSON_IsTrue(cJSON_GetObjectItem(pr, "available"))) continue;
+        const cJSON *price = NULL, *p;
+        cJSON_ArrayForEach(p, cJSON_GetObjectItem(pr, "prices")) {
+            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(p, "type"));
+            if (cJSON_IsTrue(cJSON_GetObjectItem(p, "available")) && (!kio || (type && !strcmp(type, "real")))) {
+                price = p;
+                break;
+            }
+        }
+        const char *ref = price ? cJSON_GetStringValue(cJSON_GetObjectItem(price, "price_ref")) : NULL;
+        if (!ref || !ref[0] || strlen(ref) >= key_n || strpbrk(ref, "'\"<>&\\")) continue;
+        int match = 0;
+        const cJSON *rw;
+        cJSON_ArrayForEach(rw, cJSON_GetObjectItem(pr, "rewards")) {
+            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(rw, "type"));
+            const cJSON *id = cJSON_GetObjectItem(rw, "id");
+            if (type && !strcmp(type, "skin") && cJSON_IsNumber(id) && id->valuedouble == skin) match = 1;
+        }
+        if (!match) continue;
+        snprintf(key, key_n, "%s", ref);
+        const cJSON *d = cJSON_GetArrayItem(cJSON_GetObjectItem(pr, "display_ids"), 0);
+        if (cJSON_IsNumber(d)) snprintf(display, display_n, "%.0f", d->valuedouble);
+        else snprintf(display, display_n, "undefined");
+        return 1;
+    }
+    return 0;
+}
+
 // UTILS.getItemDesc(item) without " Item": the type's market label (i18n social.market.*), a
 // weapon skin's weapon name
 static const char *item_desc(const ViewerSkin *skin) {
@@ -719,7 +798,17 @@ static void load_next_item(void) {
     sb_append_esc(&sb, skin ? skin->name : "?");
     sb_append(&sb, "<div style='color:rgba(255,255,255,0.5)'>");
     sb_append_esc(&sb, item_desc(skin));
-    sb_append(&sb, "</div><div style='color:rgba(255,255,255,0.5)'>");
+    sb_append(&sb, "</div>");
+    // an instance's wear / serial line: the wear's name (iîìiiïî) and <span class='serialTag'>#serial</span>
+    // (deob-10.0.7.js:224559-224568)
+    const double wear = g_wheel.inst_wear[slot], serial = g_wheel.inst_serial[slot];
+    if (wear >= 0 || serial > 0) {
+        sb_append(&sb, "<div style='color:rgba(255,255,255,0.5)'>");
+        if (wear >= 0) sb_append_esc(&sb, wear_name(wear));
+        if (serial > 0) sb_appendf(&sb, "<span class='serialTag'>#%.0f</span>", serial);
+        sb_append(&sb, "</div>");
+    }
+    sb_append(&sb, "<div style='color:rgba(255,255,255,0.5)'>");
     if (owned > 1) sb_appendf(&sb, "<span style='color:#fff'>x%d</span> Owned", owned);
     else sb_append(&sb, "<span style='color:#fff'>NEW</span>");
     sb_append(&sb, "</div>");
@@ -735,6 +824,7 @@ static void load_next_item(void) {
     char src[160];
     store_skin_preview(item, src, sizeof(src));
     show_item_image(item, src, g_wheel.win_rarity, 0);
+    spin_item_copy(item, wear, g_wheel.inst_paint[slot]); // loadMesh's {wear, paint} (:224680-224700)
     KN_LOG_VERBOSE2("[store] unboxing %s (skin %d, %d owned)\n", skin ? skin->name : "?", item, owned);
 }
 
@@ -750,8 +840,19 @@ static void spin_error(const char *err) {
     char disp[16] = "";
     if (g_cur && ui && html_dom_get_style(ui, "display", disp, sizeof(disp)) >= 0 && !strcmp(disp, "block"))
         prize_wheel(g_spin_index, g_spin_ticket, g_multi, 0, 0);
-    char html[256];
+    char html[1024];
     snprintf(html, sizeof(html), "<div class=\"popHeader\">Spin Error</div>%s", strcmp(err, "DISABLED") ? err : I18N("spins.banned", "Spins are disabled in your country"));
+    // "Not enough tickets" with a ticket: Purchase More when store.catalog has a product whose rewards include the
+    // ticket (deob-10.0.7.js:224246-224264): logBtnFRVR(`buy_ticket_<t>`);showPurchase('catalog:{"display":<id>}|<key>')
+    char key[96], display[24];
+    if (!strcmp(err, "Not enough tickets") && g_spin_ticket >= 0 && catalog_of_skin(g_spin_ticket, key, sizeof(key), display, sizeof(display))) {
+        // genericPopup's button (:223004): v10 writes the cb's quotes into the onclick attribute as they are, which ends
+        // the attribute at the JSON's first quote; KrunkNative writes them as &quot; so the button does what it says
+        const size_t used = strlen(html);
+        snprintf(html + used, sizeof(html) - used,
+                 "<button id=\"confirmBtn\" style=\"width: calc(100%% - 20px)\" onclick=\"logBtnFRVR(`buy_ticket_%d`);showPurchase('catalog:{&quot;display&quot;:%s}|%s');\">Purchase More</button>",
+                 g_spin_ticket, display, key);
+    }
     generic_popup(html, "spinErrorPop");
 }
 
@@ -785,20 +886,45 @@ static void spin_response(const cJSON *frame) {
         roll[0] = cJSON_IsNumber(rolls) ? rolls->valuedouble : 0;
         n = 1;
     }
+    // the instances (the sixth value; one or an array, aligned with the items: Array.isArray(x) || (x = x ? [x] : []),
+    // deob-10.0.7.js:224680-224686), sorted with their items
+    const cJSON *instances = cJSON_GetArrayItem(frame, 6), *inst[SPIN_ITEMS];
+    for (int i = 0; i < n; i++) {
+        const cJSON *e = cJSON_IsArray(instances) ? cJSON_GetArrayItem(instances, i) : i == 0 ? instances : NULL;
+        inst[i] = cJSON_IsObject(e) ? e : NULL;
+    }
     for (int i = 1; i < n; i++) // stable insertion sort by rarity, highest first
         for (int j = i; j > 0 && item_rarity(item[j]) > item_rarity(item[j - 1]); j--) {
             const int ti = item[j];
             const double tr = roll[j];
+            const cJSON *tn = inst[j];
             item[j] = item[j - 1];
             roll[j] = roll[j - 1];
+            inst[j] = inst[j - 1];
             item[j - 1] = ti;
             roll[j - 1] = tr;
+            inst[j - 1] = tn;
         }
+    for (int i = 0; i < n; i++) { // iiîîìîî[i].m (a JSON string or an object): its wear, serial and paint
+        const cJSON *m = inst[i] ? cJSON_GetObjectItem(inst[i], "m") : NULL;
+        cJSON *parsed = cJSON_IsString(m) ? cJSON_Parse(m->valuestring) : NULL;
+        if (parsed) m = parsed;
+        const cJSON *wear = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "wear") : NULL;
+        const cJSON *serial = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "serial") : NULL;
+        const char *paint = cJSON_IsObject(m) ? cJSON_GetStringValue(cJSON_GetObjectItem(m, "paint")) : NULL;
+        g_wheel.inst_wear[i] = cJSON_IsNumber(wear) && wear->valuedouble >= 0 ? wear->valuedouble : -1.0;
+        g_wheel.inst_serial[i] = cJSON_IsNumber(serial) && serial->valuedouble > 0 ? serial->valuedouble : 0.0;
+        g_wheel.inst_paint[i] = paint && paint[0] == '#' ? (int32_t) strtol(paint + 1, NULL, 16) : -1;
+        cJSON_Delete(parsed);
+    }
     // a pool wheel's slices are its pools: each sorted roll's pool (deob-10.0.7.js:224744-224748)
     for (int i = 0; i < n; i++) g_wheel.item_slice[i] = wheel_pools(g_cur) ? pool_of_roll(g_cur, roll[i]) : item_rarity(item[i]);
     account_set_funds(cJSON_GetNumberValue(cJSON_GetArrayItem(frame, 4)));
     for (int i = 0; i < n; i++) {
-        account_add_skin(item[i]);
+        // addSkin(index, 1, inst.id, inst.m) for an instance, else addSkin(index) (deob-10.0.7.js:224785-224790)
+        const cJSON *id = inst[i] ? cJSON_GetObjectItem(inst[i], "id") : NULL;
+        if (cJSON_IsNumber(id) && id->valuedouble != 0) account_add_skin_instance(item[i], id->valuedouble, cJSON_GetObjectItem(inst[i], "m"));
+        else account_add_skin(item[i]);
         history_add(item[i], g_cur ? g_cur->price : 0); // f1838: fds = the wheel's price, a ticket spin's too (:224757-224760)
     }
     // usedTicket: removeSkin(ticket, itemIds.length) and #spinKR its count (deob-10.0.7.js:224783)
@@ -909,6 +1035,7 @@ static void kio_spin_answer(void *user, const int status, const cJSON *data, con
         cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(data, "itemIds")));
         cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(data, "funds")));
         cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(data, "usedTicket")));
+        cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(data, "instances"))); // v10.0.7's sixth (:224680)
     }
     spin_response(frame);
     cJSON_Delete(frame);
@@ -926,6 +1053,7 @@ static void spin_button_click(void) {
         spin_error("Not enough tickets");
         return;
     }
+    if (!kio_store_active() && !backend_enabled()) return;
     if (kio_store_active()) {
         if (g_cur->kr) { // the Free KR wheel (after claimReward's ad): AD_FINISHED "fkr" on the game socket, answered "spinKR"
             cJSON *fkr = cJSON_CreateArray(); // (deob-10.0.5.js:222644, :222655)
@@ -1829,7 +1957,19 @@ void store_ui_open_tab(const int tab) {
 
 // windows[13].gen()
 char *store_window_gen(void) {
+    // gen() loads store.catalog first (deob-10.0.7.js:220836-220856): the display Purchase More looks through
+    if (active_account()) {
+        if (kio_store_active()) kio_store_catalog();
+        else junk_shop_catalog();
+    }
     return v10_store_window_gen();
+}
+
+void store_ui_owned_changed(void) {
+    HtmlElem ui = html_dom_by_id("spinUI");
+    char disp[16] = "";
+    if (!g_cur || !ui || html_dom_get_style(ui, "display", disp, sizeof(disp)) < 0 || strcmp(disp, "block")) return;
+    if (g_spin_ticket >= 0 && !g_spinning) spin_kr_ticket(g_spin_ticket); // #spinKR: the ticket's count
 }
 
 // genericPopup(html, cls): #genericPop over #popupBack
@@ -2043,8 +2183,20 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
             else kio_checkout_kr_pack(a0); // showPurchase(index): a KR pack (:213019-213056)
             return 1;
         }
-        if (!active_account()) menu_show_window(5, 1);
-        else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
+        if (!active_account()) {
+            menu_show_window(5, 1);
+            return 1;
+        }
+        // showPurchase("catalog:{display}|key") -> showProductPurchase (deob-10.0.7.js:216181-216193): krunker.io's
+        // payment checkout. Box Office's catalogue is its KR-priced products (junk_shop_catalog), bought for KR.
+        const char *s = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
+        int display = -1;
+        char ref[96];
+        if (s && krunker_checkout_parse_catalog(s, &display, ref, sizeof(ref)) && junk_shop_catalog_buy(display, ref)) {
+            ui_loadout_clear_pops();
+            return 1;
+        }
+        ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
         return 1;
     }
     if (!strcmp(name, "creatorCodeAction")) {
@@ -2147,6 +2299,10 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         spin_kr();
         return 1;
     }
+    if (!strcmp(name, "knSpinButton")) { // spinButton.onclick: its funds / ticket checks need only the account (:224473-224483)
+        spin_button_click();
+        return 0;
+    }
     if (!backend_enabled() || !active_account()) return -1;
     if (!strcmp(name, "knStoreMusicStop")) { // the music player's Stop
         eterno_music(0);
@@ -2155,10 +2311,6 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     if (!strcmp(name, "openSales")) { // openURL("/social.html?p=itemsales&i=" + i)
         if (argc > 0 && args[0].kind == HTML_ARG_NUM) open_item_sales((int) args[0].num);
         return 1;
-    }
-    if (!strcmp(name, "knSpinButton")) {
-        spin_button_click();
-        return 0;
     }
     if (!strcmp(name, "knSpinRespin")) { // spinAgainBtn: prizeWheel(i, skin, multi, true, true)
         g_spin_button_time = store_now();
@@ -2248,6 +2400,8 @@ void store_ui_scenario_result(const cJSON *result) {
         cJSON_AddItemToArray(frame, cJSON_Duplicate(cJSON_GetObjectItem(result, "rand"), 1));
         cJSON_AddItemToArray(frame, cJSON_Duplicate(items, 1));
         cJSON_AddItemToArray(frame, cJSON_CreateNumber(acc ? acc->funds - (g_cur ? g_cur->price * n : 0) : 0));
+        cJSON_AddItemToArray(frame, cJSON_CreateNull()); // usedTicket
+        cJSON_AddItemToArray(frame, kio_or_null(cJSON_GetObjectItem(result, "instances"))); // state.spinResult.instances
         spin_response(frame);
     }
     cJSON_Delete(frame);

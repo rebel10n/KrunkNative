@@ -10,6 +10,14 @@ on --render-scenario, read from the document the frame was captured from (KRUNKN
   swu       the brain's "swu" (store.applySpinData) replaces the wheels: the new wheel's pools, #spinPromo (promoText on
             promoCol), infoText's lines (markup kept) at calc(100% + 72px) and "Available until: <endDate>"
   expired   a wheel past its endDate does not open (iîìiiii, deob-10.0.7.js:25150-25158)
+  instance  a spin's sixth value, its instances (deob-10.0.7.js:224680-224697): sorted with their items (rarest first), and
+            #spinItemName gets the shown instance's wear / serial line under the description: the wear's tier name and
+            <span class='serialTag'>#serial</span> (:224559-224568); an item with no instance has no such line
+  more      prizeWheel(null, 7792) opens the Paint Ticket's own spinWheel (the Paint Wheel, a pool wheel, :224216-224219);
+            "Not enough tickets" with a ticket whose catalogue entry (store.catalog: Box Office's "limited" display, the
+            0398 Paint Ticket product whose rewards hold {type "skin", id 7792}) exists: the Spin Error popup gets v10's
+            Purchase More button, logBtnFRVR(`buy_ticket_7792`);showPurchase('catalog:{"display":90001}|kn.paintticket')
+            (:224246-224264); with no catalogue entry it has none
 
   python3 -I client/tests/prize_wheel_scenario_e2e.py BUILD_DIR [SOURCE_DIR]   (run from the repository root)
 """
@@ -142,6 +150,41 @@ def main():
 
     doc = render("expired", spin=1, spinData=SPIN_DATA)
     check("expired: a wheel past its endDate does not open", ">GONE<" not in element(doc, "spinInfo"), element(doc, "spinInfo")[:200])
+
+    # 7582 Fractured (rarity 1) and 2 (a rarer item): the rarer comes first with its own instance
+    spinner = {"name": "Spinner", "funds": 1000, "skins": []}
+    doc = render("instance", spin=0, account=spinner,
+                 spinResult={"rand": [40, 60], "item": [7582, 311],
+                             "instances": [{"id": 1000001, "m": {"wear": 0.45, "serial": 3}}, {"id": 1000002, "m": {"wear": 0.05, "serial": 12}}]})
+    name = element(doc, "spinItemName")
+    check("instance: the rarer item shows first with its own instance: Flawless, #12",
+          re.search(r"Flawless<span class=[\"']serialTag[\"']>#12</span>", name) and "Trashed" not in name, name[:500])
+    check("instance: the wear / serial line sits between the description and the NEW line",
+          re.search(r"</div><div style=[\"']color:\s*rgba\(255,\s*255,\s*255,\s*0\.5\)[^\"']*[\"']>Flawless<span[^>]*>#12</span></div>"
+                    r"<div style=[\"']color:\s*rgba\(255,\s*255,\s*255,\s*0\.5\)[^\"']*[\"']>", name), name[:500])
+    doc = render("instance-none", spin=0, account=spinner, spinResult={"rand": 40, "item": 7582})
+    name = element(doc, "spinItemName")
+    check("instance: an item with no instance has no wear line", "serialTag" not in name and "Flawless" not in name, name[:400])
+
+    catalog = {"/api/shop/displays?tag=limited": {"data": {"id": 1, "type": "front", "children": [], "products": {"90001": {
+        "id": 90001, "name": "Paint Ticket", "available": True, "display_ids": [90001],
+        "prices": [{"id": 90001, "price_ref": "kn.paintticket", "type": "virtual", "available": True,
+                    "virtual": {"amount": 50, "currency_id": 1, "currency": "KR"}}],
+        "rewards": [{"type": "skin", "id": 7792, "skin_id": 7792, "amount": 1}],
+        "contents": [{"id": 90001, "type": "skin", "ref": "7792", "quantity": 1}]}}}}}
+    doc = render("more", spin=0, account=spinner, v10responses=catalog, spinActions=[["prizeWheel", None, 7792, False], "knSpinButton"])
+    info = element(doc, "spinInfo")
+    check("more: prizeWheel(null, 7792) opens the Paint Ticket's own spinWheel, the Paint Wheel (a pool wheel)",
+          "PAINT WHEEL" in info.upper() and "CONTRABAND" in info.upper() and ">0</span> Tickets" in element(doc, "spinKR"), info[:300])
+    pop = element(doc, "genericPop")
+    btn = re.search(r'<button id="confirmBtn"[^>]*onclick="([^"]*)"[^>]*>Purchase More</button>', pop)
+    cb = btn.group(1).replace("&quot;", '"') if btn else ""
+    check("more: Not enough tickets opens the Spin Error popup", "Spin Error</div>Not enough tickets" in pop, pop[:300])
+    check("more: Purchase More buys the ticket's catalogue entry",
+          cb == "logBtnFRVR(`buy_ticket_7792`);showPurchase('catalog:{\"display\":90001}|kn.paintticket');", pop[:600])
+    doc = render("more-none", spin=0, account=spinner, spinActions=[["prizeWheel", None, 7792, False], "knSpinButton"])
+    pop = element(doc, "genericPop")
+    check("more: no catalogue entry, no Purchase More", "Not enough tickets" in pop and "Purchase More" not in pop, pop[:300])
 
     failed = sum(1 for _, ok, _ in results if not ok)
     print("prize_wheel_scenario_e2e: %d checks, %d failed" % (len(results), failed))

@@ -173,6 +173,9 @@ int  v10_market_owns_frame(const char *label); // 1 = the open exchange answers 
 void clan_ui_reset(void);                   // account changed: drop clanData
 void clan_ui_scenario(const cJSON *state);  // --render-scenario: state.clan {data, tab, motd, loot, recruit}
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count
+// acc.addSkin(skin, 1, id, m) (deob-10.0.7.js:115267-115276): an instance (a spin's minted copy: m {wear, serial}) as its
+// own entry {ind, cnt: 1, id, m, st: 0}, on the active backend's account
+void account_add_skin_instance(int skin_index, double id, const cJSON *m);
 // v10.0.4 counter skins: the signed-in krunker.io account's copy of store skin `skin`: its m[stat] (the counter's base,
 // generateMeshes, deob-10.0.4.js:172727-172728), -1 when it has none or krunker.io is not the account (Box Office's comes
 // from the server, NET_EXT_KN_SKIN_COPIES)
@@ -213,6 +216,7 @@ void store_ui_frame(const cJSON *frame);    // "spin" / "spinKR" / "spinH" repli
 void store_ui_free_kr_wheel(void);          // claimReward(): the Free KR wheel
 void store_ui_open_tab(int tab);            // windows[13].switchTab(tab) + showWindow(14) (5: the Eterno Shop's shop front)
 void store_ui_account_changed(void);        // a login / logout: the spin history is the old account's
+void store_ui_owned_changed(void);          // the account's items changed (a shop purchase): the open wheel's ticket count
 void store_ui_tick(void);                   // per frame: spin screen geometry + reveal
 void store_ui_scenario_wheel(int index, int multi); // --render-scenario state.spin(+spinMulti): prizeWheel(index, null, multi) with noAnim
 void store_ui_scenario_result(const cJSON *result); // state.spinResult {rand, item}: the spin's reply, the spin skipped

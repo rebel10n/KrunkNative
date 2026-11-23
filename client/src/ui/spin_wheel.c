@@ -663,6 +663,31 @@ int spin_item_set(const int skin_index) {
     return g_item.ready;
 }
 
+void spin_item_copy(const int skin_index, const double wear, const int32_t paint_color) {
+    const ViewerSkin *n = viewer_skin(skin_index);
+    if (!g_item.ready || !n) return;
+    if (wear >= 0.0 && n->type > 0) { // a typed item's wearMap (skin_fx_wear_key)
+        for (int i = 0; i < g_item.mesh_count; i++) skin_fx_apply_wear(g_item.meshes[i], n, wear);
+        if (g_item.gltf) skin_fx_apply_wear_gltf(g_item.gltf, n, wear);
+    } else if (wear >= 0.0 && n->weapon > 0) { // "weapons/" + weapons[weapon - 1].src + [_mid] + "_wear": the model's key
+        char model[128], texture[192], key[160];
+        viewer_item_keys(n, model, sizeof(model), texture, sizeof(texture));
+        snprintf(key, sizeof(key), "%s_wear", model);
+        const unsigned int map = item_texture(key); // 0 when the host has no such map: no wear drawn
+        for (int i = 0; map && i < g_item.mesh_count; i++) {
+            Mesh *mesh = g_item.meshes[i];
+            if (!mesh->material || mesh->material->vtable != &basic_material_vtable) continue;
+            ((BasicMaterial *) mesh->material)->wear_texture = map;
+            ((BasicMaterial *) mesh->material)->wear_level = (float) wear;
+        }
+    }
+    if (paint_color >= 0 && (n->flags2 & VS2_PAINTABLE)) { // paint: {targets, color: m.paint, mask} (paintTargets items)
+        const WornSkinPaint paint = {paint_color, -1};
+        for (int i = 0; i < g_item.mesh_count; i++) skin_fx_apply_paint(g_item.meshes[i], paint, n);
+        if (g_item.gltf) skin_fx_apply_paint_gltf(g_item.gltf, paint, n);
+    }
+}
+
 int spin_item_set_coin(void) {
     if (!item_scene()) return 0;
     holder_set((vec3) {0.0f, 1.0f, 0.0f}, -(float) M_PI / 7.0f, 1.07f, -2.45f);

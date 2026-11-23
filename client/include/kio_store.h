@@ -21,6 +21,9 @@ int  kio_store_active(void);              // krunker.io is the active backend: t
 // The Eterno Shop tab's body (v10 svelte-gh77t9: the header, then loading / error / the shop front of
 // krunker.io's "limited" display). Starts the request when nothing is cached.
 void kio_store_eterno(StrBuf *sb);
+// krunker.io's "limited" display ({products}; asked for when nothing is cached, NULL until it answers): the products
+// of store.catalog (windows[13].gen, deob-10.0.7.js:220836-220856) the Spin Error's Purchase More looks through
+const cJSON *kio_store_catalog(void);
 // ranked.getShop()'s data ({skins: [...]}, each row's expires_at as epoch ms) in the shape of the
 // brain's /mm/ranked/shop answer, for ranked_ui.c's Shop tab. Never NULL.
 const struct V10Req *kio_store_ranked_shop(void);

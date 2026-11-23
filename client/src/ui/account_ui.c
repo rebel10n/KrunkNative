@@ -796,7 +796,8 @@ void account_remove_skin(const int skin_index) {
     int i = 0;
     cJSON_ArrayForEach(entry, skins) {
         cJSON *ind = cJSON_GetObjectItem(entry, "ind"), *cnt = cJSON_GetObjectItem(entry, "cnt");
-        if (cJSON_IsNumber(ind) && ind->valueint == skin_index) {
+        // v10's removeSkin(ind): the index's stack (no id), never a copy (deob-10.0.7.js:115320-115330)
+        if (cJSON_IsNumber(ind) && ind->valueint == skin_index && !cJSON_GetObjectItem(entry, "id")) {
             const int n = (cJSON_IsNumber(cnt) ? cnt->valueint : 1) - 1;
             if (n > 0) cJSON_ReplaceItemInObject(entry, "cnt", cJSON_CreateNumber(n));
             else cJSON_DeleteItemFromArray(skins, i);
@@ -1065,9 +1066,9 @@ int account_add_skin(const int skin_index) {
         cJSON_ReplaceItemInArray(g_acc.data, 10, skins);
     }
     cJSON *entry;
-    cJSON_ArrayForEach(entry, skins) {
+    cJSON_ArrayForEach(entry, skins) { // v10's addSkin(ind): the index's stack (an entry with no id), not a copy
         cJSON *ind = cJSON_GetObjectItem(entry, "ind");
-        if (cJSON_IsNumber(ind) && ind->valueint == skin_index) {
+        if (cJSON_IsNumber(ind) && ind->valueint == skin_index && !cJSON_GetObjectItem(entry, "id")) {
             cJSON *cnt = cJSON_GetObjectItem(entry, "cnt");
             const int n = (cJSON_IsNumber(cnt) ? cnt->valueint : 0) + 1;
             cJSON_ReplaceItemInObject(entry, "cnt", cJSON_CreateNumber(n));
@@ -1079,6 +1080,34 @@ int account_add_skin(const int skin_index) {
     cJSON_AddNumberToObject(entry, "cnt", 1);
     cJSON_AddItemToArray(skins, entry);
     return 1;
+}
+
+void account_add_skin_instance(const int skin_index, const double id, const cJSON *m) {
+    cJSON *skins = NULL;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        if (!g_kio.obj || !krunker_account_signed_in()) return;
+        skins = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "skins");
+        if (!cJSON_IsArray(skins)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(g_kio.obj, "skins");
+            skins = cJSON_AddArrayToObject(g_kio.obj, "skins");
+        }
+    } else if (g_logged_in && g_acc.data) {
+        skins = cJSON_GetArrayItem(g_acc.data, 10);
+        if (!cJSON_IsArray(skins)) {
+            skins = cJSON_CreateArray();
+            cJSON_ReplaceItemInArray(g_acc.data, 10, skins);
+        }
+    }
+    if (!skins) return;
+    // addSkin(ind, 1, id, m) (deob-10.0.7.js:115267-115276): the instance is its own entry {ind, cnt: 1, id, m, st: 0}
+    cJSON *entry = cJSON_CreateObject();
+    cJSON_AddNumberToObject(entry, "ind", skin_index);
+    cJSON_AddNumberToObject(entry, "cnt", 1);
+    cJSON_AddNumberToObject(entry, "id", id);
+    cJSON_AddItemToObject(entry, "m", cJSON_IsObject(m) ? cJSON_Duplicate(m, 1) : cJSON_CreateObject());
+    cJSON_AddNumberToObject(entry, "st", 0);
+    cJSON_AddItemToArray(skins, entry);
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) g_kio.gen++;
 }
 const char *account_session_token(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKIO ? g_token : ""; }
 

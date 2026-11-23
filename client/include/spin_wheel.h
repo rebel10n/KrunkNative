@@ -62,6 +62,10 @@ void spin_wheel_confetti_reset(void);
 // the caller shows its PNG); spin_item_set_coin(): the Free KR wheel's KR coin; spin_item_clear():
 // nothing on show.
 int  spin_item_set(int skin_index);
+// The won instance's m on the item spin_item_set built (v10.0.7's loadMesh {wear, paint}, deob-10.0.7.js:224680-224700):
+// wear >= 0 its wearMap at that level (a typed item's <types[assetType || type]><id>_wear, a weapon skin's
+// weapons/<src>[_<mid>]_wear), paint_color >= 0 (0xRRGGBB, m.paint) its colour paint on a paintTargets item.
+void spin_item_copy(int skin_index, double wear, int32_t paint_color);
 int  spin_item_set_coin(void);
 void spin_item_clear(void);
 

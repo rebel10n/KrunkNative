@@ -17,6 +17,13 @@ void junk_shop_reload(void);
 // knKioShopBuy on Box Office (kio_store.c): the product's purchase, one unit; an accepted one counts on the card of
 // display_id at once (updateDisplayPurchaseCount, deob-10.0.6.js:115979-116030)
 void junk_shop_buy(int display_id, int product_id);
+// Box Office's store.catalog (deob-10.0.7.js:220836-220856): the "limited" display's data ({products}), asked for when
+// nothing fresh is cached (NULL until it answers). krunker.io's catalogue is its real-priced products; Box Office has
+// no payments, so its catalogue is what it sells: the KR-priced official products (0398's Paint Ticket among them).
+const cJSON *junk_shop_catalog(void);
+// showPurchase("catalog:{display}|price_ref") on Box Office: the catalogue product with that price_ref, bought as
+// junk_shop_buy buys it (KR, no payment). 0 when the catalogue has no such product.
+int junk_shop_catalog_buy(int display_id, const char *price_ref);
 // the store home's bundle grid (store_ui.c v10_store_home): the brain's GET /api/shop/bundles rows as v10's bundle
 // cards in v10's order (svelte-lri212, deob-10.0.3.js:144642, 144811-144823); nothing is drawn while they load or
 // when none are published

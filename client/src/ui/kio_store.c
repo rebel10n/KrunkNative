@@ -773,6 +773,11 @@ static void display_html(StrBuf *sb, const cJSON *d, const cJSON *products, cons
     // "wild-offer": not drawn (the head comment)
 }
 
+const cJSON *kio_store_catalog(void) {
+    const Slot *s = kio_get(DISPLAY_LIMITED, 0);
+    return s && cJSON_IsObject(s->req.json) ? s->req.json : NULL;
+}
+
 void kio_store_eterno(StrBuf *sb) {
     char vid[256];
     html_dom_asset_url("videos/limited_shop_banner.webm", vid, sizeof(vid));
