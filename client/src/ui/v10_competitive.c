@@ -699,15 +699,24 @@ static int raid_months_now(void) {
 
 static void lb_render(void);
 
-static void lb_loading_or(StrBuf *sb, const V10Req *r, const char *hash, const char *loading, const char *fail) {
-    if (r->status == 0) sb_appendf(sb, "<div class=\"loading svelte-%s\">%s</div>", hash, loading);
-    else {
+enum { KC_LOADING, KC_ERROR, KC_LOADED };
+
+static int kc_request(const V10Req *r, const char *fail, const cJSON **rows, char *msg, size_t mn);
+
+// the players / clans and raid components' states (deob-10.0.7.js:140052-140057, 140121-140132, 140525-140540,
+// 140643-140665): their fetch throws error.message || `fail` ("Failed to fetch leaderboard", "... raid leaderboard",
+// "... monthly raid leaderboard") and the catch shows that message; `data || []` makes a missing list "no data".
+// Returns KC_LOADED, *rows the list (NULL = empty), once there is a table or the no-data line to draw.
+static int lb_state(StrBuf *sb, const V10Req *r, const char *hash, const char *loading, const char *fail, const cJSON **rows) {
+    char msg[160];
+    const int st = kc_request(r, fail, rows, msg, sizeof(msg));
+    if (st == KC_LOADING) sb_appendf(sb, "<div class=\"loading svelte-%s\">%s</div>", hash, loading);
+    else if (st == KC_ERROR) {
         sb_appendf(sb, "<div class=\"error svelte-%s\">", hash);
-        const char *msg = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(r->json, "error"), "message"));
-        if (!msg) msg = cJSON_GetStringValue(cJSON_GetObjectItem(r->json, "error"));
-        sb_append_esc(sb, msg && msg[0] ? msg : fail);
+        sb_append_esc(sb, msg[0] ? msg : "Failed to load leaderboard");
         sb_append(sb, "</div>");
     }
+    return st;
 }
 
 static const cJSON *data_array(const V10Req *r) {
@@ -764,9 +773,9 @@ static void lb_component(StrBuf *sb, const char *type, const char *sort) {
     else snprintf(path, sizeof(path), "/api/leaderboards/%s", type);
     const V10Req *r = v10_get(path, 30000);
     sb_append(sb, "<div class=\"leaderboard-component svelte-12wkeob\">");
-    const cJSON *rows = data_array(r);
-    if (!rows) lb_loading_or(sb, r, "12wkeob", "Loading leaderboard...", "Failed to load leaderboard");
-    else if (!cJSON_GetArraySize(rows)) sb_append(sb, "<div class=\"no-data svelte-12wkeob\">No data available.</div>");
+    const cJSON *rows = NULL;
+    if (lb_state(sb, r, "12wkeob", "Loading leaderboard...", "Failed to fetch leaderboard", &rows) != KC_LOADED) {
+    } else if (!cJSON_GetArraySize(rows)) sb_append(sb, "<div class=\"no-data svelte-12wkeob\">No data available.</div>");
     else if (!strcmp(type, "player_clan")) {
         static const V10Col cols[] = {{"#", "50px", 1, 0}, {"Clan", NULL, 0, 0}, {"Score", NULL, 1, 0}, {"Members", NULL, 1, 0}};
         v10_table_begin(sb, cols, 4, -1, 1, NULL);
@@ -778,7 +787,8 @@ static void lb_component(StrBuf *sb, const char *type, const char *sort) {
             v10_fmt_int(members, sizeof(members), v10_num(row, "member_count", 0));
             v10_table_row(sb, NULL, 0);
             v10_table_cell(sb, &cols[0], pos);
-            v10_table_cell(sb, &cols[1], v10_str(row, "clan_name"));
+            const cJSON *cn = cJSON_GetObjectItem(row, "clan_name"); // a column without render: row[key] ?? '—' (deob-10.0.7.js:132575)
+            v10_table_cell(sb, &cols[1], cJSON_IsString(cn) ? cn->valuestring : "\xe2\x80\x94");
             v10_table_cell(sb, &cols[2], score);
             v10_table_cell(sb, &cols[3], members);
             v10_table_row_end(sb);
@@ -833,9 +843,10 @@ static void lb_raids(StrBuf *sb) {
         sb_append(sb, "</select>");
     } else sb_append(sb, "<!---->");
     sb_append(sb, "</div> ");
-    const cJSON *rows = data_array(r);
-    if (!rows) lb_loading_or(sb, r, "9t0md3", "Loading leaderboard...", "Failed to load raid leaderboard");
-    else if (!cJSON_GetArraySize(rows)) sb_append(sb, "<div class=\"no-data svelte-9t0md3\">No raid data available.</div>");
+    const cJSON *rows = NULL;
+    if (lb_state(sb, r, "9t0md3", "Loading leaderboard...", monthly ? "Failed to fetch monthly raid leaderboard" : "Failed to fetch raid leaderboard", &rows) !=
+        KC_LOADED) {
+    } else if (!cJSON_GetArraySize(rows)) sb_append(sb, "<div class=\"no-data svelte-9t0md3\">No raid data available.</div>");
     else {
         const int best = !LB.raid_completions;
         const V10Col all[] = {{"#", "50px", 1, 0}, {"Player", NULL, 0, 0}, {"Best Time", NULL, 1, 0}, {"Clears", NULL, 1, 0}};
@@ -1025,8 +1036,6 @@ static void kc_team_thumb(char *out, const size_t n, const int id) {
     html_dom_asset_url(path, out, n);
 }
 
-enum { KC_LOADING, KC_ERROR, KC_LOADED };
-
 static int kc_truthy(const cJSON *v) {
     if (!v) return 0;
     if (cJSON_IsBool(v)) return cJSON_IsTrue(v);
@@ -1198,7 +1207,7 @@ static void lb_krunkcup(StrBuf *sb) {
 
 static void lb_view(StrBuf *sb, const char *title, const char *const *tabs, const int ntabs, const int active, const char *tab_handler) {
     sb_append(sb, "<div class=\"category-view svelte-1k16b2z\"><div class=\"view-header svelte-1k16b2z\">");
-    v10_back_button(sb, "playSelect();knLbBack()");
+    v10_back_button(sb, "knLbBack()"); // the main-button plays no sound (deob-10.0.7.js:11859-11871), nor do the cards (:140294-140298)
     sb_appendf(sb, " <h2 class=\"view-title svelte-1k16b2z\">%s</h2></div> ", title);
     v10_tabs(sb, tabs, ntabs, active, tab_handler);
     sb_append(sb, " <div class=\"tab-content svelte-1k16b2z\">");
@@ -1237,15 +1246,15 @@ static char *lb_gen(void) {
             break;
         default:
             sb_append(&sb, "<div class=\"category-grid svelte-1k16b2z\">"
-                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"playSelect();knLbCategory(0)\"><div class=\"card-icon svelte-1k16b2z\">&#9733;</div> "
+                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"knLbCategory(0)\"><div class=\"card-icon svelte-1k16b2z\">&#9733;</div> "
                            "<h3 class=\"card-title svelte-1k16b2z\">Players</h3> <p class=\"card-description svelte-1k16b2z\">Level, Kills, Wins, Time, KR, Followers, and more.</p></button> "
-                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"playSelect();knLbCategory(1)\"><div class=\"card-icon svelte-1k16b2z\">&#9876;</div> "
+                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"knLbCategory(1)\"><div class=\"card-icon svelte-1k16b2z\">&#9876;</div> "
                            "<h3 class=\"card-title svelte-1k16b2z\">Clans</h3> <p class=\"card-description svelte-1k16b2z\">Top clans ranked by score or member count.</p></button> "
-                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"playSelect();knLbCategory(2)\"><div class=\"card-icon svelte-1k16b2z\">&#9760;</div> "
+                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"knLbCategory(2)\"><div class=\"card-icon svelte-1k16b2z\">&#9760;</div> "
                            "<h3 class=\"card-title svelte-1k16b2z\">Raids</h3> <p class=\"card-description svelte-1k16b2z\">Best completion times per raid map.</p></button> "
-                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"playSelect();knLbCategory(3)\"><div class=\"card-icon svelte-1k16b2z\">&#9884;</div> "
+                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"knLbCategory(3)\"><div class=\"card-icon svelte-1k16b2z\">&#9884;</div> "
                            "<h3 class=\"card-title svelte-1k16b2z\">Ranked</h3> <p class=\"card-description svelte-1k16b2z\">Top players by rating and matches across seasons.</p></button> "
-                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"playSelect();knLbCategory(4)\"><div class=\"card-icon svelte-1k16b2z\">");
+                           "<button type=\"button\" class=\"category-card svelte-1k16b2z\" onclick=\"knLbCategory(4)\"><div class=\"card-icon svelte-1k16b2z\">");
             v10_emoji(&sb, "\xf0\x9f\x8f\x86", ""); // Chrome draws 🏆 in colour (Noto Color Emoji); ⚔ ☠ ⚜ ★ stay text (README)
             sb_append(&sb, "</div> "
                            "<h3 class=\"card-title svelte-1k16b2z\">KrunkCup</h3> <p class=\"card-description svelte-1k16b2z\">Team standings and top contributors for the KrunkCup.</p></button></div>"
@@ -1262,14 +1271,38 @@ static void lb_render(void) {
     free(html);
 }
 
-// window.openLeaderboards(initialCategory): genericPopup({component: _49281}, 'defaultModal')
+// the state of the components a category mounts: the raid component's sort and month (deob-10.0.7.js:140507-140508),
+// the ranked Rating tab's region (Global) and season (the current one, :140698-140699) and the Matches tab's season
+// (All Time); each starts afresh when its component mounts again
+static void lb_reset_raids(void) {
+    LB.raid_completions = 0;
+    snprintf(LB.raid_month, sizeof(LB.raid_month), "all-time");
+}
+
+static void lb_reset_rating(void) {
+    LB.ranked_region = 0;
+    LB.ranked_season = -1;
+}
+
+static void lb_reset_matches(void) { LB.matches_season = 0; }
+
+static void lb_reset_category(void) {
+    lb_reset_raids();
+    lb_reset_rating();
+    lb_reset_matches();
+    LB.kc_team = -1;
+    kc_reset_sort();
+}
+
+// window.openLeaderboards(initialCategory): genericPopup({component: _49281}, 'defaultModal'). A new component each
+// time: every tab index starts at 0 (deob-10.0.7.js:140313-140316)
 static void lb_open(const char *category) {
     static const char *const names[LB_CATEGORIES] = {"players", "clans", "raids", "ranked", "krunkcup"};
     LB.cat = LB_GRID;
     for (int i = 0; category && i < LB_CATEGORIES; i++)
         if (!strcmp(category, names[i])) LB.cat = i;
-    LB.kc_team = -1;
-    kc_reset_sort();
+    LB.player_tab = LB.clan_tab = LB.raid_tab = LB.ranked_tab = 0;
+    lb_reset_category();
     char *html = lb_gen();
     v10_popup_show("defaultModal", html, lb_render);
     free(html);
@@ -1319,16 +1352,22 @@ int v10_competitive_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
     char v[32];
     if (!strcmp(name, "knLbCategory")) {
         if (a0 >= 0 && a0 < LB_CATEGORIES) LB.cat = a0;
-        LB.kc_team = -1;
-        kc_reset_sort();
+        lb_reset_category(); // the category's components mount afresh; its tab index is the popup's (kept)
     } else if (!strcmp(name, "knLbBack")) {
         LB.cat = LB_GRID;
+        lb_reset_category();
     } else if (!strcmp(name, "knLbTab")) {
         switch (LB.cat) {
             case LB_PLAYERS: if (a0 >= 0 && a0 < PLAYER_TABS) LB.player_tab = a0; break;
             case LB_CLANS: if (a0 >= 0 && a0 < 2) LB.clan_tab = a0; break;
-            case LB_RAIDS: if (a0 >= 0 && a0 < RAID_TABS) LB.raid_tab = a0; break;
-            case LB_RANKED: if (a0 >= 0 && a0 < 2) LB.ranked_tab = a0; break;
+            case LB_RAIDS: if (a0 >= 0 && a0 < RAID_TABS) LB.raid_tab = a0; break; // the raid component only takes the new mapId
+            case LB_RANKED: // Rating / Matches: the other tab's component mounts (deob-10.0.7.js:140694-140700)
+                if (a0 >= 0 && a0 < 2 && a0 != LB.ranked_tab) {
+                    LB.ranked_tab = a0;
+                    if (a0 == 0) lb_reset_rating();
+                    else lb_reset_matches();
+                }
+                break;
             default: break;
         }
     } else if (!strcmp(name, "knLbRegion")) {
@@ -1356,7 +1395,10 @@ int v10_competitive_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
         }
     } else if (!strcmp(name, "knLbKcBack")) {
         if (LB.kc_team >= 0) LB.kc_team = -1;
-        else LB.cat = LB_GRID;
+        else {
+            LB.cat = LB_GRID;
+            lb_reset_category();
+        }
         kc_reset_sort();
     } else {
         return -1;

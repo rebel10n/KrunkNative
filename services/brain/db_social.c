@@ -9,6 +9,7 @@
 #include "knsvc/json.h"
 #include "ranked.h" /* RANKED_PLACEMENT_MATCHES: the profile's ranked row */
 #include "raids.h"  /* db_raid_stats: the profile's Raids tab (t.raidStats) */
+#include "junk.h"  /* junk_format: the profile's Junk (player_elo4) */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -521,9 +522,26 @@ const kn_proc P_CHAT_THREAD = {
 #define PROFILE_STR_(x) #x
 #define PROFILE_STR(x) PROFILE_STR_(x)
 
+/* The profile's Stats values player_rows does not carry (deob-10.0.7.js:112109, 112680-112690, 112742-112757):
+ *   player_elo4             the Junk the profile shows (parseFloat(player_elo4)): the wallet, players.player_junk
+ *                           (0347, hundredths) as the account JSON's "12.34" text
+ *   player_skinvalue        "Inventory ~": every owned unit (inventory.count) at its item's estimate, the rounded
+ *                           mean of its completed market sales (economy.c "prices", the cards' "~ N KR")
+ *   player_calls            "KPD Calls": the K.P.D calls the player made (kpd_calls.reporter_id, 0209)
+ *   player_taggedaccounts   "KPD Tagged": the calls the player, an officer, rated tagged (handled_by, rating 1)
+ *   player_jobrating(positive)  "KPD Total" / "KPD Positive" under v10's names (player_rows has them unprefixed) */
+#define PROFILE_SKINVALUE_PG \
+    "SELECT coalesce(sum(i.count * e.est), 0)::bigint FROM inventory i JOIN (SELECT skin_id, round(avg(price)) AS est" \
+    " FROM market_listings WHERE sold_at IS NOT NULL GROUP BY skin_id) e ON e.skin_id = i.skin_id WHERE i.account_id = "
 #define PROFILE_SQL_PG \
     "SELECT jsonb_build_object(" \
     " 'row', to_jsonb(r) - 'clan_role' - 'player_2fa' || jsonb_build_object('player_follow', 0," \
+    "     'player_elo4', (SELECT (p.player_junk / 100)::text || '.' || lpad((p.player_junk % 100)::text, 2, '0')" \
+    "         FROM players p WHERE p.player_id = r.player_id)," \
+    "     'player_skinvalue', (" PROFILE_SKINVALUE_PG "r.player_id)," \
+    "     'player_calls', (SELECT count(*) FROM kpd_calls k WHERE k.reporter_id = r.player_id)," \
+    "     'player_taggedaccounts', (SELECT count(*) FROM kpd_calls k WHERE k.handled_by = r.player_id AND k.rating = 1)," \
+    "     'player_jobrating', r.jobrating, 'player_jobratingpositive', r.jobratingpositive," \
     "     'creator_badge', (SELECT p.creator_badge FROM players p WHERE p.player_id = r.player_id)," \
     "     'badges', coalesce((SELECT jsonb_agg(pb.badge ORDER BY pb.badge) FROM player_badges pb" \
     "         WHERE pb.account_id = r.player_id), '[]'::jsonb)," \
@@ -567,6 +585,26 @@ static kn_db_result *run_profile(kn_dbconn *c, int n, const char *const *p) {
     /* 0210_creator_badge: v10's creator badge (the profile's purple verified icon) */
     cJSON_AddNumberToObject(row, "creator_badge",
         (double) dbx_int(&x, SQL(.any = "SELECT creator_badge FROM players WHERE player_id = $1"), KN_DB_ARGS(id), 0));
+    /* the Stats values player_rows lacks (see PROFILE_SQL_PG's note; deob-10.0.7.js:112680-112757) */
+    char junk[32];
+    junk_format(dbx_int(&x, SQL(.any = "SELECT player_junk FROM players WHERE player_id = $1"), KN_DB_ARGS(id), 0), junk, sizeof(junk));
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "player_elo4");
+    cJSON_AddStringToObject(row, "player_elo4", junk);
+    cJSON_AddNumberToObject(row, "player_skinvalue", (double) dbx_int(&x,
+        SQL(.sqlite = "SELECT coalesce(sum(i.count * e.est), 0) FROM inventory i JOIN (SELECT skin_id,"
+                      " CAST(round(avg(price)) AS INTEGER) AS est FROM market_listings WHERE sold_at IS NOT NULL GROUP BY skin_id) e"
+                      " ON e.skin_id = i.skin_id WHERE i.account_id = $1",
+            .mysql = "SELECT CAST(coalesce(sum(i.count * e.est), 0) AS SIGNED) FROM inventory i JOIN (SELECT skin_id,"
+                     " CAST(ROUND(AVG(price)) AS SIGNED) AS est FROM market_listings WHERE sold_at IS NOT NULL GROUP BY skin_id) e"
+                     " ON e.skin_id = i.skin_id WHERE i.account_id = $1",
+            .pg = PROFILE_SKINVALUE_PG "$1"),
+        KN_DB_ARGS(id), 0));
+    cJSON_AddNumberToObject(row, "player_calls", (double) dbx_int(&x,
+        SQL(.any = "SELECT count(*) FROM kpd_calls WHERE reporter_id = $1"), KN_DB_ARGS(id), 0));
+    cJSON_AddNumberToObject(row, "player_taggedaccounts", (double) dbx_int(&x,
+        SQL(.any = "SELECT count(*) FROM kpd_calls WHERE handled_by = $1 AND rating = 1"), KN_DB_ARGS(id), 0));
+    cJSON_AddNumberToObject(row, "player_jobrating", (double) kn_json_int(row, "jobrating", 0));
+    cJSON_AddNumberToObject(row, "player_jobratingpositive", (double) kn_json_int(row, "jobratingpositive", 0));
     /* the earned badges (player_badges, as kn_account_json's "badges"): the profile's Badges tab */
     cJSON *badge_rows = dbx_rows(&x, SQL(.any = "SELECT badge AS b__i FROM player_badges WHERE account_id = $1 ORDER BY badge"),
                                  KN_DB_ARGS(id));

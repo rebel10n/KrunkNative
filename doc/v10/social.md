@@ -116,7 +116,20 @@ read: `player_badge` (the `player_badges` rows), `player_titles` (the `player_ti
 the same list as `sh_titles`: Box Office grants a title with its Black Market item, `0361_player_titles`), `player_twitchname` (`players.tw_twitchname`, null when unset), `ranked_rank`
 (`ranked_rank_of` over the account's newest `ranked_profiles` row, a placed one and the best rated
 first; 0 when that row is not of the running season) and `raid_stats` (`[]`: Box Office records no
-raids). A krunker.io account's profile reads krunker.io's own fields.
+raids). The Stats tab's values (v10.0.7, deob-10.0.7.js:112109, 112680-112757): `player_elo4` is the Junk wallet
+(`players.player_junk` as `"12.34"`, 0347), `player_skinvalue` the owned units at each item's estimate (the rounded
+mean of its completed market sales, the Market's "~ N KR"), `player_calls` the K.P.D calls the player made,
+`player_taggedaccounts` the calls the player rated tagged as an officer, and `player_jobrating` /
+`player_jobratingpositive` the officer's rated calls under v10's names. A krunker.io account's profile reads
+krunker.io's own fields.
+
+Staff actions (v10.0.7, deob-10.0.7.js:111865-111924, 112551-112585; permissions 115227-115240): Chat Ban / Chat
+Unban for developers, moderators and Deputies (role 3, the account data's slot 21), on their own profile too, its
+label from `GET /moderation/chat/<name>` once the profile loaded; Flag / Unflag (developers and moderators, never on
+themselves) after v10's confirm, `POST /moderation/flag` (BANNED follows); Verify / Unverify (developers),
+`POST /players/<name>/verify {featured}`. kn_brain serves these as HTTP routes, so the profile sends them over HTTP
+with the session token, not through the social socket's gapi tunnel. The Reports tab (developers and moderators)
+draws v10.0.7's rows: "from NAME", the age ("3d ago" ... "just now"), the reason, the text.
 
 ## Giveaways (0112_social_v10)
 
@@ -132,7 +145,7 @@ back to the author. News: `accounts.news` (HTML strings).
   the clan view its shield placeholder, and the DM emoji panel never has candidates (`:` is inserted).
 * Profile: match history shows v10's empty state, and so do raid stats on Box Office
   accounts (no raids recorded; titles come only from the Black Market); the sales chart is a bar strip instead of v10's
-  canvas line chart; listings show the skin index instead of its name / thumbnail; Trade dispatches
+  canvas line chart (a bar per day of the window, zero-filled, the day's "DD Mon YY" label on hover); Trade dispatches
   `openTrade` (the economy's flow). The 39 badges v10.0.3 added after v7.1.4's 29 have their icons in
   the page tree (`ui/img/badges`, v10: the asset host's `textures/badges`). Game and mod cards open the
   hub's map / mod pages instead of v10's Svelte ones (`svelte-1kkpw01` / `svelte-1v2j2f2`, not

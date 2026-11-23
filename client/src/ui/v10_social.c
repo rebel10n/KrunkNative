@@ -121,6 +121,8 @@ typedef struct {
     int sales_range;
     cJSON *sales, *listings, *feed, *reports; // owned
     int sales_loading, listings_loading, feed_loading, reports_loading;
+    char sales_error[128], listings_error[128]; // the Sales tab's inline errors (deob-10.0.7.js:112880-112912)
+    int chat_banned, chat_busy, flag_busy;      // the staff buttons' state (deob-10.0.7.js:112063-112065)
     MhState mh;          // the Match History tab's component (a new one each time the tab shows)
     int auto_gift;       // openPlayerProfile's autoGift: 1 a mod's creator, 2 a map's (0 none)
     char asset_name[64]; // its assetName: the mod / map
@@ -177,6 +179,7 @@ static struct {
     int nviews;
     int unread_shown;                // the menu badge's last value
     int scenario;
+    double scenario_now; // --render-scenario: a fixed Date.now() (epoch ms) for the profile's dates, 0 = the clock
     // the conversation's load-earlier-on-scroll (v10.0.3 deob-10.0.3.js:157767-157790)
     float earlier_anchor;            // scrollHeight - scrollTop when an earlier page was asked (0 none): kept after it lands
     float msgs_top;                  // #v10sMessages' scrollTop at the last tick (-1 unknown)
@@ -258,6 +261,9 @@ static double now_ms(void) {
     return (double) ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 }
 
+// Date.now() for what the profile shows (report ages, the sales window): a scenario's "now" when it set one
+static double date_now_ms(void) { return S.scenario_now > 0 ? S.scenario_now : now_ms(); }
+
 static void local_tm(const double ms, struct tm *out) {
     const time_t t = (time_t) (ms / 1000.0);
 #ifdef _WIN32 // MinGW's msvcrt declares neither gmtime_r nor localtime_r (v10_market.c's pattern)
@@ -297,6 +303,71 @@ static void fmt_day(char *out, const size_t n, const double ms) {
     else if (tm.tm_year == yday.tm_year && tm.tm_yday == yday.tm_yday) snprintf(out, n, "Yesterday");
     else if (tm.tm_year == today.tm_year) snprintf(out, n, "%s, %s %d", k_days[tm.tm_wday], k_months[tm.tm_mon], tm.tm_mday);
     else snprintf(out, n, "%s, %s %d, %d", k_days[tm.tm_wday], k_months[tm.tm_mon], tm.tm_mday, tm.tm_year + 1900);
+}
+
+// v10 _8995 (deob-10.0.7.js:23952-23956): x.toString() with the integer part's thousands commas, the fraction
+// kept ("1,234.56"); toString is the shortest text that reads back as the same double
+static void fmt_js_num(char *out, const size_t n, const double v) {
+    char t[48];
+    if (!isfinite(v) || v == floor(v)) snprintf(t, sizeof(t), "%.0f", isfinite(v) ? v : 0.0);
+    else {
+        for (int p = 1; p <= 17; p++) {
+            snprintf(t, sizeof(t), "%.*g", p, v);
+            if (strtod(t, NULL) == v) break;
+        }
+        if (strchr(t, 'e')) snprintf(t, sizeof(t), "%.0f", v);
+    }
+    const char *dot = strchr(t, '.');
+    const char *s = t;
+    size_t o = 0;
+    if (*s == '-' && o + 1 < n) out[o++] = *s++;
+    const size_t len = dot ? (size_t) (dot - s) : strlen(s);
+    for (size_t i = 0; i < len && o + 2 < n; i++) {
+        if (i && (len - i) % 3 == 0) out[o++] = ',';
+        out[o++] = s[i];
+    }
+    for (const char *f = dot; f && *f && o + 1 < n; f++) out[o++] = *f;
+    out[o] = 0;
+}
+
+// the days since 1970-01-01 of a civil date and back (Howard Hinnant's days_from_civil / civil_from_days)
+static long long days_from_civil(int y, const int mo, const int d) {
+    y -= mo <= 2;
+    const int era = (y >= 0 ? y : y - 399) / 400, yoe = y - era * 400;
+    const int doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return (long long) era * 146097 + doe - 719468;
+}
+
+static void civil_from_days(long long z, int *y, int *mo, int *d) {
+    z += 719468;
+    const long long era = (z >= 0 ? z : z - 146096) / 146097;
+    const int doe = (int) (z - era * 146097), yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const int doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+    *d = doy - (153 * mp + 2) / 5 + 1;
+    *mo = mp < 10 ? mp + 3 : mp - 9;
+    *y = (int) (yoe + era * 400) + (*mo <= 2);
+}
+
+// new Date(v).getTime() for kn_brain's dates: epoch ms, or ISO "YYYY-MM-DDTHH:MM:SS[.mmm]Z" (UTC); 0 = none
+static double date_ms(const cJSON *v) {
+    if (cJSON_IsNumber(v)) return v->valuedouble;
+    int y, mo, d, h = 0, mi = 0;
+    double s = 0;
+    if (!cJSON_IsString(v) || sscanf(v->valuestring, "%d-%d-%d%*[T ]%d:%d:%lf", &y, &mo, &d, &h, &mi, &s) < 3) return 0;
+    return (((double) days_from_civil(y, mo, d) * 24 + h) * 60 + mi) * 60000.0 + s * 1000.0;
+}
+
+// v10 iiïîiií (deob-10.0.7.js:23971-23982): "3d ago" / "2h ago" / "5m ago" / "just now" (and for a negative age)
+static void fmt_ago(char *out, const size_t n, const double age_ms) {
+    if (age_ms < 0) {
+        snprintf(out, n, "just now");
+        return;
+    }
+    const long long m = (long long) floor(age_ms / 1000.0) / 60, h = m / 60, d = h / 24;
+    if (d) snprintf(out, n, "%lldd ago", d);
+    else if (h % 24) snprintf(out, n, "%lldh ago", h % 24);
+    else if (m % 60) snprintf(out, n, "%lldm ago", m % 60);
+    else snprintf(out, n, "just now");
 }
 
 // v10 profile fmtDate: "YYYY-MM-DD..." -> "4 Oct 2021"; null -> "None"
@@ -1828,6 +1899,21 @@ static View *view_of(const intptr_t tag) {
 static const char *const k_profile_tabs[8] = {"Stats", "Feed", "Sales", "Badges", "Titles", "Creations", "Match History", "Reports"};
 // v10 REPORT_REASONS (v10.js _7525): the reporter's select; a report stores the index or the name
 static const char *const k_report_reasons[7] = {"Hacking", "Exploiting", "Scamming", "Harassment", "Other", "Boosting", "Market Manipulation"};
+static cJSON *listings_v10(const cJSON *rows);
+
+// the viewer's staff rights (updatePerms, deob-10.0.7.js:115227-115240): isMod = role 2, isDeputy = role 3. The
+// role is the account data's slot 21 (kn_brain's player_moderator: 1 its moderators, 3 a Deputy; db_common.c),
+// is_mod when the account has no data array
+static int staff_role(const AccountInfo *a) {
+    const cJSON *r = a && a->data ? cJSON_GetArrayItem(a->data, 21) : NULL;
+    return cJSON_IsNumber(r) ? (int) r->valuedouble : a && a->is_mod ? 2 : 0;
+}
+static int staff_deputy(const AccountInfo *a) { return staff_role(a) == 3; }
+static int staff_mod(const AccountInfo *a) { return a && a->is_mod && !staff_deputy(a); }
+static int can_chat_ban(const AccountInfo *a) { return a && (a->is_dev || staff_mod(a) || staff_deputy(a)); }
+static int can_global_flag(const AccountInfo *a) { return a && (a->is_dev || staff_mod(a)); }
+static int can_verify(const AccountInfo *a) { return a && a->is_dev; }
+static int can_view_reports(const AccountInfo *a) { return a && (a->is_dev || staff_mod(a)); }
 
 static void profile_feed_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
     View *v = view_of(tag);
@@ -1865,6 +1951,7 @@ static MhOpts profile_mh_opts(const View *v) {
 }
 
 static void gift_open(const char *who, const char *message);
+static void profile_chat_ban_fetch(View *v);
 
 // the profile's autoGift (deob-10.0.7.js:112032-112038, 112331-112334): once the load settled, failed or not, the
 // gift view for the name it was opened with, its message "I like your <assetName> mod" (autoGift === 1) or
@@ -1896,6 +1983,7 @@ static void profile_done(const int status, const cJSON *data, const cJSON *error
         char path[96];
         snprintf(path, sizeof(path), "/social/feed?player_id=%lld&limit=20", (long long) jnum(data, "player_id"));
         v->feed_loading = gapi("GET", path, NULL, profile_feed_done, tag);
+        profile_chat_ban_fetch(v); // canChatBan: the Chat Ban button's state (deob-10.0.7.js:112328-112332)
     }
     render_views();
     profile_auto_gift(v);
@@ -1916,7 +2004,7 @@ static void open_profile(const char *name, const int auto_gift, const char *asse
     snprintf(path, sizeof(path), "/players/%s", enc);
     if (!gapi("GET", path, NULL, profile_done, view_tag(v)) && !S.scenario) {
         v->loading = 0;
-        snprintf(v->error, sizeof(v->error), "Failed to load profile.");
+        snprintf(v->error, sizeof(v->error), "Failed to load profile"); // deob-10.0.7.js:112311-112322
         render_views();
         profile_auto_gift(v); // the load settled (failed)
         return;
@@ -1930,8 +2018,9 @@ static void stat_card(StrBuf *sb, const char *label, const char *value, const in
                wide ? " profile-detail-stat-wide" : "", label, value);
 }
 
-// fmt: comma thousands on the integer part (1234.5 -> 1,234.5)
-static void fmt_num(char *out, const size_t n, const double v) { commas(out, n, floor(v)); }
+// the profile's number format (iííiíìí, deob-10.0.7.js:23952): comma thousands on the integer part, the
+// fraction kept (1234.5 -> 1,234.5; Junk 12.34)
+static void fmt_num(char *out, const size_t n, const double v) { fmt_js_num(out, n, v); }
 
 static void fixed_trim(char *out, const size_t n, const double v, const int dp) {
     snprintf(out, n, "%.*f", dp, v); // parseFloat(x.toFixed(dp))
@@ -1963,7 +2052,7 @@ static void sb_profile_stats(StrBuf *sb, const cJSON *d) {
     fmt_num(v, sizeof(v), games); stat_card(sb, "Games", v, 0);
     fixed_trim(v, sizeof(v), wins / (games - wins > 1 ? games - wins : 1), 3); stat_card(sb, "W/L", v, 0);
     fmt_num(v, sizeof(v), wins); stat_card(sb, "Wins", v, 0);
-    fmt_num(v, sizeof(v), games - wins); stat_card(sb, "Losses", v, 0);
+    fmt_num(v, sizeof(v), fmax(games - wins, 0)); stat_card(sb, "Losses", v, 0); // Math.max(games - wins, 0) (deob-10.0.7.js:112141)
     static const struct { const char *label, *key; } counted[] = {
         {"Assists", "ast"}, {"Melee Kills", "mk"}, {"Fist Kills", "fk"}, {"Thrown Kills", "tmk"},
         {"Headshots", "hs"}, {"Legshots", "ls"}, {"Wallbangs", "wb"},
@@ -1994,15 +2083,16 @@ static void sb_profile_stats(StrBuf *sb, const cJSON *d) {
     sb_append(sb, "</div> <div class=\"profile-detail-section-header svelte-1hghrmf\">Other</div> <div class=\"profile-detail-stat-grid svelte-1hghrmf\">");
     fmt_num(v, sizeof(v), stat_of(st, "crc")); stat_card(sb, "Crouches", v, 0);
     fmt_num(v, sizeof(v), stat_of(st, "spry")); stat_card(sb, "Sprays", v, 0);
-    fmt_num(v, sizeof(v), jnum(d, "jobratingpositive")); stat_card(sb, "KPD Positive", v, 0);
-    fmt_num(v, sizeof(v), jnum(d, "jobrating")); stat_card(sb, "KPD Total", v, 0);
+    // v10's names (deob-10.0.7.js:112742, 112747): kn_brain's GET /players carries both (db_social.c P_PROFILE)
+    fmt_num(v, sizeof(v), jnum(d, "player_jobratingpositive")); stat_card(sb, "KPD Positive", v, 0);
+    fmt_num(v, sizeof(v), jnum(d, "player_jobrating")); stat_card(sb, "KPD Total", v, 0);
     fmt_num(v, sizeof(v), jnum(d, "player_calls")); stat_card(sb, "KPD Calls", v, 0);
     fmt_num(v, sizeof(v), jnum(d, "player_taggedaccounts")); stat_card(sb, "KPD Tagged", v, 0);
     sb_append(sb, "</div> <div class=\"profile-detail-section-header svelte-1hghrmf\">Classes</div> <div class=\"profile-detail-class-grid svelte-1hghrmf\">");
     const ClassConfig *classes = rules_classes();
     const size_t ncls = rules_class_count();
     for (size_t i = 0; classes && i < ncls; i++) {
-        if (classes[i].hide || !classes[i].name) continue;
+        if (!classes[i].name) continue; // every class, the hidden ones too (deob-10.0.7.js:112761)
         char key[8], xp[32];
         snprintf(key, sizeof(key), "c%zu", i);
         const double cx = stat_of(st, key);
@@ -2314,7 +2404,7 @@ static void sb_profile_creations(StrBuf *sb, View *v) {
 static void sb_profile_right(StrBuf *sb, View *v) {
     const cJSON *d = v->data;
     const AccountInfo *a = active_account();
-    const int ntabs = a && (a->is_dev || a->is_mod) ? 8 : 7;
+    const int ntabs = can_view_reports(a) ? 8 : 7; // canViewReports: dev or mod
     sb_append(sb, "<div class=\"simple-tabs svelte-1oqd18e simple-tabs-small\" role=\"tablist\">");
     for (int i = 0; i < ntabs; i++)
         sb_appendf(sb, "<div class=\"simple-tab svelte-1oqd18e%s\" role=\"tab\" aria-selected=\"%s\" tabindex=\"0\" id=\"v10sPtab%d\" onmouseenter=\"playTick(0.1)\" "
@@ -2333,9 +2423,27 @@ static void sb_profile_right(StrBuf *sb, View *v) {
         break;
     case 2: {
         static const char *const ranges[7] = {"1 Week", "2 Weeks", "3 Weeks", "1 Month", "2 Months", "3 Months", "4 Months"};
-        double total = 0;
+        static const int range_days[7] = {7, 14, 21, 30, 60, 90, 120}; // deob-10.0.7.js:26203
+        // the chart's series (deob-10.0.7.js:112196-112226): a point per local day of the window, today last, the
+        // day's "f" or 0, labelled "DD Mon YY" (iîíîíiì, :23925); the header's total is the window's sum
+        const int ndays = range_days[v->sales_range >= 0 && v->sales_range < 7 ? v->sales_range : 3];
+        double series[120], total = 0, max = 1;
+        char labels[120][16];
+        struct tm today;
+        local_tm(date_now_ms(), &today);
+        const long long day0 = days_from_civil(today.tm_year + 1900, today.tm_mon + 1, today.tm_mday) - ndays + 1;
         const cJSON *e;
-        cJSON_ArrayForEach(e, v->sales) total += jnum(e, "f");
+        for (int i = 0; i < ndays; i++) {
+            int y, mo, dd;
+            civil_from_days(day0 + i, &y, &mo, &dd);
+            char key[16];
+            snprintf(key, sizeof(key), "%04d-%02d-%02d", y, mo, dd);
+            snprintf(labels[i], sizeof(labels[i]), "%02d %s %02d", dd, k_months[mo - 1], y % 100);
+            series[i] = 0;
+            cJSON_ArrayForEach(e, v->sales) if (!strcmp(jstr(e, "d"), key)) { series[i] = jnum(e, "f"); }
+            total += series[i];
+            max = fmax(max, series[i]);
+        }
         char t[32];
         fmt_num(t, sizeof(t), total);
         sb_appendf(sb, "<div class=\"profile-detail-sales-panel svelte-1hghrmf\"><div class=\"profile-detail-sales-header svelte-1hghrmf\"><span>Player Sales</span> "
@@ -2345,30 +2453,69 @@ static void sb_profile_right(StrBuf *sb, View *v) {
                        v->sales_range == i ? " active" : "", i, ranges[i]);
         sb_append(sb, "</div> <div class=\"profile-detail-sales-canvas svelte-1hghrmf\">");
         if (v->sales_loading) sb_append(sb, "<div class=\"profile-detail-loading-inline svelte-1hghrmf\"><i class=\"material-icons spin svelte-1hghrmf\">hourglass_empty</i></div>");
-        else if (cJSON_GetArraySize(v->sales) == 0) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No sales in this window.</div>");
+        else if (v->sales_error[0]) { // deob-10.0.7.js:112874-112878
+            sb_append(sb, "<div class=\"profile-detail-error-inline svelte-1hghrmf\">");
+            sb_append_esc(sb, v->sales_error);
+            sb_append(sb, "</div>");
+        } else if (cJSON_GetArraySize(v->sales) == 0) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No sales in this window.</div>");
         else {
-            // a bar per day with sales (v10 draws a line chart on a canvas: _36123)
-            double max = 1;
-            cJSON_ArrayForEach(e, v->sales) max = fmax(max, jnum(e, "f"));
+            // a bar per day of the window (v10 draws the series as a line chart on a canvas, _36123): the label and
+            // the day's KR on hover
             sb_append(sb, "<div style=\"display:flex;align-items:flex-end;height:160px;gap:2px\">");
-            cJSON_ArrayForEach(e, v->sales) {
-                sb_appendf(sb, "<div title=\"%s: %.0f KR\" style=\"flex:1;background:#fbc02d;height:%.0f%%\"></div>", jstr(e, "d"), jnum(e, "f"),
-                           jnum(e, "f") / max * 100.0);
+            for (int i = 0; i < ndays; i++) {
+                char kr[32];
+                fmt_num(kr, sizeof(kr), series[i]);
+                sb_appendf(sb, "<div title=\"%s: %s KR\" style=\"flex:1;background:#fbc02d;height:%.0f%%\"></div>", labels[i], kr, series[i] / max * 100.0);
             }
             sb_append(sb, "</div>");
         }
         sb_appendf(sb, "</div></div> <div class=\"profile-detail-sales-panel svelte-1hghrmf\"><div class=\"profile-detail-sales-header svelte-1hghrmf\"><span>Active Listings</span> "
                        "<span class=\"profile-detail-sales-total svelte-1hghrmf\">%d live</span></div> ", cJSON_GetArraySize(v->listings));
         if (v->listings_loading) sb_append(sb, "<div class=\"profile-detail-loading-inline svelte-1hghrmf\"><i class=\"material-icons spin svelte-1hghrmf\">hourglass_empty</i></div>");
-        else if (cJSON_GetArraySize(v->listings) == 0) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No active market listings.</div>");
+        else if (v->listings_error[0]) { // deob-10.0.7.js:112906-112912
+            sb_append(sb, "<div class=\"profile-detail-error-inline svelte-1hghrmf\">");
+            sb_append_esc(sb, v->listings_error);
+            sb_append(sb, "</div>");
+        } else if (cJSON_GetArraySize(v->listings) == 0) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No active market listings.</div>");
         else {
+            // a card per listing (deob-10.0.7.js:112917-112958): the item's thumbnail, its name (else "#skinindex"), the
+            // nametag m.name in quotes, "funds KR", the border in its rarity's colour; a click closes every view and opens
+            // the Market on the item (openExchange(0, skinindex), :112243-112246)
             sb_append(sb, "<div class=\"profile-detail-listings-grid svelte-1hghrmf\">");
             cJSON_ArrayForEach(e, v->listings) {
+                const int idx = (int) jnum(e, "skinindex");
+                const ViewerSkin *s = idx >= 0 ? viewer_skin(idx) : NULL;
+                const int r = s ? s->rarity : 0;
+                const char *col = g_viewer_rarities[r >= 0 && r < g_viewer_rarity_count ? r : 0].color;
                 char price[32];
-                fmt_num(price, sizeof(price), jnum(e, "kr"));
-                sb_appendf(sb, "<button class=\"profile-detail-listing-card svelte-1hghrmf\" type=\"button\"><div class=\"profile-detail-listing-info svelte-1hghrmf\">"
-                               "<div class=\"profile-detail-listing-name svelte-1hghrmf\">#%.0f</div> <div class=\"profile-detail-listing-price svelte-1hghrmf\">%s KR</div></div></button>",
-                           jnum(e, "sk"), price);
+                fmt_num(price, sizeof(price), jnum(e, "funds"));
+                sb_appendf(sb, "<button class=\"profile-detail-listing-card svelte-1hghrmf\" type=\"button\" style=\"border-color: %s;\" onclick=\"v10s('plisting',%d)\">",
+                           col ? col : "#B0B0B0", idx);
+                if (s) {
+                    char url[256];
+                    store_skin_preview(idx, url, sizeof(url));
+                    sb_append(sb, "<img class=\"profile-detail-listing-thumb svelte-1hghrmf\" loading=\"lazy\" src=\"");
+                    sb_append_esc(sb, url);
+                    sb_append(sb, "\" alt=\"");
+                    sb_append_esc(sb, s->name ? s->name : "");
+                    sb_append(sb, "\">");
+                }
+                sb_append(sb, " <div class=\"profile-detail-listing-info svelte-1hghrmf\"><div class=\"profile-detail-listing-name svelte-1hghrmf\">");
+                if (s && s->name && s->name[0]) sb_append_esc(sb, s->name);
+                else sb_appendf(sb, "#%d", idx);
+                sb_append(sb, "</div> ");
+                // m: the listing's nametag, an object or its JSON text
+                const cJSON *mv = cJSON_GetObjectItem(e, "m");
+                cJSON *mp = cJSON_IsString(mv) ? cJSON_Parse(mv->valuestring) : NULL;
+                const cJSON *tag = cJSON_GetObjectItem(mp ? mp : mv, "name");
+                if (jtrue(mp ? mp : mv, "name")) {
+                    sb_append(sb, "<div class=\"profile-detail-listing-nametag svelte-1hghrmf\">\"");
+                    if (cJSON_IsString(tag)) sb_append_esc(sb, tag->valuestring);
+                    else if (cJSON_IsNumber(tag)) sb_appendf(sb, "%g", tag->valuedouble);
+                    sb_append(sb, "\"</div>");
+                }
+                cJSON_Delete(mp);
+                sb_appendf(sb, " <div class=\"profile-detail-listing-price svelte-1hghrmf\">%s KR</div></div></button>", price);
             }
             sb_append(sb, "</div>");
         }
@@ -2392,16 +2539,24 @@ static void sb_profile_right(StrBuf *sb, View *v) {
         if (v->reports_loading) sb_append(sb, "<div class=\"profile-detail-loading-inline svelte-1hghrmf\"><i class=\"material-icons spin svelte-1hghrmf\">hourglass_empty</i></div>");
         else if (!cJSON_GetArraySize(v->reports)) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No reports.</div>");
         else {
+            // a row per report (deob-10.0.7.js:112018, 113233-113248): "from NAME", its age (iiïîiií(now - rp_date)),
+            // the reason (REPORT_REASONS[rp_index] || "Unknown") and the text
             const cJSON *rp;
             int row = 0;
             cJSON_ArrayForEach(rp, v->reports) {
-                const int idx = (int) jnum(rp, "rp_index");
-                sb_appendf(sb, "<div class=\"profile-detail-report svelte-1hghrmf\" id=\"v10sReport%d\"><div class=\"profile-detail-report-head svelte-1hghrmf\"><b>", row++);
-                sb_append(sb, idx >= 0 && idx < 7 ? k_report_reasons[idx] : "Unknown");
-                sb_append(sb, "</b> <span>from </span>");
+                const cJSON *ri = cJSON_GetObjectItem(rp, "rp_index");
+                const int idx = cJSON_IsNumber(ri) ? (int) ri->valuedouble : -1;
+                char ago[32];
+                const double when = date_ms(cJSON_GetObjectItem(rp, "rp_date"));
+                if (when > 0) fmt_ago(ago, sizeof(ago), date_now_ms() - when);
+                else snprintf(ago, sizeof(ago), "just now"); // an Invalid Date: every part NaN, "just now"
+                sb_appendf(sb, "<div class=\"profile-detail-report svelte-1hghrmf\" id=\"v10sReport%d\"><div class=\"profile-detail-report-head svelte-1hghrmf\">"
+                               "<span class=\"profile-detail-report-from svelte-1hghrmf\">from ", row++);
                 sb_append_esc(sb, jstr(rp, "rp_reportername"));
-                sb_append(sb, "</div><div class=\"profile-detail-report-text svelte-1hghrmf\">");
-                sb_append_esc(sb, jstr(rp, "rp_text")); // raw from the brain, as v10.0.3's text node (deob-10.0.3.js:126950)
+                sb_appendf(sb, "</span> <span class=\"profile-detail-report-date svelte-1hghrmf\">%s</span></div> <div class=\"profile-detail-report-reason svelte-1hghrmf\">%s</div> "
+                               "<div class=\"profile-detail-report-text svelte-1hghrmf\">",
+                           ago, idx >= 0 && idx < 7 ? k_report_reasons[idx] : "Unknown");
+                sb_append_esc(sb, jstr(rp, "rp_text")); // raw from the brain, a text node
                 sb_append(sb, "</div></div>");
             }
         }
@@ -2481,7 +2636,8 @@ static void sb_profile(StrBuf *sb, View *v) {
     char curs[32], needs[32], since[32], fol[32], fing[32];
     commas(curs, sizeof(curs), cur);
     commas(needs, sizeof(needs), need);
-    fmt_date(since, sizeof(since), jstr(d, "player_datenew"));
+    if (jtrue(d, "player_datenew")) fmt_date(since, sizeof(since), jstr(d, "player_datenew"));
+    else since[0] = 0; // none: '' (deob-10.0.7.js:112110-112112)
     commas(fol, sizeof(fol), jnum(d, "player_followed"));
     commas(fing, sizeof(fing), jnum(d, "player_following"));
     sb_appendf(sb, "<div class=\"profile-detail-xp-strip svelte-1hghrmf\"><div class=\"profile-detail-level-row svelte-1hghrmf\"><span class=\"profile-detail-level-badge svelte-1hghrmf\">LVL %d</span> "
@@ -2500,15 +2656,40 @@ static void sb_profile(StrBuf *sb, View *v) {
         sb_append(sb, "</span></button> ");
     }
     sb_append(sb, "<div class=\"profile-detail-actions svelte-1hghrmf\">");
-    const AccountInfo *a = actor(); // Follow / Trade / Gift KR / Report
-    if (a && strcasecmp(a->name, name) != 0) {
+    // the six action slots (deob-10.0.7.js:112019 "<!> <!> <!> <!> <!> <!>", 112507-112585): Follow, Trade + Gift KR,
+    // Report (another player's profile), then the staff's Chat Ban (canChatBan, own profile too), Flag (canGlobalFlag,
+    // another player's) and Verify (canVerify)
+    const AccountInfo *a = actor();
+    const int other = a && strcasecmp(a->name, name) != 0;
+    if (other) {
         const int following = jnum(d, "follow_state") > 0;
-        sb_appendf(sb, "<button class=\"profile-detail-action svelte-1hghrmf%s\" type=\"button\" id=\"v10sProfileFollow\" onclick=\"v10s('follow')\"><i class=\"material-icons svelte-1hghrmf\">%s</i> <span>%s</span></button> ",
+        sb_appendf(sb, "<button class=\"profile-detail-action svelte-1hghrmf%s\" type=\"button\" id=\"v10sProfileFollow\" onclick=\"v10s('follow')\"><i class=\"material-icons svelte-1hghrmf\">%s</i> <span>%s</span></button>",
                    following ? " active" : "", following ? "person_remove" : "person_add", following ? "Unfollow" : "Follow");
+    }
+    sb_append(sb, " ");
+    if (other) {
         if (a->level >= 10 && lvl >= 10)
-            sb_append(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" onclick=\"v10s('trade')\"><i class=\"material-icons svelte-1hghrmf\">swap_horiz</i> <span>Trade</span></button> ");
-        sb_append(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileGift\" onclick=\"v10s('gift')\"><i class=\"material-icons svelte-1hghrmf\">card_giftcard</i> <span>Gift KR</span></button> "
-                      "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileReport\" onclick=\"v10s('report')\"><i class=\"material-icons svelte-1hghrmf\">report</i> <span>Report</span></button>");
+            sb_append(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" onclick=\"v10s('trade')\"><i class=\"material-icons svelte-1hghrmf\">swap_horiz</i> <span>Trade</span></button>");
+        sb_append(sb, " <button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileGift\" onclick=\"v10s('gift')\"><i class=\"material-icons svelte-1hghrmf\">card_giftcard</i> <span>Gift KR</span></button>");
+    }
+    sb_append(sb, " ");
+    if (other)
+        sb_append(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileReport\" onclick=\"v10s('report')\"><i class=\"material-icons svelte-1hghrmf\">report</i> <span>Report</span></button>");
+    sb_append(sb, " ");
+    if (can_chat_ban(a))
+        sb_appendf(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileChatBan\" onclick=\"v10s('pchatban')\"%s><i class=\"material-icons svelte-1hghrmf\">speaker_notes_off</i> <span>%s</span></button>",
+                   v->chat_busy ? " disabled" : "", v->chat_banned ? "Chat Unban" : "Chat Ban");
+    sb_append(sb, " ");
+    if (can_global_flag(a) && other) {
+        const int flagged = (int) jnum(d, "player_hack") == 1;
+        sb_appendf(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileFlag\" onclick=\"v10s('pflag')\"%s><i class=\"material-icons svelte-1hghrmf\">flag</i> <span>%s</span></button>",
+                   v->flag_busy ? " disabled" : "", flagged ? "Unflag" : "Flag");
+    }
+    sb_append(sb, " ");
+    if (can_verify(a)) {
+        const int featured = jtrue(d, "player_featured");
+        sb_appendf(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileVerify\" onclick=\"v10s('pverify')\"><i class=\"material-icons svelte-1hghrmf\">%s</i> <span>%s</span></button>",
+                   featured ? "remove_circle" : "check_circle", featured ? "Unverify" : "Verify");
     }
     sb_append(sb, "</div></section> <section class=\"profile-detail-right svelte-1hghrmf\">");
     sb_profile_right(sb, v);
@@ -3258,6 +3439,141 @@ static void profile_follow(View *v) {
     render_views();
 }
 
+// ---- the profile's staff actions (deob-10.0.7.js:111865-111924, 112551-112585)
+
+// kn_brain serves v10's moderation / verify calls as HTTP routes (v10_mods.c, v10_market.c), not through the social
+// socket's gapi tunnel: the request goes there with the session token (?token=, as the hub's Chat Ban, social_ui.c),
+// its {data, error} answer to fn like a tunnelled one
+typedef struct {
+    DoneFn fn;
+    intptr_t tag;
+    int generation;
+} StaffReq;
+
+static void staff_http_done(void *user, const int status, const char *body, const size_t length) {
+    StaffReq *r = user;
+    cJSON *j = body && length ? cJSON_ParseWithLength(body, length) : NULL;
+    const cJSON *data = cJSON_GetObjectItem(j, "data"), *error = cJSON_GetObjectItem(j, "error");
+    if (r->generation == g_generation) // {"data": ..., "error": null}: a null is no error (nor data)
+        r->fn(status, cJSON_IsNull(data) ? NULL : data, cJSON_IsNull(error) ? NULL : error, r->tag);
+    cJSON_Delete(j);
+    free(r);
+}
+
+static int staff_http(const char *method, const char *path, const cJSON *body, const DoneFn fn, const intptr_t tag) {
+    if (S.scenario || !backend_url()[0]) return 0;
+    StaffReq *r = malloc(sizeof(*r));
+    if (!r) return 0;
+    r->fn = fn;
+    r->tag = tag;
+    r->generation = g_generation;
+    char token[400], url[1024];
+    backend_url_encode(token, sizeof(token), account_session_token());
+    snprintf(url, sizeof(url), "%s%s?token=%s", backend_url(), path, token);
+    char *text = body ? cJSON_PrintUnformatted(body) : NULL;
+    const int sent = backend_http_request(method, url, text, staff_http_done, r);    free(text);
+    if (!sent) free(r);
+    return sent;
+}
+
+// getChatBan once the profile loaded, for a viewer who canChatBan (deob-10.0.7.js:112328-112332): GET
+// /moderation/chat/<name> -> {chat_banned}
+static void profile_chat_ban_got(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    View *v = view_of(tag);
+    if (!v || !ok(status, error) || !data) return;
+    v->chat_banned = cJSON_IsTrue(cJSON_GetObjectItem(data, "chat_banned"));
+    render_views();
+}
+
+static void profile_chat_ban_fetch(View *v) {
+    if (!v->data || !can_chat_ban(actor()) || !jstr(v->data, "player_name")[0]) return;
+    char enc[160], path[220];
+    backend_path_segment(enc, sizeof(enc), jstr(v->data, "player_name"));
+    snprintf(path, sizeof(path), "/moderation/chat/%s", enc);
+    staff_http("GET", path, NULL, profile_chat_ban_got, view_tag(v));
+}
+
+// Chat Ban / Chat Unban: POST /moderation/chat {player_name, ban}; the label flips on an answer without error, the
+// button is disabled meanwhile
+static void profile_chat_ban_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    View *v = view_of(tag);
+    if (!v) return;
+    if (ok(status, error) && data) v->chat_banned = v->chat_busy - 1; // the ban asked for
+    v->chat_busy = 0;
+    render_views();
+}
+
+static void profile_chat_ban(View *v) {
+    if (!v->data || v->chat_busy || !can_chat_ban(actor())) return;
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "player_name", jstr(v->data, "player_name"));
+    cJSON_AddBoolToObject(body, "ban", !v->chat_banned);
+    v->chat_busy = 1 + !v->chat_banned; // busy, and the ban asked for
+    if (!staff_http("POST", "/moderation/chat", body, profile_chat_ban_done, view_tag(v))) v->chat_busy = 0;
+    cJSON_Delete(body);
+    render_views();
+}
+
+// Flag / Unflag: the confirm ("Flag Player", "Are you sure you want to flag X as a Hacker?", "Flag"), then POST
+// /moderation/flag {player_name, flag}: player_hack follows (BANNED shows), an error is alert()ed
+static void profile_flag_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    View *v = view_of(tag);
+    if (!v || !v->data) return;
+    v->flag_busy = 0;
+    if (ok(status, error) && data) set_num(v->data, "player_hack", (int) jnum(v->data, "player_hack") == 1 ? 0 : 1);
+    else ui_alert(v10_gapi_error_text(error, "Failed to update flag"));
+    render_views();
+}
+
+static void profile_flag_closed(const int accepted, void *user) {
+    View *v = view_of((intptr_t) user);
+    if (!accepted || !v || !v->data || !can_global_flag(actor())) return;
+    const int flagged = (int) jnum(v->data, "player_hack") == 1;
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "player_name", jstr(v->data, "player_name"));
+    cJSON_AddBoolToObject(body, "flag", !flagged);
+    v->flag_busy = 1;
+    if (!staff_http("POST", "/moderation/flag", body, profile_flag_done, view_tag(v))) profile_flag_done(0, NULL, NULL, view_tag(v));
+    cJSON_Delete(body);
+    render_views();
+}
+
+// iìiîíïî (deob-10.0.7.js:104114-104130): the FormDialog with no fields, Cancel and the confirm label
+static void profile_flag(View *v) {
+    if (!v->data || v->flag_busy || !can_global_flag(actor())) return;
+    const int flagged = (int) jnum(v->data, "player_hack") == 1;
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 800px;\"><div class=\"io-popup-container\">"
+                    "<div class=\"io-popup-header\">%s</div> <div class=\"io-popup-content\"><div class=\"io-card\"><p id=\"v10sFlagText\">Are you sure you want to %s ",
+               flagged ? "Unflag Player" : "Flag Player", flagged ? "unflag" : "flag");
+    sb_append_esc(&sb, jstr(v->data, "player_name"));
+    sb_appendf(&sb, " as a Hacker?</p> <form><div class=\"io-input-container\"><div class=\"io-button-group\"><button type=\"button\" class=\"io-button\" id=\"v10sFlagCancel\" "
+                    "onclick=\"knViewPop(0)\">Cancel</button> <button type=\"button\" class=\"io-button io-button--accept\" id=\"v10sFlagConfirm\" onclick=\"knViewPop(1)\">%s</button>"
+                    "</div></div></form></div></div></div></div></div>",
+               flagged ? "Unflag" : "Flag");
+    v10_view_push(sb_finish(&sb), NULL, profile_flag_closed, (void *) view_tag(v));
+}
+
+// Verify / Unverify (developers): POST /players/<name>/verify {featured}; player_featured follows on success
+static void profile_verify_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    (void) data;
+    View *v = view_of(tag);
+    if (!v || !v->data || !ok(status, error)) return;
+    set_num(v->data, "player_featured", jtrue(v->data, "player_featured") ? 0 : 1);
+    render_views();
+}
+
+static void profile_verify(View *v) {
+    if (!v->data || !can_verify(actor())) return;
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddBoolToObject(body, "featured", !jtrue(v->data, "player_featured"));
+    char enc[160], path[220];
+    backend_path_segment(enc, sizeof(enc), jstr(v->data, "player_name"));
+    snprintf(path, sizeof(path), "/players/%s/verify", enc);
+    staff_http("POST", path, body, profile_verify_done, view_tag(v));
+    cJSON_Delete(body);
+}
+
 static void follow_row_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
     (void) status;
     (void) data;
@@ -3475,11 +3791,7 @@ static void on_view_frame(const char *label, const cJSON *frame) {
     } else if (v->type == V_PROFILE && !strcmp(label, "ul") && v->listings_loading) {
         v->listings_loading = 0;
         cJSON_Delete(v->listings);
-        v->listings = cJSON_Duplicate(cJSON_GetArrayItem(frame, 1), 1);
-        if (!cJSON_IsArray(v->listings)) {
-            cJSON_Delete(v->listings);
-            v->listings = cJSON_CreateArray();
-        }
+        v->listings = listings_v10(cJSON_GetArrayItem(frame, 1));
         render_views();
     }
 }
@@ -3493,6 +3805,8 @@ static void kio_sales_done(const int status, const cJSON *data, const cJSON *err
     v->sales_loading = 0;
     cJSON_Delete(v->sales);
     v->sales = ok(status, error) && cJSON_IsArray(data) ? cJSON_Duplicate(data, 1) : cJSON_CreateArray();
+    // a failed load: the error's message or "Failed to load sales history" (deob-10.0.7.js:112230-112241)
+    if (!ok(status, error)) snprintf(v->sales_error, sizeof(v->sales_error), "%s", v10_gapi_error_text(error, "Failed to load sales history"));
     render_views();
 }
 
@@ -3501,18 +3815,25 @@ static void kio_listings_done(const int status, const cJSON *data, const cJSON *
     if (!v) return;
     v->listings_loading = 0;
     cJSON_Delete(v->listings);
-    v->listings = cJSON_CreateArray();
-    const cJSON *e;
-    if (ok(status, error)) {
-        cJSON_ArrayForEach(e, data) {
-            cJSON *row = cJSON_CreateObject();
-            cJSON_AddNumberToObject(row, "sk", jnum(e, "skinindex"));
-            cJSON_AddNumberToObject(row, "kr", jnum(e, "funds"));
-            cJSON_AddNumberToObject(row, "id", jnum(e, "marketid"));
-            cJSON_AddItemToArray(v->listings, row);
-        }
-    }
+    // v10's rows as they come ({marketid, skinindex, funds, m}: the cards read them all)
+    v->listings = ok(status, error) && cJSON_IsArray(data) ? cJSON_Duplicate(data, 1) : cJSON_CreateArray();
+    if (!ok(status, error)) snprintf(v->listings_error, sizeof(v->listings_error), "%s", v10_gapi_error_text(error, "Failed to load listings"));
     render_views();
+}
+
+// kn_brain's "ul" rows ({sk, kr, id, ...}, db_economy.c P_LISTINGS_OF) as v10's listing rows {marketid, skinindex,
+// funds}: a Box Office listing has no nametag (its "m" is the v7 market id)
+static cJSON *listings_v10(const cJSON *rows) {
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *e;
+    cJSON_ArrayForEach(e, rows) {
+        cJSON *row = cJSON_CreateObject();
+        cJSON_AddNumberToObject(row, "marketid", jnum(e, "id"));
+        cJSON_AddNumberToObject(row, "skinindex", jnum(e, "sk"));
+        cJSON_AddNumberToObject(row, "funds", jnum(e, "kr"));
+        cJSON_AddItemToArray(out, row);
+    }
+    return out;
 }
 
 static void profile_sales_load(View *v) {
@@ -3520,6 +3841,7 @@ static void profile_sales_load(View *v) {
     if (!v->data) return;
     v->sales_loading = 1;
     v->listings_loading = 1;
+    v->sales_error[0] = v->listings_error[0] = 0;
     if (kio()) {
         char enc[160], path[220];
         backend_path_segment(enc, sizeof(enc), jstr(v->data, "player_name"));
@@ -3852,6 +4174,17 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         render_views();
     } else if (!strcmp(op, "follow") && v && v->type == V_PROFILE) {
         profile_follow(v);
+    } else if (!strcmp(op, "pchatban") && v && v->type == V_PROFILE) {
+        profile_chat_ban(v);
+    } else if (!strcmp(op, "pflag") && v && v->type == V_PROFILE) {
+        profile_flag(v);
+    } else if (!strcmp(op, "pverify") && v && v->type == V_PROFILE) {
+        profile_verify(v);
+    } else if (!strcmp(op, "plisting") && v && v->type == V_PROFILE) {
+        // a listing card (deob-10.0.7.js:112243-112246): every view closes, then openExchange(0, skinindex)
+        const double idx = arg_num(args, argc, 1, -1);
+        v10_view_clear();
+        html_ui_dispatch("openExchange", ev, (HtmlArg[]) {{HTML_ARG_NUM, 0, NULL}, {HTML_ARG_NUM, idx, NULL}}, 2);
     } else if (!strcmp(op, "follows") && v && v->type == V_PROFILE && v->data) {
         open_follows(jstr(v->data, "player_name"), (int) arg_num(args, argc, 1, 0), jnum(v->data, "player_followed"), jnum(v->data, "player_following"));
     } else if (!strcmp(op, "ftab") && v && v->type == V_FOLLOWS) {
@@ -4032,7 +4365,21 @@ void v10_social_scenario(const cJSON *st) {
         v->data = cJSON_Duplicate(cJSON_GetObjectItem(view, "data"), 1);
         v->tab = (int) jnum(view, "tab");
         v->ctab = (int) jnum(view, "ctab"); // the Creations sub-tab (0 Skins)
-        if (v->type == V_PROFILE) v->feed = cJSON_CreateArray();
+        if (v->type == V_PROFILE) {
+            v->feed = cJSON_CreateArray();
+            // the tabs' loads as answered: {reports, sales [{d, f}], listings (v10's rows), sales_error, listings_error,
+            // sales_range, chat_banned, now (Date.now() in epoch ms)}
+            S.scenario_now = jnum(view, "now");
+            v->reports = cJSON_Duplicate(cJSON_GetObjectItem(view, "reports"), 1);
+            v->sales = cJSON_Duplicate(cJSON_GetObjectItem(view, "sales"), 1);
+            v->listings = cJSON_Duplicate(cJSON_GetObjectItem(view, "listings"), 1);
+            if (!v->sales) v->sales = cJSON_CreateArray();
+            if (!v->listings) v->listings = cJSON_CreateArray();
+            v->sales_range = cJSON_GetObjectItem(view, "sales_range") ? (int) jnum(view, "sales_range") : 3;
+            snprintf(v->sales_error, sizeof(v->sales_error), "%s", jstr(view, "sales_error"));
+            snprintf(v->listings_error, sizeof(v->listings_error), "%s", jstr(view, "listings_error"));
+            v->chat_banned = jtrue(view, "chat_banned");
+        }
         render_views();
     }
 }

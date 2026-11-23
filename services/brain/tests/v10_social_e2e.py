@@ -270,7 +270,36 @@ def main():
         A.ui("v10s('back')")  # the report view's Done: the profile again
         A.click("v10sPtab7")  # Reports (moderators): gapi GET /players/<name>/reports
         check(A.has("v10sReport0"), "the Reports tab lists the report")
+        rp = A.textof("v10sReport0") or ""
+        check(rp.startswith("from %s" % names[0]) and "Hacking" in rp and "carol is using an aimbot" in rp
+              and re.search(r"(just now|\d+m ago)", rp) is not None,
+              "a report row: \"from <alice>\", its age, the reason, the text (deob-10.0.7.js:112018): %r" % rp)
         A.shot("profile-reports")
+        # the staff actions (deob-10.0.7.js:111865-111924, 112551-112585): alice moderates (canChatBan, canGlobalFlag),
+        # no developer (no Verify)
+        check((A.textof("v10sProfileChatBan") or "").endswith(" Chat Ban"), "a moderator sees Chat Ban (getChatBan: none)")
+        check(A.count("#v10sProfileVerify") == 0, "Verify is a developer's only (canVerify)")
+        A.click("v10sProfileChatBan")
+        time.sleep(1.0)
+        check(q("SELECT count(*) FROM feature_bans WHERE account_id = ? AND feature = 'chat' AND revoked_at IS NULL", c)[0][0] == 1
+              and (A.textof("v10sProfileChatBan") or "").endswith("Chat Unban"),
+              "Chat Ban: POST /moderation/chat bans carol's chat, the button reads Chat Unban")
+        A.click("v10sProfileChatBan")
+        time.sleep(1.0)
+        check(q("SELECT count(*) FROM feature_bans WHERE account_id = ? AND feature = 'chat' AND revoked_at IS NULL", c)[0][0] == 0
+              and (A.textof("v10sProfileChatBan") or "").endswith("Chat Ban"), "Chat Unban lifts it")
+        A.click("v10sProfileFlag")
+        check(A.has("v10sFlagConfirm", 6.0) and A.textof("v10sFlagText") == "Are you sure you want to flag %s as a Hacker?" % names[2]
+              and A.textof("v10sFlagConfirm") == "Flag", "Flag asks first: \"Are you sure you want to flag <carol> as a Hacker?\", Flag")
+        A.click("v10sFlagConfirm")
+        time.sleep(1.0)
+        check(q("SELECT player_hack FROM players WHERE player_id = ?", c)[0][0] == 1 and "BANNED" in (A.textof("v10sProfile") or "")
+              and (A.textof("v10sProfileFlag") or "").endswith("Unflag"), "Flag: POST /moderation/flag sets player_hack, BANNED shows, Unflag")
+        A.click("v10sProfileFlag")
+        A.has("v10sFlagConfirm", 6.0)
+        A.click("v10sFlagConfirm")
+        time.sleep(1.0)
+        check(q("SELECT player_hack FROM players WHERE player_id = ?", c)[0][0] == 0, "Unflag clears it")
         # Match History (deob-10.0.7.js:113205-113221): GET /players' match_history in v10's MatchHistory, carol's line
         A.click("v10sPtab6")
         time.sleep(0.8)
@@ -345,6 +374,17 @@ def main():
         check(q("SELECT count(*) FROM feed_likes WHERE post_id = ? AND account_id = ?", gid, b)[0][0] == 1,
               "Like on the giveaway reached kn_brain (the entry)")
         B.shot("hub-giveaways")
+        # the Leaderboards popup is a new component on every openLeaderboards (deob-10.0.7.js:140313-140316): the
+        # Players tab picked last time (Wins) is back on Level
+        B.ui("clearPops()")
+        B.ui("openLeaderboards('players')")
+        first, third = ".tabs-container > .tab:first-child.tab-active", ".tabs-container > .tab:nth-child(3).tab-active"
+        check(B.count(first) == 1, "openLeaderboards('players'): the Level tab is active")
+        B.ui("knLbTab(2)")
+        check(B.count(third) == 1 and B.count(first) == 0, "knLbTab(2): Wins is active")
+        B.ui("clearPops()")
+        B.ui("openLeaderboards('players')")
+        check(B.count(first) == 1 and B.count(third) == 0, "reopened: Level is active again (the tabs reset)")
     except Exception as e:
         import traceback; traceback.print_exc(); check(False, "exception: %r" % e)
     finally:

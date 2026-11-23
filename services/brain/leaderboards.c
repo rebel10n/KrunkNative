@@ -278,8 +278,9 @@ static void player_page(SocialSession *s, const LeaderQuery *q, int64_t region, 
  *        clan_score, member_count})
  *   GET /api/leaderboards/raids/<map>[?sort=completions], /raids/<map>/monthly?month=YYYY-MM
  *   GET /api/leaderboards/krunkcup/teams, /krunkcup/teams/<id>/contributors, /krunkcup/players
- * The raid pages are the raid record's (raids.c, 0360_raid_stats). KrunkNative keeps no inventory values, event finds
- * or KrunkCup teams: those answer an empty list (the popup then says "No data available."). Pages are cached
+ * The raid pages are the raid record's (raids.c, 0360_raid_stats). skinvalue ranks the inventories at the market's
+ * sale estimates and eventcount the event finds (event_eggs). KrunkNative keeps no KrunkCup teams: those answer an
+ * empty list (the popup then says "No data available."). Pages are cached
  * accounts.leaderboard_cache_s per path, like the socket's. */
 
 typedef struct HttpBoard {
@@ -426,7 +427,37 @@ static void h_http_board(kn_http_req *req, void *ud) {
         kn_db_query_sql(b->db, !strcmp(sort, "members") ? &by_members : &by_score, KN_DB_ARGS(lim), on_http_board, h);
         return;
     }
-    free(h); /* player_skinvalue, player_eventcount, unknown types: nothing to rank */
+    if (!strcmp(type, "player_eventcount")) { /* Event Finds (deob-10.0.7.js:140471): the hidden event items found (event_eggs) */
+        static const kn_sql q = {.any = "SELECT r.player_name, r.player_clan, count(*) AS value FROM event_eggs e"
+                                        " JOIN player_rows r ON r.player_id = e.account_id WHERE r.player_hack = 0"
+                                        " GROUP BY e.account_id, r.player_name, r.player_clan ORDER BY count(*) DESC, e.account_id"
+                                        " LIMIT {int:$1}"};
+        kn_db_query_sql(b->db, &q, KN_DB_ARGS(lim), on_http_board, h);
+        return;
+    }
+    if (!strcmp(type, "player_skinvalue")) { /* Inventory Value (deob-10.0.7.js:140471): every owned unit at its item's
+                                              * estimate, the rounded mean of its completed sales (economy.c "prices",
+                                              * P_PROFILE's player_skinvalue) */
+        static const kn_sql q = {
+            .pg = "SELECT r.player_name, r.player_clan, sum(i.count * e.est)::bigint AS value FROM inventory i"
+                  " JOIN (SELECT skin_id, round(avg(price)) AS est FROM market_listings WHERE sold_at IS NOT NULL GROUP BY skin_id) e"
+                  " ON e.skin_id = i.skin_id JOIN player_rows r ON r.player_id = i.account_id WHERE r.player_hack = 0"
+                  " GROUP BY i.account_id, r.player_name, r.player_clan HAVING sum(i.count * e.est) > 0"
+                  " ORDER BY sum(i.count * e.est) DESC, i.account_id LIMIT $1::int",
+            .sqlite = "SELECT r.player_name, r.player_clan, sum(i.count * e.est) AS value FROM inventory i"
+                      " JOIN (SELECT skin_id, CAST(round(avg(price)) AS INTEGER) AS est FROM market_listings WHERE sold_at IS NOT NULL"
+                      " GROUP BY skin_id) e ON e.skin_id = i.skin_id JOIN player_rows r ON r.player_id = i.account_id WHERE r.player_hack = 0"
+                      " GROUP BY i.account_id, r.player_name, r.player_clan HAVING sum(i.count * e.est) > 0"
+                      " ORDER BY sum(i.count * e.est) DESC, i.account_id LIMIT CAST($1 AS INTEGER)",
+            .mysql = "SELECT r.player_name, r.player_clan, CAST(sum(i.count * e.est) AS SIGNED) AS value FROM inventory i"
+                     " JOIN (SELECT skin_id, CAST(ROUND(AVG(price)) AS SIGNED) AS est FROM market_listings WHERE sold_at IS NOT NULL"
+                     " GROUP BY skin_id) e ON e.skin_id = i.skin_id JOIN player_rows r ON r.player_id = i.account_id WHERE r.player_hack = 0"
+                     " GROUP BY i.account_id, r.player_name, r.player_clan HAVING sum(i.count * e.est) > 0"
+                     " ORDER BY sum(i.count * e.est) DESC, i.account_id LIMIT $1"};
+        kn_db_query_sql(b->db, &q, KN_DB_ARGS(lim), on_http_board, h);
+        return;
+    }
+    free(h); /* unknown types: nothing to rank */
     http_reply(req, NULL);
 }
 

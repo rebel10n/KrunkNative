@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 try:
     import websockets
@@ -202,6 +203,46 @@ async def scenario(names):
     hub = await B.recv_until(lambda f: f[0] == "0" and f[1] == "profile")
     row = hub[3] if hub and len(hub) > 3 and isinstance(hub[3], dict) else {}
     check(row.get("rankedRank") == 0, "the hub's profile row: rankedRank 0 for an earlier season only (got %r)" % row.get("rankedRank"))
+    # --- the Stats tab's values (deob-10.0.7.js:112109, 112680-112757): Junk (player_elo4, the junk wallet's
+    # "12.34"), Inventory ~ (player_skinvalue: owned units at the rounded mean sale price), KPD Calls / Tagged and
+    # v10's player_jobrating(positive) names
+    q("UPDATE players SET player_junk = 1234, jobrating = 9, jobratingpositive = 7 WHERE player_id = ?", a_id)
+    # item ids no account starts with (a signup's skins have no sales here, so they add nothing either way)
+    q("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, 9003, 2), (?, 9005, 1), (?, 9007, 4)"
+      " ON CONFLICT (account_id, skin_id) DO UPDATE SET count = excluded.count", a_id, a_id, b_id)
+    sold = "INSERT INTO market_listings (seller_id, skin_id, price, sold_at) VALUES (?, ?, ?, %s)" % AGO_1S
+    for skin, price in ((9003, 100), (9003, 201), (9005, 40), (9007, 10)):
+        q(sold, b_id, skin, price)
+    q("INSERT INTO market_listings (seller_id, skin_id, price) VALUES (?, 9003, 99999)", b_id)  # open: no estimate
+    q("INSERT INTO kpd_calls (reporter_id) VALUES (?), (?)", a_id, a_id)
+    q("INSERT INTO kpd_calls (reporter_id, handled_by, rating) VALUES (?, ?, 1), (?, ?, 0)", b_id, a_id, b_id, a_id)
+    st, r = await B.gapi("GET", "/players/%s" % an)
+    d = r["data"] if st == 200 else {}
+    got = {k: d.get(k) for k in ("player_elo4", "player_skinvalue", "player_calls", "player_taggedaccounts",
+                                   "player_jobrating", "player_jobratingpositive")}
+    check(got == {"player_elo4": "12.34", "player_skinvalue": 2 * 151 + 40, "player_calls": 2, "player_taggedaccounts": 1,
+                  "player_jobrating": 9, "player_jobratingpositive": 7},
+          "A's profile Stats: Junk \"12.34\", Inventory ~342, KPD Calls 2 / Tagged 1, player_jobrating 9 / positive 7 (got %r)" % got)
+    await B.send(["r", "profile", an])
+    hub = await B.recv_until(lambda f: f[0] == "0" and f[1] == "profile")
+    row = hub[3] if hub and len(hub) > 3 and isinstance(hub[3], dict) else {}
+    check(row.get("player_elo4") == "12.34" and row.get("player_skinvalue") == 342,
+          "the hub's profile row: the same Junk and Inventory (got %r %r)" % (row.get("player_elo4"), row.get("player_skinvalue")))
+    # the leaderboards' Inventory Value and Event Finds (deob-10.0.7.js:140471): the same estimate, event_eggs
+    q("INSERT INTO event_eggs (account_id, egg_key) VALUES (?, 'e1'), (?, 'e2'), (?, 'e1')", a_id, a_id, b_id)
+
+    def board(path):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:%d/api/leaderboards/%s" % (PORT, path), timeout=10) as resp:
+                return json.loads(resp.read().decode()).get("data")
+        except Exception as e:  # noqa: BLE001
+            return "ERR %r" % e
+    sv = board("player_skinvalue")
+    sv = [(x.get("player_name"), x.get("value"), x.get("position")) for x in sv] if isinstance(sv, list) else sv
+    check(isinstance(sv, list) and sv[:2] == [(an, 342, 1), (bn, 40, 2)], "/leaderboards/player_skinvalue: A ~342 KR, B ~40 KR (got %r)" % sv)
+    ev = board("player_eventcount")
+    ev = [(x.get("player_name"), x.get("value")) for x in ev] if isinstance(ev, list) else ev
+    check(isinstance(ev, list) and ev[:2] == [(an, 2), (bn, 1)], "/leaderboards/player_eventcount: A 2 found, B 1 (got %r)" % ev)
     st, r = await B.gapi("POST", "/players/%s/follow" % an, {"follow": True})
     check(st == 200 and r["data"]["following"] is True, "B follows A back")
     check(await B.recv_until(lambda f: f[0] == "gmc" and f[1] >= 2, timeout=1.0) is None,

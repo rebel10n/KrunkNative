@@ -613,6 +613,10 @@ static const char *g_krunker_game;
 // --demo <file>[:<call token>]: play a K.P.D demo file (demo_play.h), no server; --demo-link <tok>[:<ct>] /
 // ?demo=<tok>&sus=<ct>: the case popup of a demo on the brain (openDemoLink, hud_replay.h)
 static char g_demo_file[512], g_demo_ct[48], g_demo_link[48], g_demo_link_ct[48];
+// the page's ?profile=<name>&autoGift=<n>&mn=<asset> and ?leaderboards=<category> (deob-10.0.7.js:230147-230153,
+// 230168): openPlayerProfile / openLeaderboards once the page is up (web)
+static char g_link_profile[64], g_link_asset[128], g_link_leaderboards[32];
+static int g_link_auto_gift;
 
 static void split_demo_arg(const char *arg, char *head, const size_t head_size, char *tail, const size_t tail_size) {
     const char *colon = strrchr(arg, ':');
@@ -850,6 +854,19 @@ int main(int argc, char **argv) {
         free(web_sus);
     }
     free(web_demo);
+    char *web_profile = web_query_string("profile");
+    if (web_profile && web_profile[0]) {
+        char *gift = web_query_string("autoGift"), *mn = web_query_string("mn");
+        snprintf(g_link_profile, sizeof(g_link_profile), "%s", web_profile);
+        g_link_auto_gift = gift ? atoi(gift) : 0; // parseInt(autoGift || '0') || null
+        snprintf(g_link_asset, sizeof(g_link_asset), "%s", mn ? mn : "");
+        free(gift);
+        free(mn);
+    }
+    free(web_profile);
+    char *web_lb = web_query_string("leaderboards");
+    if (web_lb && web_lb[0]) snprintf(g_link_leaderboards, sizeof(g_link_leaderboards), "%s", web_lb);
+    free(web_lb);
     char *web_krunker = web_query_string("krunker");
     if (web_krunker) {
         g_krunker_start = 1;
@@ -2452,6 +2469,17 @@ void client_tick(Client *client, const float now, const float delta) {
     if (g_demo_link[0] && html_ui_available() && html_ui_is_ready()) { // --demo-link / ?demo=: openDemoLink once the page is up
         hud_replay_open_link(client, g_demo_link, g_demo_link_ct);
         g_demo_link[0] = 0;
+    }
+    if ((g_link_profile[0] || g_link_leaderboards[0]) && html_ui_available() && html_ui_is_ready()) {
+        if (g_link_profile[0]) { // openPlayerProfile(name, {autoGift, assetName}): v10_social.c takes them as arguments
+            const HtmlArg args[3] = {{HTML_ARG_STR, 0, g_link_profile}, {HTML_ARG_NUM, g_link_auto_gift, NULL}, {HTML_ARG_STR, 0, g_link_asset}};
+            html_ui_dispatch("openPlayerProfile", NULL, args, 3);
+        }
+        if (g_link_leaderboards[0]) {
+            const HtmlArg arg = {HTML_ARG_STR, 0, g_link_leaderboards};
+            html_ui_dispatch("openLeaderboards", NULL, &arg, 1);
+        }
+        g_link_profile[0] = g_link_leaderboards[0] = 0;
     }
     hud_map_tick(client);      // WP-E part 2a: minimap + death markers (client/src/ui/hud_map.c)
     ui_mobile_tick(client);    // #mobileUI touch controls on phones (client/src/ui/ui_mobile.c)
