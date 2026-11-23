@@ -311,7 +311,8 @@ def main():
         check(client.wait_line(r"\[hub\] enter", 0, 30.0) is not None, "the hub entered its page (p=profile)")
         check(client.visible("creatorBtn", 20.0), "a developer sees the Creator button")
         check(client.text_of("creatorBtn") == "Creator", "it reads Creator (no badge yet)")
-        check(client.count("#creatorBadge") == 0, "no creator mark on the profile yet")
+        # the hub profile's name row (social_ui.c, v10's markup: the #993299 "verified" icon, no id)
+        check("verified" not in (client.text_of(".leftTopHolder") or "verified"), "no creator mark on the profile yet")
         client.click("creatorBtn")
         check(client.visible("confBtn"), "Creator opens the confirm popup")
         client.click("confBtn")
@@ -321,7 +322,7 @@ def main():
         client.ui("clearPops()")
         time.sleep(1.5)
         check(client.text_of("creatorBtn") == "Uncreator", "after Creator the button reads Uncreator (the profile reloaded)")
-        check(client.count("#creatorBadge") == 1, "the profile shows the purple creator mark")
+        check("verified" in (client.text_of(".leftTopHolder") or ""), "the profile shows the purple creator mark")
         p = client.shot("creator-profile")
         check(png_ok(p), "screenshot: %s" % p)
 

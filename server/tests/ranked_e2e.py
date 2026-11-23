@@ -71,7 +71,7 @@ def check(name, ok, detail=""):
 
 
 def cfgdb():
-    with open("config/config.json") as f:
+    with open(os.environ.get("KN_TEST_CONFIG") or "config/config.json") as f:
         return json.load(f)["database"]
 
 
