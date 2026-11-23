@@ -13,10 +13,12 @@ against a local kn_brain (sqlite, temp dir) and headless client_bin on the v10 p
   mail-lost       the brain goes away while a message's text is on its way: the message says so
   mail-refused    the brain answers a message as gone (its row was deleted): "Loading..." is replaced
   clan-lost       the brain is gone when the Clan window opens (no clan yet): the window says so, with Retry
-  clan-settings-lost     the clan is loaded, the brain goes away, Settings is opened: the message of the day,
-                  the loot config and the recruitment post each say they could not load, with Retry
+  clan-settings-lost     the clan is loaded, the brain goes away, Settings is opened: each section fails as
+                  v10.0.7's does when its fetch fails (deob-10.0.7.js:96429, :96695, :96888): the message of the
+                  day shows "Failed to fetch" above its form, the loot config its default form with
+                  "Error: Failed to fetch", the recruitment board reads it as no post (Create Post)
   clan-settings-refused  the clan is loaded, the clan is deleted (the brain answers its routes 404), Settings
-                  is opened: the loot config says it could not load
+                  is opened: the loot config shows its form with the brain's "Error: Clan not found"
   lottery-lost    the brain is gone when the lottery window opens: the window says so, with Retry
   lottery-refused the brain answers the lottery as not found: the window says so, with Retry
 
@@ -530,9 +532,11 @@ def scenario_clan_settings_lost(brain, name, token):
         check(ok, "the clan loads while the brain is up: %r" % text[:80])
         brain.stop()
         c.ui("windows[12].switchTab(4)")  # Settings: its sections are asked for now
-        want = ("Couldn't load the message of the day", "Couldn't load the loot config", "Couldn't load the recruitment post")
-        ok, text = wait_text(c, "#clanErr", lambda t: all(w in t for w in want), WAIT_S)
-        check(ok, "no answer: each Settings section says it could not load, not Loading... for good: %r" % text[:160])
+        # v10's failed fetches: the MOTD's error above its form, the loot form's defaults with its error, no post
+        want = ("Failed to fetch", "Distribution Mode", "Error: Failed to fetch", "Create Post (1,000 KR)")
+        ok, text = wait_text(c, "#clanErr", lambda t: all(w in t for w in want) and "Loading" not in t, WAIT_S)
+        check(ok, "no answer: each Settings section fails as v10's fetch does, not Loading... for good: %r" % text[:240])
+        check("Couldn't load" not in text and "Retry" not in text, "no KrunkNative Retry in Settings: %r" % text[:240])
         c.shot("clan-settings-lost")
     finally:
         c.close()
@@ -552,8 +556,8 @@ def scenario_clan_settings_refused(brain, name, token):
         q("DELETE FROM clan_members WHERE account_id = ?", ACCOUNT_ID)
         q("DELETE FROM clans WHERE clan_name = 'LoadClan'")  # the brain answers the clan's routes 404 (Clan not found)
         c.ui("windows[12].switchTab(4)")
-        ok, text = wait_text(c, "#clanErr", lambda t: "Couldn't load the loot config" in t, WAIT_S)
-        check(ok, "a refused loot config says it could not load (not the silent Clan Bank form): %r" % text[:160])
+        ok, text = wait_text(c, "#clanErr", lambda t: "Error: Clan not found" in t and "Distribution Mode" in t, WAIT_S)
+        check(ok, "a refused loot config shows its form with the brain's error (v10: error.message): %r" % text[:240])
         c.shot("clan-settings-refused")
     finally:
         c.close()

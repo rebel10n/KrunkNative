@@ -146,12 +146,22 @@ Player drill-down: GET `/territorial-wars/player/<id>`, `/player/<id>/contributi
   decoder, `avatar_review_picture` in `avatar.c`, the same moderation profile and verdict rules).
   There is no separate admin queue: the AI verdict approves or rejects the logo, the same as for
   profile pictures. Approval moves `clan_logo_pending` into `clan_logo`. The approved image is GET
-  `/api/clans/<id>/logo` (not v10's user-assets CDN). Deviations: the settings tab uploads as soon
-  as a PNG is chosen (no preview step); a pending logo is shown as a status, not a picture;
-  20,000 KR is taken from the clan bank only when an approval sets the logo (no fee,
+  `/api/clans/<id>/logo` (not v10's user-assets CDN; signed in to krunker.io the window shows
+  v10's `user-assets.krunker.io/clans/<id>[_pending].png?v=` pictures). The settings tab follows
+  v10's two steps: the drop target selects a PNG (its size / type checks, then the 512 x 512 check),
+  and the BUY 20,000 KR button it shows uploads it. Deviations: the brain keeps no pending picture,
+  so a pending logo's picture is the file this client sent (other clients show the pending status
+  only); 20,000 KR is taken from the clan bank only when an approval sets the logo (no fee,
   `clan_funds_ledger` source `clan-logo`), the same as the profile picture, which costs nothing: a
   rejected or failed review charges nothing and refunds nothing. An approval the clan can no longer
   pay for is not set (status error).
+- The clan window (client `clan_ui.c`) mounts its settings sections again on every show / update of
+  the window, as v10's Svelte components do (each load starts again); a section's own state change
+  only redraws. The settings sections' load errors are v10's (the MOTD's above its form, the loot
+  config's form with "Error: ..." under it, a failed recruitment read is "no post"), without a
+  Retry. Box Office keeps a 15 s deadline on the clan page itself (the window's error with Retry)
+  and on each settings load (shown as "Failed to fetch"), since the brain can go away while v10's
+  socket would reconnect.
 - Turf Wars needs: shared `territorialWars` tracker in the game (eligibility, per-player kill
   records, game-end flush to the brain), a daily brain job (winner per map, KR pool split
   60/30/10 then loot-config distribution), the `warsClan` packet and init field, `wars_banner*`

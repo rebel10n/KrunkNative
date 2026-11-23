@@ -9,10 +9,17 @@
 // transfer. Deviation (Box Office): v10's ownership-transfer socket RPCs (clan-transfer-initiate /
 // -cancel / -respond) are POST / DELETE /clans/<id>/transfer and POST /clans/<id>/transfer/respond. The
 // Turf Wars loot config and the recruitment board are kn_brain HTTP routes (turf.c, ?token=).
-// The logo: the file dialog is the profile picture's (avatar_ui_pick_file, PNG only) and the upload
-// is POST /clans/<id>/logo {file: base64} over the gapi tunnel on Box Office (v10 sends the multipart
-// `file`, as the krunker.io account's upload does);
-// the approved logo is GET /api/clans/<id>/logo (clan_logo.c), not v10's user-assets CDN.
+// The logo, as v10.0.7's (deob-10.0.7.js:96058-96350): the drop target (the profile picture's file dialog,
+// avatar_ui_pick_file, PNG only) selects a file, v10's checks run on it, and the BUY 20,000 KR button under it
+// uploads it. Box Office: the upload is POST /clans/<id>/logo {file: base64} over the gapi tunnel (v10 sends the
+// multipart `file`, as the krunker.io account's upload does); the approved logo is GET /api/clans/<id>/logo
+// (clan_logo.c), not v10's user-assets CDN. Deviation (Box Office): the brain never keeps a picture that is
+// under review, so there is no clans/<id>_pending.png; the uploader's own client shows the file it sent while it
+// is pending, other clients the "Pending Approval" status alone.
+//
+// Every showWindow / updateWindow(13) mounts v10's Svelte components again (deob-10.0.7.js:223808-223850): the
+// settings tab and the home tab's loot display load again and lose their local state. KrunkNative re-renders for
+// a component's own state change too (clan_rerender): only the other renders count as a mount here.
 //
 // Permissions as v10: owner = clanData.clan_playerid; clanRole = the account's clan_members rank
 // (v10 account slot player_clanrole), read from clanData.members. mgr = owner or Captain (2):
@@ -53,8 +60,6 @@
 #define COL_VERIFIED_PLAYER "#40C4FF" // COLORS.verified.player
 #define LOGO_COST 20000               // clan logo: 20,000 KR from the clan bank
 #define LOGO_MAX_BYTES 262144         // v10: "max 256KB" (the brain's CLAN_LOGO_MAX_BYTES)
-#define LOGO_WATCH_MS 5000.0          // a pending logo is looked at again this often ...
-#define LOGO_WATCH_MAX 36             // ... for this many times (about three minutes)
 
 // _7497: home / Members / Stats / Requests / settings
 static const char *const k_clan_tabs[] = {
@@ -117,10 +122,13 @@ static int g_req_sent;  // sendReq(3) in flight (the window asks once per load)
 static int g_clan_timer; // the clan's own load (sendReq(3)) has a deadline (html_timer id, 0 none)
 static int g_clan_failed; // that load got no answer (or was not sent): the window says so, with Retry
 static int g_scenario;  // --render-scenario: no network
+static int g_svelte;    // the render is a Svelte component's own update (clan_rerender), not a mount
 
-// Every load here has a deadline (CLAN_WAIT_MS): a request whose answer never comes, or that could not be sent
-// (no socket, the brain is gone), fails and the section says so with Retry, instead of "Loading..." for good.
+// Every load here has a deadline (CLAN_WAIT_MS). The clan's own load (sendReq(3)) that gets no answer, or could not
+// be sent (no socket, the brain is gone), says so with Retry instead of "LOADING..." for good; a settings load that
+// gets none fails as v10's fetch does when the network fails ("Failed to fetch").
 #define CLAN_WAIT_MS 15000
+#define FETCH_FAILED "Failed to fetch" // a fetch() that could not reach the server (Chromium's TypeError message)
 
 // settings tab / tab 0 state (the Svelte components' state)
 static struct {
@@ -131,10 +139,9 @@ static struct {
     int motd_saved;       // "Saved!" for 3 s
     int64_t motd_for;     // clan id the MOTD belongs to
     int motd_timer;       // the load's deadline (html_timer id, 0 none)
-    int motd_load_failed; // the load got no answer / a refusal: the section says so, with Retry
     // loot config (svelte-1ydnong) + the tab 0 display
     cJSON *loot;          // flat config (owned), NULL = not loaded
-    int loot_loading, loot_saving, loot_saved, loot_failed; // loot_failed: the load failed (Retry)
+    int loot_loading, loot_saving, loot_saved, loot_failed; // loot_failed: the load failed (the form's defaults)
     int loot_timer;
     char loot_err[96];
     char loot_mode[24];
@@ -142,20 +149,29 @@ static struct {
     // recruitment (svelte-1o06kdk)
     cJSON *recruit;       // the clan's post (owned) or NULL
     int recruit_loaded, recruit_loading, recruit_saving;
-    int recruit_timer, recruit_failed; // the load's deadline; the load failed (not "no post"): Retry
+    int recruit_timer;    // the load's deadline
     char recruit_err[96], recruit_ok[96];
     char r_desc[2048], r_looking[512], r_level[16], r_kd[16], r_region[8], r_lang[8];
     // banner colour
     int banner_sel;       // index in k_paints, -1 none
     int banner_busy;
     char banner_err[96];
-    // logo
+    // logo: busy 1 uploading, 2 removing; logo_err the settings' error line
     int logo_busy;
     char logo_err[96];
+    char *logo_file;      // the selected file (base64, owned), NULL none (v10's selectedFile)
+    size_t logo_bytes;
+    // the drop target's own state (svelte-145grbc): has-file with the file's name, or its error
+    int logo_has_file;
+    char logo_name[128], logo_drop_err[96];
     // transfer ownership
     int transfer_busy;
     char transfer_err[96], transfer_name[40];
 } S = {.banner_sel = -1};
+
+// Box Office: the file this client uploaded for the clan, shown as its pending logo while the review runs
+static char *g_logo_sent;    // "data:image/png;base64,..." (owned), NULL none
+static int g_logo_sent_clan; // the clan it was sent for
 
 static double jnum(const cJSON *o, const char *k) {
     const cJSON *v = cJSON_GetObjectItem(o, k);
@@ -223,8 +239,44 @@ static void settings_reset(void) {
     cJSON_Delete(S.motd);
     cJSON_Delete(S.loot);
     cJSON_Delete(S.recruit);
+    free(S.logo_file);
     memset(&S, 0, sizeof(S));
     S.banner_sel = -1;
+    snprintf(S.r_level, sizeof(S.r_level), "0"); // the recruitment form's initial min level / K/D
+    snprintf(S.r_kd, sizeof(S.r_kd), "0");
+}
+
+static void logo_sent_clear(void) {
+    free(g_logo_sent);
+    g_logo_sent = NULL;
+    g_logo_sent_clan = 0;
+}
+
+// A mount of the open tab's components (showWindow / updateWindow(13)): the settings tab's sections (tab 4) and the
+// home tab's loot display (tab 0) start again with their initial state and load again. A load still in flight
+// keeps its answer (it is not asked twice).
+static void components_mount(void) {
+    if (g_clan_tab == 0 && !S.loot_loading) {
+        cJSON_Delete(S.loot);
+        S.loot = NULL;
+        S.loot_failed = 0;
+        S.loot_err[0] = S.loot_mode[0] = 0;
+    }
+    if (g_clan_tab != 4) return;
+    const int motd_loading = S.motd_loading, motd_timer = S.motd_timer, loot_loading = S.loot_loading,
+              loot_timer = S.loot_timer, recruit_loading = S.recruit_loading, recruit_timer = S.recruit_timer;
+    const int64_t motd_for = S.motd_for;
+    cJSON_Delete(S.motd);
+    cJSON_Delete(S.loot);
+    cJSON_Delete(S.recruit);
+    free(S.logo_file);
+    memset(&S, 0, sizeof(S));
+    S.banner_sel = -1;
+    snprintf(S.r_level, sizeof(S.r_level), "0");
+    snprintf(S.r_kd, sizeof(S.r_kd), "0");
+    S.motd_loading = motd_loading, S.motd_timer = motd_timer, S.loot_loading = loot_loading, S.loot_timer = loot_timer;
+    S.recruit_loading = recruit_loading, S.recruit_timer = recruit_timer;
+    if (motd_loading) S.motd_for = motd_for;
 }
 
 void clan_ui_reset(void) {
@@ -236,6 +288,7 @@ void clan_ui_reset(void) {
     g_clan_tab = 0;
     g_req_sent = 0;
     settings_reset();
+    logo_sent_clear();
 }
 
 // a name inside onclick='openPlayerProfile("NAME")': quotes backslash-escaped, then HTML-escaped
@@ -287,9 +340,28 @@ static int sorted_members(const cJSON *members, const cJSON **out, const int max
 
 // ------------------------------------------------------------------ async data (settings / tab 0)
 
+// a Svelte component's own state changed: the window is drawn again, its components keep their state
 static int clan_rerender(void) {
+    const int was = g_svelte;
+    g_svelte = 1;
     menu_rerender_if_open(13);
+    g_svelte = was;
     return 1;
+}
+
+// "Server error: <statusText>" (v10's gapi wrapper throws it for a 5xx, deob-10.0.7.js:26157)
+static void server_error(char *out, const size_t n, const int status) {
+    const char *t = status == 500 ? "Internal Server Error" : status == 501 ? "Not Implemented" : status == 502 ? "Bad Gateway"
+                  : status == 503 ? "Service Unavailable" : status == 504 ? "Gateway Timeout" : "";
+    snprintf(out, n, "Server error: %s", t);
+}
+
+// A settings load's failure text as v10's component shows it: no answer is the fetch's TypeError, a 5xx the wrapper's
+// HttpError, else the answer's error.message || error || the wrapper's fallback (deob-10.0.7.js:96419-96430, :27774)
+static void load_error(char *out, const size_t n, const int status, const char *message, const char *fallback) {
+    if (status <= 0) snprintf(out, n, FETCH_FAILED);
+    else if (status >= 500) server_error(out, n, status);
+    else snprintf(out, n, "%s", message && message[0] ? message : fallback);
 }
 
 // the clan's own load (sendReq(3)) got no answer by the deadline: the window says so, and Retry asks again
@@ -302,22 +374,32 @@ static void clan_expired(void *user) {
     clan_rerender();
 }
 
-// the MOTD's load failed (a refusal, no answer, not sent): the section says so and Retry asks again
-static void motd_load_fail(void) {
+// the MOTD's load failed (a refusal, no answer, not sent): v10's catch shows the error above the section's form
+// (deob-10.0.7.js:96429-96430, :96443-96448)
+static void motd_load_fail(const int status, const char *message) {
     html_timer_cancel(S.motd_timer);
     S.motd_timer = 0;
     S.motd_loading = 0;
     if (!S.motd) S.motd = cJSON_CreateObject();
-    S.motd_load_failed = 1;
+    load_error(S.motd_err, sizeof(S.motd_err), status, message, "Failed to fetch MOTD");
 }
 
 static void motd_expired(void *user) {
     (void) user;
     S.motd_timer = 0;
     if (!S.motd_loading) return;
-    motd_load_fail();
+    motd_load_fail(0, NULL);
     clan_rerender();
 }
+
+// error.message || error (a string) of a gapi answer, NULL when neither
+static const char *gapi_message(const cJSON *error) {
+    if (cJSON_IsString(error)) return error->valuestring;
+    const char *m = cJSON_GetStringValue(cJSON_GetObjectItem(error, "message"));
+    return m && m[0] ? m : NULL;
+}
+
+static void saved_off(void *user);
 
 static int kio_clan(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
 
@@ -355,17 +437,24 @@ static void on_motd(void *user, const int status, const cJSON *data, const cJSON
     S.motd_loading = 0;
     S.motd_busy = 0;
     if (gapi_ok(status, error)) {
-        cJSON_Delete(S.motd);
-        S.motd = data ? cJSON_Duplicate(data, 1) : cJSON_CreateObject();
+        if (kind == 2) { // text '', set_by / set_at null (deob-10.0.7.js:96403-96405)
+            cJSON_Delete(S.motd);
+            S.motd = cJSON_CreateObject();
+        } else {
+            cJSON_Delete(S.motd);
+            S.motd = data ? cJSON_Duplicate(data, 1) : cJSON_CreateObject();
+        }
         snprintf(S.motd_text, sizeof(S.motd_text), "%s", jstr(S.motd, "message"));
         S.motd_err[0] = 0;
-        S.motd_load_failed = 0;
-        if (kind == 1) S.motd_saved = 1;
+        if (kind == 1) { // "Saved!" for 3 s from the answer (setTimeout 3000, :96383-96384)
+            S.motd_saved = 1;
+            html_timer_add(3000, saved_off, (void *) 1);
+        }
     } else if (kind == 0) {
-        motd_load_fail();
+        motd_load_fail(status, gapi_message(error));
     } else {
-        static const char *const fails[] = {"Failed to load MOTD", "Failed to save MOTD", "Failed to delete MOTD"};
-        snprintf(S.motd_err, sizeof(S.motd_err), "%s", error ? v10_gapi_error_text(error, fails[kind]) : fails[kind]);
+        static const char *const fails[] = {"Failed to load MOTD", "Failed to set MOTD", "Failed to delete MOTD"};
+        load_error(S.motd_err, sizeof(S.motd_err), status, gapi_message(error), fails[kind]);
         if (!S.motd) S.motd = cJSON_CreateObject();
     }
     clan_rerender();
@@ -376,31 +465,31 @@ static void fetch_motd(void) {
     char path[64];
     snprintf(path, sizeof(path), "/clans/%d/motd", clan_id());
     S.motd_for = clan_id();
-    S.motd_load_failed = 0;
+    S.motd_err[0] = 0;
     S.motd_loading = v10_gapi("GET", path, NULL, on_motd, (void *) 0) != 0;
     if (S.motd_loading) {
         html_timer_cancel(S.motd_timer);
         S.motd_timer = html_timer_add(CLAN_WAIT_MS, motd_expired, NULL);
     } else {
-        motd_load_fail(); // not sent: no answer can come (no re-render here: this runs while the window renders)
+        motd_load_fail(0, NULL); // not sent: no answer can come (no re-render here: this runs while the window renders)
     }
 }
 
-// the section's failure: its text (the caller's I18N) and a Retry that asks again (the handler clears the section's state)
-static void load_failed(StrBuf *sb, const char *text, const char *retry) {
-    sb_append(sb, "<div class=\"io-message error-message svelte-1w0uz1r\">");
-    sb_append_esc(sb, text);
-    sb_appendf(sb, "</div> <button class=\"io-button\" onclick=\"%s\">%s</button>", retry, I18N("kn.retry", "Retry"));
+// v10's `x ?? fallback`: a missing or null field is the fallback
+static int num_or(const cJSON *o, const char *k, const int fallback) {
+    const cJSON *v = cJSON_GetObjectItem(o, k);
+    return v && !cJSON_IsNull(v) ? (int) jnum(o, k) : fallback;
 }
 
+// the loot config form's state from a config (deob-10.0.7.js:96687-96692); an empty config is the form's defaults
 static void loot_from(const cJSON *cfg) {
     const char *mode = jstr(cfg, "distribution_mode");
     snprintf(S.loot_mode, sizeof(S.loot_mode), "%s", mode[0] ? mode : "clan_bank");
-    S.loot_clan_pct = (int) jnum(cfg, "clan_pct");
-    S.loot_top_count = cJSON_GetObjectItem(cfg, "top_player_count") ? (int) jnum(cfg, "top_player_count") : 20;
-    S.loot_top_pct = cJSON_GetObjectItem(cfg, "top_player_pct") ? (int) jnum(cfg, "top_player_pct") : 80;
-    S.loot_rem = 100 - S.loot_top_pct;
-    S.loot_min_games = cJSON_GetObjectItem(cfg, "min_games_required") ? (int) jnum(cfg, "min_games_required") : 1;
+    S.loot_clan_pct = num_or(cfg, "clan_pct", 0);
+    S.loot_top_count = num_or(cfg, "top_player_count", 20);
+    S.loot_top_pct = num_or(cfg, "top_player_pct", 80);
+    S.loot_rem = num_or(cfg, "remainder_pct", 20);
+    S.loot_min_games = num_or(cfg, "min_games_required", 1);
 }
 
 // turf.c answers {data: {config: [row]}} on GET (row.updated_by = the name) and {data: {...}} on
@@ -433,6 +522,7 @@ static void on_loot(void *user, const int status, const char *body, const size_t
             if (cJSON_GetObjectItem(row, "updated_at")) cJSON_AddItemToObject(cfg, "updated_at", cJSON_Duplicate(cJSON_GetObjectItem(row, "updated_at"), 1));
             S.loot_saved = 1;
             S.loot_err[0] = 0;
+            html_timer_add(3000, saved_off, (void *) 2); // "Config saved successfully!" for 3 s (:96669-96672)
         } else {
             cJSON_Delete(S.loot);
             S.loot = cJSON_Duplicate(row, 1);
@@ -442,12 +532,14 @@ static void on_loot(void *user, const int status, const char *body, const size_t
             loot_from(S.loot);
         }
     } else {
-        const char *e = cJSON_GetStringValue(cJSON_GetObjectItem(res, "message"));
-        if (!e) e = cJSON_GetStringValue(cJSON_GetObjectItem(res, "error"));
-        if (!e) e = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(res, "error"), "message"));
-        snprintf(S.loot_err, sizeof(S.loot_err), "%s", e ? e : saving ? "Failed to save loot config" : "Failed to load loot config");
-        if (!saving) {
-            S.loot_failed = 1; // the tab 0 display treats it as null (clan bank)
+        // error.message || error || the wrapper's fallback (deob-10.0.7.js:27777, :96656), a 5xx or no answer as
+        // v10's fetch fails
+        const char *e = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(res, "error"), "message"));
+        if (!e || !e[0]) e = cJSON_GetStringValue(cJSON_GetObjectItem(res, "error"));
+        if (!e || !e[0]) e = cJSON_GetStringValue(cJSON_GetObjectItem(res, "message"));
+        load_error(S.loot_err, sizeof(S.loot_err), status, e, saving ? "Failed to update loot config" : "Failed to fetch loot config");
+        if (!saving) { // the form keeps its defaults, with the error under it; the tab 0 display treats it as null
+            S.loot_failed = 1;
             if (!S.loot) {
                 S.loot = cJSON_CreateObject();
                 loot_from(S.loot);
@@ -464,8 +556,7 @@ static void on_recruit(void *user, int status, const char *body, size_t length);
 // its updateLootConfig / createOrUpdateRecruitment / removeRecruitment (:26855, :26897, :26903), rebuilt as the kn_brain
 // route's body for the same handler. user: 0 loot config load, 1 recruitment load, 2 loot config save, 3 recruitment
 // save, 4 recruitment removal. A success by v10's rule (gapi_ok) is the handler's 200. v10 reads a failed recruitment
-// load as "no post" (its catch sets the post to null, :96880-96891), so an answered failure is the handler's 404 there;
-// no answer at all keeps the section's Retry.
+// load as "no post" (its catch sets the post to null, :96880-96891), so an answered failure is the handler's 404 there.
 static void kio_settings_read(void *user, const int status, const cJSON *data, const cJSON *error) {
     const int kind = (int) (intptr_t) user;
     cJSON *res = cJSON_CreateObject();
@@ -481,12 +572,13 @@ static void kio_settings_read(void *user, const int status, const cJSON *data, c
     cJSON_Delete(res);
 }
 
-// the loot config's load failed (a refusal, no answer, not sent): the section says so and Retry asks again
+// the loot config's load got no answer or was not sent: v10's fetch failure (the form's defaults and the error)
 static void loot_load_fail(void) {
     html_timer_cancel(S.loot_timer);
     S.loot_timer = 0;
     S.loot_loading = 0;
     S.loot_failed = 1;
+    snprintf(S.loot_err, sizeof(S.loot_err), FETCH_FAILED);
     if (!S.loot) {
         S.loot = cJSON_CreateObject();
         loot_from(S.loot);
@@ -535,8 +627,7 @@ static void on_recruit(void *user, const int status, const char *body, const siz
         html_timer_cancel(S.recruit_timer);
         S.recruit_timer = 0;
         S.recruit_loaded = 1;
-        // a clan with no post answers 404 (or no data): "no post". Any other reply that is not a post is a failed load
-        S.recruit_failed = !ok && status != 404;
+        // v10's catch reads any failed load as "no post" (deob-10.0.7.js:96880-96891)
         cJSON_Delete(S.recruit);
         S.recruit = ok && cJSON_IsObject(data) ? cJSON_Duplicate(data, 1) : NULL;
         if (S.recruit) {
@@ -550,7 +641,7 @@ static void on_recruit(void *user, const int status, const char *body, const siz
     } else if (!ok) {
         const char *e = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(res, "error"), "message"));
         if (!e) e = cJSON_GetStringValue(cJSON_GetObjectItem(res, "error"));
-        snprintf(S.recruit_err, sizeof(S.recruit_err), "%s", e ? e : kind == 1 ? "Failed to save recruitment post" : "Failed to remove recruitment post");
+        load_error(S.recruit_err, sizeof(S.recruit_err), status, e, kind == 1 ? "Failed to save recruitment post" : "Failed to remove recruitment post");
         S.recruit_ok[0] = 0;
     } else if (kind == 1) {
         const int had = S.recruit && jnum(S.recruit, "is_active");
@@ -578,13 +669,14 @@ static void recruit_url(char *out, const size_t n) {
     snprintf(out, n, "%s/api/clans/%d/recruitment?token=%s", backend_url(), clan_id(), token);
 }
 
-// the recruitment load failed (no answer, not sent): the section says so and Retry asks again
+// the recruitment load got no answer or was not sent: "no post", as v10's catch reads any failure
 static void recruit_load_fail(void) {
     html_timer_cancel(S.recruit_timer);
     S.recruit_timer = 0;
     S.recruit_loading = 0;
     S.recruit_loaded = 1;
-    S.recruit_failed = 1;
+    cJSON_Delete(S.recruit);
+    S.recruit = NULL;
 }
 
 static void recruit_expired(void *user) {
@@ -598,7 +690,6 @@ static void recruit_expired(void *user) {
 static void fetch_recruit(void) {
     if (g_scenario || S.recruit_loaded || S.recruit_loading || !g_clan) return;
     int sent = 0;
-    S.recruit_failed = 0;
     if (kio_clan()) {
         char path[64];
         snprintf(path, sizeof(path), "/clans/%d/recruitment", clan_id());
@@ -709,7 +800,8 @@ static void gen_home(StrBuf *sb) {
     sb_appendf(sb, "<div class='settName'>Clan Discord<a style='float:right' href='javascript:;' onclick='windows[12].discordPop()' class='menuLink'>%s</a></div>",
                leader ? "Update Link" : "Link Here");
     sb_appendf(sb, "<div class='settName'>Bank<span class='floatR'><span style='color:rgba(0,0,0,0.4)'><a href='javascript:;'  onclick='windows[12].mangFunds()' class='menuLink'>%s</a></span> KR</span></div>", funds);
-    sb_appendf(sb, "<div class='settName'>Level<span class='floatR'>%d</span></div><div class='settName'>Total Score<span class='floatR'>%s</span></div>", level, total);
+    sb_appendf(sb, "<div class='settName'>%s<span class='floatR'>%d</span></div><div class='settName'>Total Score<span class='floatR'>%s</span></div>",
+               I18N("generic.level", "Level"), level, total);
     sb_appendf(sb, "<div class='xpBar' style='margin-bottom:15px;margin-top:20px'><div class='xpBarB' style='width:%d%%'></div><span class='xpBarV'>%s / %s</span></div></div>", prog, cur, need);
     gen_loot_display(sb);
     sb_append(sb, "<div style=\"text-align: center;\">\n\t\t\t\t<span class=\"material-icons\" style=\"color: var(--yellow);font-size: 35px;margin-right: 10px;vertical-align: text-bottom;\">\n\t\t\t\t\twarning_amber\n\t\t\t\t</span>\n\t\t\t\tClan members will be limited to 100 in a Future Season\n\t\t\t</div>");
@@ -729,7 +821,10 @@ static void gen_members(StrBuf *sb) {
         for (int i = 0; i < n; i++) {
             const cJSON *m = mem[i];
             const int id = (int) jnum(m, "i");
-            if (!((leader_id == id && k_clan_roles[r].perms == 2) || ((int) jnum(m, "r") == r && leader_id != id))) continue;
+            // members[j].r == role (a member pushed by an accepted request has no r yet and is in no section)
+            const cJSON *mr_v = cJSON_GetObjectItem(m, "r");
+            const int has_r = mr_v && !cJSON_IsNull(mr_v);
+            if (!((leader_id == id && k_clan_roles[r].perms == 2) || (has_r && (int) jnum(m, "r") == r && leader_id != id))) continue;
             count++;
             sb_append(&rows, "<div class='settName'>");
             member_name(&rows, m);
@@ -798,50 +893,145 @@ static void gen_requests(StrBuf *sb) {
 
 // ------------------------------------------------------------------ tab 4 (clan-settings)
 
+// JS truthiness of a clanData field (a number other than 0, a non-empty string, true)
+static int truthy(const cJSON *v) {
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0;
+    if (cJSON_IsString(v)) return v->valuestring[0] != 0;
+    return cJSON_IsTrue(v) || cJSON_IsObject(v) || cJSON_IsArray(v);
+}
+
+// a JSON value as JS writes it into a string (`${v}`)
+static void json_text(const cJSON *v, char *out, const size_t n) {
+    if (cJSON_IsString(v)) snprintf(out, n, "%s", v->valuestring);
+    else if (cJSON_IsNumber(v)) snprintf(out, n, "%.17g", v->valuedouble);
+    else snprintf(out, n, "%s", cJSON_IsTrue(v) ? "true" : "");
+}
+
+static int logo_pending(void) { return truthy(cJSON_GetObjectItem(g_clan, "clan_logo_pending")); }
+static int logo_funds_ok(void) { return cJSON_IsNumber(cJSON_GetObjectItem(g_clan, "clan_funds")) && jnum(g_clan, "clan_funds") >= LOGO_COST; }
+
+// v10's iíïiììï(clan_id, pending, version) (deob-10.0.7.js:27901): clans/<id>.png?v=<clan_logo> or
+// clans/<id>_pending.png?v=<clan_logo_pending> on Krunker's user-assets host, while the field is set. Box Office:
+// the approved logo is the brain's GET /api/clans/<id>/logo?v=<clan_logo> (clan_logo.c); a pending one is not kept by
+// the brain, so it is the file this client sent, while it is pending. 0 = none (out untouched).
+static int logo_src(StrBuf *out, const int pending) {
+    const cJSON *v = cJSON_GetObjectItem(g_clan, pending ? "clan_logo_pending" : "clan_logo");
+    if (!clan_id() || !truthy(v)) return 0;
+    char ver[64];
+    json_text(v, ver, sizeof(ver));
+    if (kio_clan()) {
+        sb_appendf(out, "https://user-assets.krunker.io/clans/%d%s.png?v=%s", clan_id(), pending ? "_pending" : "", ver);
+    } else if (pending) {
+        if (!g_logo_sent || g_logo_sent_clan != clan_id()) return 0;
+        sb_append(out, g_logo_sent);
+    } else {
+        const char *base = backend_url();
+        if (!base || !base[0]) return 0;
+        sb_appendf(out, "%s/api/clans/%d/logo?v=%s", base, clan_id(), ver);
+    }
+    return 1;
+}
+
+// the buy button (iîíìiíi, deob-10.0.7.js:25837, svelte-1ov1s5h) at size medium for the logo's 20,000 KR; while
+// purchasing, the hourglass and "Buying..."
+static void logo_buy_button(StrBuf *sb, const int disabled, const int purchasing) {
+    sb_appendf(sb, "<button class=\"buy-button svelte-1ov1s5h medium\" type=\"button\" tabindex=\"0\" style=\"padding: 8px 12px; font-size: 14px;\" onclick=\"windows[12].logoUpload()\"%s>",
+               disabled ? " disabled" : "");
+    if (purchasing) sb_append(sb, "<span class=\"material-icons svelte-1ov1s5h\" style=\"font-size: 24px;\">hourglass_empty</span> <span>Buying...</span>");
+    else
+        sb_append(sb, "BUY <div class=\"currency-display svelte-1r6bdx8\" style=\"--text-size: 14px; --icon-size: 16px;\"><span class=\"currency-amount svelte-1r6bdx8\" style=\"color: white;\">20,000</span> "
+                      "<span class=\"currency-text svelte-1r6bdx8\" style=\"color: white;\">KR</span></div>");
+    sb_append(sb, "</button>");
+}
+
+// the file drop target (iììiíïí, deob-10.0.7.js:11905-12030, svelte-145grbc) for a .png up to 256KB: has-file shows the
+// picked file's name and its remove button, a refused file the target's own error
+static void logo_drop_target(StrBuf *sb, const int disabled) {
+    const char *label = I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here");
+    const int has = S.logo_has_file, err = !has && S.logo_drop_err[0];
+    sb_appendf(sb, "<div class=\"file-drop-target svelte-145grbc%s%s%s\" role=\"button\" tabindex=\"%d\" aria-label=\"%s\"%s><input type=\"file\" style=\"display: none;\" class=\"svelte-145grbc\" accept=\".png,image/png\"> <div class=\"file-drop-content svelte-145grbc\">",
+               has ? " has-file" : "", err ? " error" : "", disabled ? " disabled" : "", disabled ? -1 : 0, label, disabled ? "" : " onclick=\"windows[12].logoPick()\"");
+    if (has) {
+        sb_append(sb, "<div class=\"file-success-state svelte-145grbc\"><i class=\"material-icons success-icon svelte-145grbc\">check_circle</i> <div class=\"file-name svelte-145grbc\">");
+        sb_append_esc(sb, S.logo_name);
+        sb_append(sb, "</div> <button class=\"remove-file-btn svelte-145grbc\" aria-label=\"Remove file\" onclick=\"event.stopPropagation();windows[12].logoUnset()\"><i class=\"material-icons svelte-145grbc\">close</i></button></div>");
+    } else if (err) {
+        sb_append(sb, "<div class=\"file-error-state svelte-145grbc\"><i class=\"material-icons error-icon svelte-145grbc\">error</i> <div class=\"error-message svelte-145grbc\">");
+        sb_append_esc(sb, S.logo_drop_err);
+        sb_append(sb, "</div> <div class=\"retry-hint svelte-145grbc\">Click to try again</div></div>");
+    } else {
+        sb_appendf(sb, "<div class=\"file-empty-state svelte-145grbc\"><i class=\"material-icons add-icon svelte-145grbc\">add</i> <div class=\"drop-label svelte-145grbc\">%s</div> <div class=\"accepted-types svelte-145grbc\">.png, image/png</div> <div class=\"size-limit svelte-145grbc\">Max: 256KB</div></div>",
+                   label);
+    }
+    sb_append(sb, "</div></div>");
+}
+
+// the settings' Clan Logo section (deob-10.0.7.js:96234-96352): the current / pending logo, the upload (the drop target,
+// then, with a file selected, the buy button and the funds warning) or the pending notice, Remove Logo, the error line
 static void gen_logo(StrBuf *sb) {
-    const int logo = (int) jnum(g_clan, "clan_logo"), pending = (int) jnum(g_clan, "clan_logo_pending");
-    const double kr = jnum(g_clan, "clan_funds");
-    char funds[32];
-    comma(funds, sizeof(funds), kr);
-    const char *base = backend_url();
+    const int pending = logo_pending(), funds_ok = logo_funds_ok();
+    StrBuf approved_src = {0}, pending_src = {0};
+    const int approved = logo_src(&approved_src, 0), pend = logo_src(&pending_src, 1);
+    char *approved_url = sb_finish(&approved_src), *pending_url = sb_finish(&pending_src);
     sb_appendf(sb, "<div class=\"setHed\" style=\"margin-top:20px\">%s</div> <div class=\"logo-upload-container svelte-1w0uz1r\"><div class=\"io-card\"><div class=\"io-input-container svelte-1w0uz1r\">",
                I18N("windows.clans.settings.logo.title", "Clan Logo"));
-    if (logo || pending) {
+    // Box Office: a pending logo this client did not send has no picture; its status shows alone
+    const int show_pending = pend || (pending && clan_id());
+    if (approved || show_pending) {
         sb_appendf(sb, "<div class=\"logo-preview-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">%s</span></div> <div class=\"logo-preview-container svelte-1w0uz1r\">",
                    I18N("windows.clans.settings.logo.current", "Current Logo"));
-        if (logo) { // the approved logo (clan_logo.c serves it; without a brain there is no picture, only the status)
-            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\">");
-            if (base[0])
-                sb_appendf(sb, "<img alt=\"Clan logo\" class=\"logo-image svelte-1w0uz1r\" src=\"%s/api/clans/%d/logo?v=%d\">", base, clan_id(), logo);
-            sb_appendf(sb, " <div class=\"logo-status approved svelte-1w0uz1r\">%s</div></div>",
-                       I18N("windows.clans.settings.logo.status.approved", "Approved"));
+        if (approved) {
+            sb_append(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><img alt=\"Clan logo\" class=\"logo-image svelte-1w0uz1r\" src=\"");
+            sb_append_esc(sb, approved_url);
+            sb_appendf(sb, "\"> <div class=\"logo-status approved svelte-1w0uz1r\">%s</div></div>", I18N("windows.clans.settings.logo.status.approved", "Approved"));
+        } else {
+            sb_append(sb, "<!---->");
         }
-        if (pending) // the picture under review is not served (clan_logo.c): the status alone
-            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><div class=\"logo-status pending svelte-1w0uz1r\">%s</div></div>",
-                       I18N("windows.clans.settings.logo.status.pending", "Pending Approval"));
+        sb_append(sb, " ");
+        if (show_pending) {
+            sb_append(sb, "<div class=\"logo-preview svelte-1w0uz1r\">");
+            if (pend) {
+                sb_append(sb, "<img alt=\"Pending logo\" class=\"logo-image svelte-1w0uz1r\" src=\"");
+                sb_append_esc(sb, pending_url);
+                sb_append(sb, "\"> ");
+            }
+            sb_appendf(sb, "<div class=\"logo-status pending svelte-1w0uz1r\">%s</div></div>", I18N("windows.clans.settings.logo.status.pending", "Pending Approval"));
+        } else {
+            sb_append(sb, "<!---->");
+        }
         sb_append(sb, "</div></div> ");
     }
+    free(approved_url);
+    free(pending_url);
     if (!pending) {
-        // the drop target is live with the funds and no busy request (v10's disabled rules)
-        const int ready = !S.logo_busy && kr >= LOGO_COST;
-        sb_appendf(sb, "<div class=\"logo-upload-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">%s</span></div> <div class=\"logo-upload-info svelte-1w0uz1r\"><p class=\"upload-requirements svelte-1w0uz1r\">%s</p> <p class=\"clan-funds svelte-1w0uz1r\">%s: %s KR</p></div> ",
+        char funds[32] = "0";
+        if (truthy(cJSON_GetObjectItem(g_clan, "clan_funds"))) comma(funds, sizeof(funds), jnum(g_clan, "clan_funds"));
+        sb_appendf(sb, "<div class=\"logo-upload-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">%s</span></div> <div class=\"logo-upload-info svelte-1w0uz1r\"><p class=\"upload-requirements svelte-1w0uz1r\">%s</p> <p class=\"clan-funds svelte-1w0uz1r\">%s: \n                %s KR</p></div> ",
                    I18N("windows.clans.settings.logo.upload.label", "Upload Logo"),
                    I18N("windows.clans.settings.logo.upload.requirements", "Requirements: 512x512 PNG, max 256KB. Cost: 20,000 krunkies"),
                    I18N("windows.clans.settings.logo.clan.funds", "Clan Funds"), funds);
-        if (kr < LOGO_COST)
-            sb_appendf(sb, "<p class=\"insufficient-funds-warning svelte-1w0uz1r\">%s</p> ",
-                       I18N("kn.clans.logo.insufficient.funds", "Insufficient clan funds. Need 20,000 krunkies."));
-        sb_appendf(sb, "<div class=\"file-drop-target svelte-145grbc%s\" role=\"button\" tabindex=\"%d\"%s aria-label=\"%s\"><input type=\"file\" style=\"display: none;\" class=\"svelte-145grbc\" accept=\".png,image/png\"> <div class=\"file-drop-content svelte-145grbc\"><div class=\"file-empty-state svelte-145grbc\"><i class=\"material-icons add-icon svelte-145grbc\">add</i> <div class=\"drop-label svelte-145grbc\">%s</div> <div class=\"accepted-types svelte-145grbc\">.png, image/png</div> <div class=\"size-limit svelte-145grbc\">Max: 256KB</div></div></div></div></div> ",
-                   ready ? "" : " disabled", ready ? 0 : -1, ready ? " onclick=\"windows[12].logoPick()\"" : "",
-                   I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here"),
-                   I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here"));
+        logo_drop_target(sb, S.logo_busy == 1 || !funds_ok); // disabled: uploading, or the clan bank short of 20,000
+        sb_append(sb, " ");
+        if (S.logo_file) { // a file is selected: the buy button, and the funds warning when the bank is short
+            sb_append(sb, "<div class=\"upload-button-container svelte-1w0uz1r\">");
+            logo_buy_button(sb, S.logo_busy == 1 || !funds_ok || S.logo_err[0], S.logo_busy == 1);
+            sb_append(sb, " ");
+            if (!funds_ok)
+                sb_appendf(sb, "<p class=\"insufficient-funds-warning svelte-1w0uz1r\">%s</p>",
+                           I18N("windows.clans.settings.logo.insufficient.funds", "Insufficient clan funds. Need 20,000 krunkies."));
+            else sb_append(sb, "<!---->");
+            sb_append(sb, "</div>");
+        } else {
+            sb_append(sb, "<!---->");
+        }
+        sb_append(sb, "</div> ");
     } else {
         sb_appendf(sb, "<div class=\"pending-notice svelte-1w0uz1r\"><p class=\"svelte-1w0uz1r\">%s</p></div> ",
                    I18N("windows.clans.settings.logo.pending.notice", "A logo is pending approval. Please wait for admin review before uploading a new one."));
     }
-    if (logo && !pending)
-        sb_appendf(sb, "<button class=\"io-button io-button--danger\" onclick=\"windows[12].logoRemove()\"%s>%s</button> ", S.logo_busy ? " disabled" : "",
-                   S.logo_busy ? I18N("windows.clans.settings.logo.removing", "Removing...") : I18N("windows.clans.settings.logo.remove.button", "Remove Logo"));
+    if (approved && !pending)
+        sb_appendf(sb, "<button class=\"io-button io-button--danger\" onclick=\"windows[12].logoRemove()\"%s>%s</button> ", S.logo_busy == 2 ? " disabled" : "",
+                   S.logo_busy == 2 ? I18N("windows.clans.settings.logo.removing", "Removing...") : I18N("windows.clans.settings.logo.remove.button", "Remove Logo"));
     if (S.logo_err[0]) {
         sb_append(sb, "<div class=\"io-message error-message svelte-1w0uz1r\">Error: ");
         sb_append_esc(sb, S.logo_err);
@@ -850,6 +1040,39 @@ static void gen_logo(StrBuf *sb) {
     sb_append(sb, "</div></div></div>");
 }
 
+// v10's main button (iîíììîï, deob-10.0.7.js:11859, svelte-whnh40): variant / size classes, and while disabled both
+// the disabled attribute and main-button-disabled
+static void main_button(StrBuf *sb, const char *variant, const int slim, const int disabled, const char *onclick, const char *label) {
+    sb_appendf(sb, "<button class=\"main-button svelte-whnh40%s%s%s%s\" type=\"button\"%s onclick=\"%s\">%s</button>", variant ? " main-button-" : "", variant ? variant : "",
+               slim ? " main-button-slim" : "", disabled ? " main-button-disabled" : "", disabled ? " disabled" : "", onclick, label);
+}
+
+static int is_ws(const char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
+
+// String.trim() is not empty
+static int has_text(const char *s) {
+    for (; *s; s++)
+        if (!is_ws(*s)) return 1;
+    return 0;
+}
+
+// String.trim() into out
+static void trim_to(char *out, const size_t n, const char *s) {
+    while (*s && is_ws(*s)) s++;
+    snprintf(out, n, "%s", s);
+    size_t len = strlen(out);
+    while (len && is_ws(out[len - 1])) out[--len] = 0;
+}
+
+static void motd_save_button(StrBuf *sb) {
+    main_button(sb, "accept", 1, S.motd_busy || !has_text(S.motd_text), "windows[12].motdSave()", S.motd_busy == 1 ? "Saving..." : "Save");
+}
+
+static void motd_remove_button(StrBuf *sb) {
+    main_button(sb, "danger", 1, S.motd_busy != 0, "windows[12].motdRemove()", S.motd_busy == 2 ? "Removing..." : "Remove");
+}
+
+// the MOTD (svelte-15d5v89, deob-10.0.7.js:96354-96520): its load's error above the form, or the message
 static void gen_motd(StrBuf *sb) {
     fetch_motd();
     const int manage = is_mgr2();
@@ -858,32 +1081,26 @@ static void gen_motd(StrBuf *sb) {
         sb_append(sb, "<div class=\"motd-loading svelte-15d5v89\">Loading...</div></div>");
         return;
     }
-    if (S.motd_load_failed && !g_scenario) {
-        load_failed(sb, I18N("kn.clan.motdFailed", "Couldn't load the message of the day."), "windows[12].motdRetry()");
-        sb_append(sb, "</div>");
-        return;
-    }
     if (S.motd_err[0]) {
         sb_append(sb, "<div class=\"motd-error svelte-15d5v89\">");
         sb_append_esc(sb, S.motd_err);
         sb_append(sb, "</div> ");
     }
-    const char *msg = jstr(S.motd, "message");
     if (manage) {
-        sb_appendf(sb, "<textarea id=\"clanMotdInput\" class=\"motd-input svelte-15d5v89\" placeholder=\"Set a message for clan members...\" maxlength=\"500\" rows=\"3\"%s>", S.motd_busy ? " disabled" : "");
+        sb_appendf(sb, "<textarea id=\"clanMotdInput\" class=\"motd-input svelte-15d5v89\" placeholder=\"Set a message for clan members...\" maxlength=\"500\" rows=\"3\" oninput=\"windows[12].motdInput()\"%s>",
+                   S.motd_busy ? " disabled" : "");
         sb_append_esc(sb, S.motd_text);
         sb_append(sb, "</textarea> <div class=\"motd-actions svelte-15d5v89\">");
-        sb_appendf(sb, "<button class=\"main-button svelte-whnh40 main-button-accept main-button-slim%s\" type=\"button\" onclick=\"windows[12].motdSave()\">%s</button> ",
-                   S.motd_busy || !S.motd_text[0] ? " main-button-disabled" : "", S.motd_busy == 1 ? "Saving..." : "Save");
-        // Remove shows while the textarea holds text, saved or typed (deob-10.0.3.js:109519): the text as last read
-        if (S.motd_text[0])
-            sb_appendf(sb, "<button class=\"main-button svelte-whnh40 main-button-danger main-button-slim%s\" type=\"button\" onclick=\"windows[12].motdRemove()\">%s</button> ",
-                       S.motd_busy ? " main-button-disabled" : "", S.motd_busy == 2 ? "Removing..." : "Remove");
+        motd_save_button(sb);
+        sb_append(sb, " ");
+        // Remove shows while the textarea holds text, saved or typed (deob-10.0.7.js:96472)
+        if (S.motd_text[0]) motd_remove_button(sb);
+        sb_append(sb, " ");
         if (S.motd_saved) sb_append(sb, "<span class=\"motd-saved svelte-15d5v89\">Saved!</span>");
         sb_append(sb, "</div>");
-    } else if (msg[0]) {
+    } else if (S.motd_text[0]) {
         sb_append(sb, "<div class=\"motd-display svelte-15d5v89\">");
-        sb_append_esc(sb, msg);
+        sb_append_esc(sb, S.motd_text);
         sb_append(sb, "</div>");
     } else {
         sb_append(sb, "<div class=\"motd-empty svelte-15d5v89\">No message set</div>");
@@ -907,12 +1124,6 @@ static int paint_count(const int index) {
     const cJSON *e;
     cJSON_ArrayForEach(e, cJSON_GetArrayItem(a->data, 10)) if ((int) jnum(e, "ind") == index) n += (int) jnum(e, "cnt");
     return n;
-}
-
-static void paint_thumb(const int i, char *out, const size_t n) {
-    char path[96];
-    snprintf(path, sizeof(path), "textures/paints/paint_%s.webp", k_paints[i].id);
-    html_dom_asset_url(path, out, n);
 }
 
 static void gen_banner(StrBuf *sb) {
@@ -953,11 +1164,13 @@ static void gen_banner(StrBuf *sb) {
         sb_append(sb, "<div class=\"swatch-grid svelte-1w0uz1r\" role=\"radiogroup\" aria-label=\"Available paints\">");
         for (int i = 0; i < PAINTS; i++) {
             if (!owned[i]) continue;
-            char thumb[256];
-            paint_thumb(i, thumb, sizeof(thumb));
+            // v10.0.7's paints have no thumbnail: a shader paint's animated fill, else its colour (deob-10.0.7.js:96572-96584)
+            char fill[160];
+            if (k_paints[i].color) snprintf(fill, sizeof(fill), "<span class=\"swatch-fill svelte-1w0uz1r\" style=\"background: %s;\"></span>", k_paints[i].color);
+            else snprintf(fill, sizeof(fill), "<span class=\"swatch-fill swatch-fill--shader svelte-1w0uz1r\"></span>");
             sb_appendf(sb, "<button type=\"button\" class=\"swatch svelte-1w0uz1r%s\" role=\"radio\" aria-checked=\"%s\" aria-label=\"%s — %d owned\" onclick=\"windows[12].bannerPick(%d)\">"
-                           "<img class=\"swatch-img svelte-1w0uz1r\" alt=\"\" draggable=\"false\" src=\"%s\"> <span class=\"swatch-count svelte-1w0uz1r\">%d</span> <span class=\"swatch-name svelte-1w0uz1r\">%s</span></button>",
-                       S.banner_sel == i ? " selected" : "", S.banner_sel == i ? "true" : "false", k_paints[i].name, owned[i], i, thumb, owned[i], k_paints[i].name);
+                           "%s <span class=\"swatch-count svelte-1w0uz1r\">%d</span> <span class=\"swatch-name svelte-1w0uz1r\">%s</span></button>",
+                       S.banner_sel == i ? " selected" : "", S.banner_sel == i ? "true" : "false", k_paints[i].name, owned[i], i, fill, owned[i], k_paints[i].name);
         }
         sb_append(sb, "</div> ");
     }
@@ -982,11 +1195,7 @@ static void gen_loot(StrBuf *sb) {
         sb_append(sb, "<div class=\"loot-loading svelte-1ydnong\">Loading loot config...</div></div></div></div>");
         return;
     }
-    if (S.loot_failed && !g_scenario) { // the load failed: the section says so (not the default form), and Retry asks again
-        load_failed(sb, I18N("kn.clan.lootFailed", "Couldn't load the loot config."), "windows[12].lootRetry()");
-        sb_append(sb, "</div></div></div></div>");
-        return;
-    }
+    // a failed load leaves the form at its defaults, with the error under it (deob-10.0.7.js:96695-96696, :96830-96835)
     if (!S.loot_mode[0]) loot_from(S.loot);
     const char *by = jstr(S.loot, "updated_by_name");
     if (by[0]) {
@@ -1012,23 +1221,24 @@ static void gen_loot(StrBuf *sb) {
     else sb_appendf(sb, "Only the top %d players are paid, in proportion to their kills.", S.loot_top_count);
     sb_append(sb, "</p></div> ");
     if (mi != 0)
-        sb_appendf(sb, "<div class=\"loot-field svelte-1ydnong\"><div class=\"label-row\"><label for=\"lootClanPct\" class=\"input-label\">Clan Treasury Cut (%%)</label></div> <input id=\"lootClanPct\" class=\"io-input-field\" type=\"number\" min=\"0\" max=\"100\" value=\"%d\" oninput=\"windows[12].lootInput()\"%s> <p class=\"loot-mode-desc svelte-1ydnong\">Percentage of rewards kept by the clan treasury. Players split the remaining %d%%.</p></div> ",
+        sb_appendf(sb, "<div class=\"loot-field svelte-1ydnong\"><div class=\"label-row\"><label for=\"lootClanPct\" class=\"input-label\">Clan Treasury Cut (%%)</label></div> <input id=\"lootClanPct\" class=\"io-input-field\" type=\"number\" min=\"0\" max=\"100\" value=\"%d\" oninput=\"windows[12].lootInput(0)\"%s> <p class=\"loot-mode-desc svelte-1ydnong\">Percentage of rewards kept by the clan treasury. Players split the remaining %d%%.</p></div> ",
                    S.loot_clan_pct, dis, 100 - S.loot_clan_pct);
     if (mi == 2 || mi == 4)
-        sb_appendf(sb, "<div class=\"loot-field svelte-1ydnong\"><div class=\"label-row\"><label for=\"lootTopCount\" class=\"input-label\">Top Player Count</label></div> <input id=\"lootTopCount\" class=\"io-input-field\" type=\"number\" min=\"1\" max=\"100\" value=\"%d\"%s></div> ",
+        sb_appendf(sb, "<div class=\"loot-field svelte-1ydnong\"><div class=\"label-row\"><label for=\"lootTopCount\" class=\"input-label\">Top Player Count</label></div> <input id=\"lootTopCount\" class=\"io-input-field\" type=\"number\" min=\"1\" max=\"100\" value=\"%d\" oninput=\"windows[12].lootInput(0)\"%s></div> ",
                    S.loot_top_count, dis);
     if (mi == 2)
-        sb_appendf(sb, "<div class=\"loot-field svelte-1ydnong\"><div class=\"label-row\"><label for=\"lootTopPct\" class=\"input-label\">Top Players Share (%%)</label></div> <input id=\"lootTopPct\" class=\"io-input-field\" type=\"number\" min=\"0\" max=\"100\" value=\"%d\" oninput=\"windows[12].lootInput()\"%s></div> "
+        sb_appendf(sb, "<div class=\"loot-field svelte-1ydnong\"><div class=\"label-row\"><label for=\"lootTopPct\" class=\"input-label\">Top Players Share (%%)</label></div> <input id=\"lootTopPct\" class=\"io-input-field\" type=\"number\" min=\"0\" max=\"100\" value=\"%d\" oninput=\"windows[12].lootInput(1)\"%s></div> "
                        "<div class=\"loot-field svelte-1ydnong\"><div class=\"label-row\"><span class=\"input-label\">Remainder Share (%%)</span></div> <div id=\"lootRemainder\" class=\"loot-remainder-display svelte-1ydnong\">%d%%</div></div> ",
                    S.loot_top_pct, dis, S.loot_rem);
     if (mi != 0)
         sb_appendf(sb, "<div class=\"loot-field svelte-1ydnong\"><div class=\"label-row\"><label for=\"lootMinGames\" class=\"input-label\">Minimum Games Required</label></div> <input id=\"lootMinGames\" class=\"io-input-field\" type=\"number\" min=\"0\" max=\"100\" value=\"%d\"%s></div> ",
                    S.loot_min_games, dis);
-    if (manage)
-        sb_appendf(sb, "<button class=\"main-button svelte-whnh40%s\" type=\"button\" onclick=\"windows[12].saveLoot()\">%s</button> ", S.loot_saving ? " main-button-disabled" : "",
-                   S.loot_saving ? "Saving..." : "Save Loot Config");
+    if (manage) {
+        main_button(sb, NULL, 0, S.loot_saving, "windows[12].saveLoot()", S.loot_saving ? "Saving..." : "Save Loot Config");
+        sb_append(sb, " ");
+    }
     if (S.loot_saved) sb_append(sb, "<div class=\"io-message success-message svelte-1ydnong\">Config saved successfully!</div> ");
-    if (S.loot_err[0] && !S.loot_failed) {
+    if (S.loot_err[0]) {
         sb_append(sb, "<div class=\"io-message error-message svelte-1ydnong\">Error: ");
         sb_append_esc(sb, S.loot_err);
         sb_append(sb, "</div>");
@@ -1061,12 +1271,6 @@ static void gen_recruit(StrBuf *sb) {
         sb_append(sb, "<div class=\"loading svelte-1o06kdk\">Loading recruitment post...</div>");
         return;
     }
-    if (S.recruit_failed && !g_scenario) { // the load failed (not "no post"): the section says so, and Retry asks again
-        sb_append(sb, "<div class=\"recruitment-manage svelte-1o06kdk\"><div class=\"io-card\"><div class=\"io-input-container svelte-1o06kdk\">");
-        load_failed(sb, I18N("kn.clan.recruitFailed", "Couldn't load the recruitment post."), "windows[12].recruitRetry()");
-        sb_append(sb, "</div></div></div>");
-        return;
-    }
     char funds[32];
     comma(funds, sizeof(funds), jnum(g_clan, "clan_funds"));
     sb_append(sb, "<div class=\"recruitment-manage svelte-1o06kdk\"><div class=\"io-card\"><div class=\"io-input-container svelte-1o06kdk\">");
@@ -1083,12 +1287,12 @@ static void gen_recruit(StrBuf *sb) {
     sb_append(sb, "</textarea> <div class=\"label-row\"><label for=\"recruit-looking\" class=\"input-label\">Looking For</label></div> <input id=\"recruit-looking\" class=\"io-input-field\" type=\"text\" placeholder=\"Active players, snipers, objective players...\" maxlength=\"500\" value=\"");
     sb_append_esc(sb, S.r_looking);
     const int lv_ok = level_ok(S.r_level), kd_v = kd_ok(S.r_kd);
-    sb_appendf(sb, "\"> <div class=\"row svelte-1o06kdk\"><div class=\"field svelte-1o06kdk\"><div class=\"label-row\"><span class=\"input-label\">Min Level</span></div> <input id=\"recruit-level\" class=\"io-input-field svelte-1o06kdk%s\" type=\"text\" placeholder=\"0\" value=\"",
+    sb_appendf(sb, "\"> <div class=\"row svelte-1o06kdk\"><div class=\"field svelte-1o06kdk\"><div class=\"label-row\"><span class=\"input-label\">Min Level</span></div> <input id=\"recruit-level\" class=\"io-input-field svelte-1o06kdk%s\" type=\"text\" placeholder=\"0\" oninput=\"windows[12].recruitInput()\" value=\"",
                lv_ok ? "" : " field-error");
     sb_append_esc(sb, S.r_level);
     sb_append(sb, "\">");
     if (!lv_ok) sb_append(sb, " <span class=\"field-error-msg svelte-1o06kdk\">Level must be a whole number between 0 and 200</span>");
-    sb_appendf(sb, "</div> <div class=\"field svelte-1o06kdk\"><div class=\"label-row\"><span class=\"input-label\">Min K/D</span></div> <input id=\"recruit-kd\" class=\"io-input-field svelte-1o06kdk%s\" type=\"text\" placeholder=\"0.00\" value=\"", kd_v ? "" : " field-error");
+    sb_appendf(sb, "</div> <div class=\"field svelte-1o06kdk\"><div class=\"label-row\"><span class=\"input-label\">Min K/D</span></div> <input id=\"recruit-kd\" class=\"io-input-field svelte-1o06kdk%s\" type=\"text\" placeholder=\"0.00\" oninput=\"windows[12].recruitInput()\" value=\"", kd_v ? "" : " field-error");
     sb_append_esc(sb, S.r_kd);
     sb_append(sb, "\">");
     if (!kd_v) sb_append(sb, " <span class=\"field-error-msg svelte-1o06kdk\">K/D must be between 0 and 99.99</span>");
@@ -1097,8 +1301,9 @@ static void gen_recruit(StrBuf *sb) {
     sb_append(sb, "</select></div> <div class=\"field svelte-1o06kdk\"><div class=\"label-row\"><span class=\"input-label\">Language</span></div> <select id=\"recruit-lang\" class=\"io-input-field\">");
     select_opts(sb, k_langs, (int) (sizeof(k_langs) / sizeof(k_langs[0])), S.r_lang);
     sb_appendf(sb, "</select></div></div> <div class=\"actions svelte-1o06kdk\"><button class=\"io-button\" onclick=\"windows[12].recruitSave()\"%s>%s</button>",
-               S.recruit_saving || !lv_ok || !kd_v ? " disabled" : "", S.recruit_saving ? "Saving..." : active ? "Update Post" : "Create Post (1,000 KR)");
-    if (active) sb_append(sb, " <button class=\"io-button io-button--danger\" onclick=\"windows[12].recruitRemove()\">Remove Post</button>");
+               S.recruit_saving || !lv_ok || !kd_v ? " disabled" : "", S.recruit_saving ? "Saving..." : S.recruit ? "Update Post" : "Create Post (1,000 KR)");
+    // Remove Post, disabled while a save or a removal runs (deob-10.0.7.js:97028-97031)
+    if (active) sb_appendf(sb, " <button class=\"io-button io-button--danger\" onclick=\"windows[12].recruitRemove()\"%s>Remove Post</button>", S.recruit_saving ? " disabled" : "");
     sb_append(sb, "</div></div></div></div>");
 }
 
@@ -1108,14 +1313,17 @@ static void gen_transfer(StrBuf *sb) {
     if (cJSON_IsObject(t)) {
         sb_append(sb, "<div class=\"io-card\"><div class=\"io-input-container svelte-1w0uz1r\"><div class=\"pending-transfer-info svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">Pending transfer to:</span></div> <div class=\"highlight-name svelte-1w0uz1r\">");
         sb_append_esc(sb, jstr(t, "to_player_name"));
-        sb_appendf(sb, "</div></div> <button class=\"main-button svelte-whnh40 main-button-danger%s\" type=\"button\" onclick=\"windows[12].transferCancel()\">%s</button></div></div>",
-                   S.transfer_busy ? " main-button-disabled" : "", S.transfer_busy ? "Cancelling..." : "Cancel Transfer");
+        sb_append(sb, "</div></div> ");
+        main_button(sb, "danger", 0, S.transfer_busy, "windows[12].transferCancel()", S.transfer_busy ? "Cancelling..." : "Cancel Transfer");
+        sb_append(sb, "</div></div>");
     } else {
         sb_append(sb, "<div class=\"io-card\"><div class=\"io-input-container svelte-1w0uz1r\"><div class=\"warning-container svelte-1w0uz1r\"><span class=\"warning-badge svelte-1w0uz1r\">Danger</span> <p class=\"warning svelte-1w0uz1r\">Warning: The new owner will have full access to the clan, including clan bank funds. You will lose access to all clan ownership features. You can cancel the transfer at any time before it is accepted. Once accepted, the transfer is irreversible.</p></div> "
                       "<div class=\"label-row\"><label for=\"newOwnerName\" class=\"input-label\">Player Name</label></div> <input id=\"newOwnerName\" class=\"io-input-field\" type=\"text\" placeholder=\"Enter player name\" autocomplete=\"username\" value=\"");
         sb_append_esc(sb, S.transfer_name);
-        sb_appendf(sb, "\"> <button class=\"main-button svelte-whnh40 main-button-danger%s\" type=\"button\" onclick=\"windows[12].transferStart()\">%s</button></div></div>",
-                   S.transfer_busy ? " main-button-disabled" : "", S.transfer_busy ? "Transferring..." : "Transfer Ownership");
+        // the name input is disabled while the transfer is sent (deob-10.0.7.js:97108)
+        sb_appendf(sb, "\"%s> ", S.transfer_busy ? " disabled" : "");
+        main_button(sb, "danger", 0, S.transfer_busy, "windows[12].transferStart()", S.transfer_busy ? "Transferring..." : "Transfer Ownership");
+        sb_append(sb, "</div></div>");
     }
     if (S.transfer_err[0]) {
         sb_append(sb, " <div class=\"io-message error-message svelte-1w0uz1r\">Error: ");
@@ -1144,6 +1352,13 @@ static void gen_settings(StrBuf *sb) {
 
 // ------------------------------------------------------------------ windows[12].gen()
 
+// KrunkNative: the clan's own load got no answer (or could not be sent): the text and a Retry that asks again
+static void load_failed(StrBuf *sb, const char *text, const char *retry) {
+    sb_append(sb, "<div class=\"io-message error-message svelte-1w0uz1r\">");
+    sb_append_esc(sb, text);
+    sb_appendf(sb, "</div> <button class=\"io-button\" onclick=\"%s\">%s</button>", retry, I18N("kn.retry", "Retry"));
+}
+
 char *clan_window_gen(void) {
     StrBuf sb = {0};
     const AccountInfo *a = active_account();
@@ -1159,9 +1374,12 @@ char *clan_window_gen(void) {
                    I18N("windows.clans.view", "View Clans"), name, I18N("generic.submit", "Submit"));
         return sb_finish(&sb);
     }
-    if (!g_scenario) backend_social_send_text("[\"vcln\"]"); // OPEN_CLAN_TAB on every render
+    // OPEN_CLAN_TAB on every gen (a Svelte component's own update is not one); a gen mounts the tab's components again
+    if (!g_svelte && !g_scenario) {
+        backend_social_send_text("[\"vcln\"]");
+        components_mount();
+    }
     const int mgr = g_clan && is_mgr();
-    if (g_clan_tab >= 3 && !mgr && g_clan) g_clan_tab = 0; // KrunkNative: a stale manager tab after a demotion
     sb_append(&sb, "<div style='height:15px;'></div><div class='bigMenTabs'>");
     for (int i = 0; i < CLAN_TABS; i++) {
         if (i >= 3 && !mgr) continue;
@@ -1234,7 +1452,7 @@ static void result_popup(const int ok, const char *text) {
     if (ok) sb_appendf(&sb, "<div style='width:100%%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#3be354'>done</i></div><div style='font-size:20px;color:rgba(255,255,255,0.5)'>%s</div></div>", text && text[0] ? text : "Success!");
     else {
         sb_append(&sb, "<div style='width:100%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#e33b3b'>clear</i></div><div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
-        sb_append_esc(&sb, text && text[0] ? text : "Failed. Try Again");
+        sb_append_esc(&sb, text && text[0] ? text : I18N("social.market.failed", "Failed. Try Again"));
         sb_append(&sb, "</div></div>");
     }
     char *html = sb_finish(&sb);
@@ -1335,11 +1553,11 @@ static void sync_forms(void) {
     if (g_clan_tab != 4) return;
     if (html_dom_by_id("clanMotdInput")) read_value("clanMotdInput", S.motd_text, sizeof(S.motd_text));
     if (html_dom_by_id("lootMode")) read_value("lootMode", S.loot_mode, sizeof(S.loot_mode));
-    S.loot_clan_pct = clampi(read_int("lootClanPct", S.loot_clan_pct), 0, 100);
-    S.loot_top_count = clampi(read_int("lootTopCount", S.loot_top_count), 1, 100);
+    // bound as typed (v10 sends them so); the top share is clamped and moves the remainder only on its own input
+    S.loot_clan_pct = read_int("lootClanPct", S.loot_clan_pct);
+    S.loot_top_count = read_int("lootTopCount", S.loot_top_count);
     S.loot_top_pct = clampi(read_int("lootTopPct", S.loot_top_pct), 0, 100);
-    S.loot_rem = 100 - S.loot_top_pct;
-    S.loot_min_games = clampi(read_int("lootMinGames", S.loot_min_games), 0, 100);
+    S.loot_min_games = read_int("lootMinGames", S.loot_min_games);
     if (html_dom_by_id("recruit-desc")) {
         read_value("recruit-desc", S.r_desc, sizeof(S.r_desc));
         read_value("recruit-looking", S.r_looking, sizeof(S.r_looking));
@@ -1356,10 +1574,10 @@ static void rerender_kept(void) {
     clan_rerender();
 }
 
+// the "Saved!" (1, the MOTD) / "Config saved successfully!" (2, the loot config) line goes after 3 s
 static void saved_off(void *user) {
-    (void) user;
-    S.motd_saved = 0;
-    S.loot_saved = 0;
+    if ((intptr_t) user == 1) S.motd_saved = 0;
+    else S.loot_saved = 0;
     clan_rerender();
 }
 
@@ -1369,21 +1587,19 @@ static void motd_send(const int remove) {
     char path[64];
     snprintf(path, sizeof(path), "/clans/%d/motd", clan_id());
     cJSON *body = NULL;
-    if (!remove) {
-        char *t = S.motd_text;
-        while (*t == ' ' || *t == '\n') t++;
-        if (!*t) return;
+    if (!remove) { // setMotd(clanId, text.trim()) (deob-10.0.7.js:96368-96379)
+        if (!has_text(S.motd_text)) return;
+        char t[sizeof(S.motd_text)];
+        trim_to(t, sizeof(t), S.motd_text);
         body = cJSON_CreateObject();
         cJSON_AddStringToObject(body, "message", t);
     }
     S.motd_err[0] = 0;
-    S.motd_saved = 0;
+    if (!remove) S.motd_saved = 0;
     S.motd_busy = remove ? 2 : 1;
     if (!v10_gapi(remove ? "DELETE" : "PUT", path, body, on_motd, (void *) (intptr_t) (remove ? 2 : 1))) {
         S.motd_busy = 0;
-        snprintf(S.motd_err, sizeof(S.motd_err), remove ? "Failed to delete MOTD" : "Failed to save MOTD");
-    } else if (!remove) {
-        html_timer_add(3000, saved_off, NULL);
+        snprintf(S.motd_err, sizeof(S.motd_err), FETCH_FAILED); // not sent: v10's fetch could not reach the server
     }
     cJSON_Delete(body);
     clan_rerender();
@@ -1407,7 +1623,10 @@ static void on_banner(void *user, const int status, const cJSON *data, const cJS
         account_remove_skin(k_paints[paint].index);
         S.banner_err[0] = 0;
     } else {
-        snprintf(S.banner_err, sizeof(S.banner_err), "%s", error ? v10_gapi_error_text(error, "Failed to apply banner color") : "Failed to apply banner color");
+        // error.message || the fallback; a fetch that failed throws its own message (deob-10.0.7.js:96196-96225)
+        if (status <= 0) snprintf(S.banner_err, sizeof(S.banner_err), FETCH_FAILED);
+        else if (status >= 500) server_error(S.banner_err, sizeof(S.banner_err), status);
+        else snprintf(S.banner_err, sizeof(S.banner_err), "%s", kio_error_text(error, "Failed to apply banner color"));
     }
     rerender_kept();
 }
@@ -1423,8 +1642,9 @@ static void banner_apply(void) {
     snprintf(path, sizeof(path), "/clans/%d/banner-color", clan_id());
     cJSON *body = cJSON_CreateObject();
     cJSON_AddNumberToObject(body, "paint_item_id", k_paints[S.banner_sel].index);
+    S.banner_err[0] = 0;
     S.banner_busy = v10_gapi("POST", path, body, on_banner, (void *) (intptr_t) S.banner_sel);
-    if (!S.banner_busy) snprintf(S.banner_err, sizeof(S.banner_err), "Failed to apply banner color");
+    if (!S.banner_busy) snprintf(S.banner_err, sizeof(S.banner_err), FETCH_FAILED);
     cJSON_Delete(body);
     rerender_kept();
 }
@@ -1456,8 +1676,7 @@ static void save_loot(void) {
         snprintf(path, sizeof(path), "/clans/%d/loot-config", clan_id());
         S.loot_saving = v10_gapi("PUT", path, cfg, kio_settings_read, (void *) 2) != 0;
         cJSON_Delete(cfg);
-        if (!S.loot_saving) snprintf(S.loot_err, sizeof(S.loot_err), "Failed to save loot config");
-        else html_timer_add(3000, saved_off, NULL);
+        if (!S.loot_saving) snprintf(S.loot_err, sizeof(S.loot_err), FETCH_FAILED);
         clan_rerender();
         return;
     }
@@ -1467,8 +1686,7 @@ static void save_loot(void) {
     backend_url_encode(token, sizeof(token), account_session_token());
     snprintf(url, sizeof(url), "%s/api/clans/%d/loot-config?token=%s", backend_url(), clan_id(), token);
     S.loot_saving = backend_http_request("PUT", url, json ? json : "{}", on_loot, (void *) 1) != 0;
-    if (!S.loot_saving) snprintf(S.loot_err, sizeof(S.loot_err), "Failed to save loot config");
-    else html_timer_add(3000, saved_off, NULL);
+    if (!S.loot_saving) snprintf(S.loot_err, sizeof(S.loot_err), FETCH_FAILED);
     free(json);
     clan_rerender();
 }
@@ -1493,7 +1711,7 @@ static void recruit_save(void) {
         snprintf(path, sizeof(path), "/clans/%d/recruitment", clan_id());
         S.recruit_saving = v10_gapi("POST", path, body, kio_settings_read, (void *) 3) != 0;
         cJSON_Delete(body);
-        if (!S.recruit_saving) snprintf(S.recruit_err, sizeof(S.recruit_err), "Failed to save recruitment post");
+        if (!S.recruit_saving) snprintf(S.recruit_err, sizeof(S.recruit_err), FETCH_FAILED);
         clan_rerender();
         return;
     }
@@ -1502,7 +1720,7 @@ static void recruit_save(void) {
     char url[600];
     recruit_url(url, sizeof(url));
     S.recruit_saving = backend_http_request("POST", url, json ? json : "{}", on_recruit, (void *) 1) != 0;
-    if (!S.recruit_saving) snprintf(S.recruit_err, sizeof(S.recruit_err), "Failed to save recruitment post");
+    if (!S.recruit_saving) snprintf(S.recruit_err, sizeof(S.recruit_err), FETCH_FAILED);
     free(json);
     clan_rerender();
 }
@@ -1520,7 +1738,9 @@ static void recruit_remove(void) {
         recruit_url(url, sizeof(url));
         sent = backend_http_request("DELETE", url, NULL, on_recruit, (void *) 2) != 0;
     }
-    if (!sent) snprintf(S.recruit_err, sizeof(S.recruit_err), "Failed to remove recruitment post");
+    // the removal runs as a save does: both buttons are disabled and the main one reads "Saving..." (deob-10.0.7.js:27868)
+    S.recruit_saving = sent;
+    if (!sent) snprintf(S.recruit_err, sizeof(S.recruit_err), FETCH_FAILED);
     clan_rerender();
 }
 
@@ -1556,109 +1776,130 @@ static unsigned char *b64_decode(const char *in, size_t *out_n) {
     return out;
 }
 
-// the logo's file: the profile picture's dialog, PNG only, up to 256 KB; the brain checks the
-// 512 x 512 size and the moderation (clan_logo.c). The upload starts when a file is chosen.
+// The drop target's click: the profile picture's file dialog, PNG only, up to 256 KB (iíïìîïì: no-op while disabled)
 static void on_logo_picked(void *user, const char *b64, size_t bytes, const char *error);
 static void logo_pick(void) {
-    S.logo_err[0] = 0;
-    if (S.logo_busy || !g_clan) return;
-    if (kio_clan()) { // v10.0.7's upload checks, in its order and words (deob-10.0.7.js:96094-96099)
-        if (!clan_id()) return;
-        if (jnum(g_clan, "clan_funds") < LOGO_COST) snprintf(S.logo_err, sizeof(S.logo_err), "Insufficient clan funds. Need 20,000 krunkies.");
-        else if (jnum(g_clan, "clan_logo_pending") > 0 || jstr(g_clan, "clan_logo_pending")[0])
-            snprintf(S.logo_err, sizeof(S.logo_err), "A logo is already pending approval. Please wait for admin review.");
-        else {
-            avatar_ui_pick_file(1, LOGO_MAX_BYTES, on_logo_picked, NULL);
-            return;
-        }
+    if (!g_clan || S.logo_busy == 1 || !logo_funds_ok() || logo_pending()) return;
+    avatar_ui_pick_file(1, LOGO_MAX_BYTES, on_logo_picked, NULL);
+}
+
+static int ends_with_png(const char *name) {
+    const size_t n = strlen(name);
+    return n >= 4 && !strcasecmp(name + n - 4, ".png");
+}
+
+// A picked file. The drop target's own checks first (iîiiïií, deob-10.0.7.js:11921-11957): over 256KB, or neither a .png
+// name nor an image/png type, is its error state (and the settings' error line, its onerror); otherwise it shows the
+// file's name and hands it to the settings' onfileSelected (:96058-96093), which clears the error and checks the type,
+// the size and the 512 x 512 picture; a failed check drops the selection (the target still shows the name).
+// avatar_ui's checks by name: FileTooLarge (the size), UnsupportedType (not PNG bytes: a .png name is a PNG type the
+// picture of which does not load), BadImage (the file could not be read: the picture does not load). A file passes the
+// target's type check by its .png name (the browser's type for it is image/png, so onfileSelected's type check holds).
+static void on_logo_picked(void *user, const char *b64, size_t bytes, const char *error) {
+    (void) user;
+    const char *name = avatar_ui_picked_name();
+    const int typed = ends_with_png(name);
+    const char *drop_err = NULL;
+    if (error && !strcmp(error, "FileTooLarge")) drop_err = "File size exceeds 256KB limit";
+    else if (!typed) drop_err = "File type not supported. Accepted types: .png, image/png";
+    if (drop_err) {
+        S.logo_has_file = 0;
+        S.logo_name[0] = 0;
+        snprintf(S.logo_drop_err, sizeof(S.logo_drop_err), "%s", drop_err);
+        snprintf(S.logo_err, sizeof(S.logo_err), "%s", drop_err);
         rerender_kept();
         return;
     }
-    if (jnum(g_clan, "clan_logo_pending") > 0) {
-        snprintf(S.logo_err, sizeof(S.logo_err), "A logo is already pending review. Please wait before uploading a new one.");
-    } else if (jnum(g_clan, "clan_funds") < LOGO_COST) {
-        snprintf(S.logo_err, sizeof(S.logo_err), "Insufficient clan funds. Need 20,000 krunkies.");
-    } else {
-        avatar_ui_pick_file(1, LOGO_MAX_BYTES, on_logo_picked, NULL);
-        return;
+    S.logo_drop_err[0] = 0;
+    S.logo_has_file = 1;
+    snprintf(S.logo_name, sizeof(S.logo_name), "%s", name);
+    S.logo_err[0] = 0;
+    free(S.logo_file);
+    S.logo_file = NULL;
+    S.logo_bytes = 0;
+    size_t n = 0;
+    unsigned char *png = error ? NULL : b64_decode(b64, &n);
+    const long w = png && n >= 24 ? (long) png[16] << 24 | (long) png[17] << 16 | png[18] << 8 | png[19] : -1;
+    const long h = png && n >= 24 ? (long) png[20] << 24 | (long) png[21] << 16 | png[22] << 8 | png[23] : -1;
+    if (!png || n < 24 || memcmp(png, "\x89PNG\r\n\x1a\n", 8) || memcmp(png + 12, "IHDR", 4))
+        snprintf(S.logo_err, sizeof(S.logo_err), "Invalid image file");
+    else if (w != 512 || h != 512) snprintf(S.logo_err, sizeof(S.logo_err), "Image must be exactly 512x512 pixels");
+    else {
+        S.logo_file = strdup(b64);
+        S.logo_bytes = bytes;
     }
+    free(png);
+    rerender_kept();
+}
+
+// the drop target's remove button (onfileRemoved, :96124-96127): no file, no error
+static void logo_unset(void) {
+    if (S.logo_busy == 1 || !logo_funds_ok()) return; // the target is disabled
+    free(S.logo_file);
+    S.logo_file = NULL;
+    S.logo_has_file = 0;
+    S.logo_name[0] = S.logo_drop_err[0] = S.logo_err[0] = 0;
     rerender_kept();
 }
 
 static void on_logo_uploaded(void *user, const int status, const cJSON *data, const cJSON *error);
-static void on_logo_picked(void *user, const char *b64, size_t bytes, const char *error) {
-    (void) user;
-    (void) bytes;
-    if (error) {
-        snprintf(S.logo_err, sizeof(S.logo_err), "%s",
-                 !strcmp(error, "UnsupportedType") ? "File must be a PNG image"
-                 : !strcmp(error, "FileTooLarge")  ? "File size must be 256KB or less"
-                                                   : "Invalid image file");
-        rerender_kept();
-        return;
-    }
-    char path[64];
-    snprintf(path, sizeof(path), "/clans/%d/logo", clan_id());
-    if (kio_clan()) { // v10.0.7: the 512 x 512 check, then a FormData with the file as `file` (deob-10.0.7.js:96060-96112)
-        size_t n = 0;
-        unsigned char *png = b64_decode(b64, &n);
-        const long w = png && n >= 24 ? (long) png[16] << 24 | (long) png[17] << 16 | png[18] << 8 | png[19] : -1;
-        const long h = png && n >= 24 ? (long) png[20] << 24 | (long) png[21] << 16 | png[22] << 8 | png[23] : -1;
-        if (!png || n < 24 || memcmp(png + 12, "IHDR", 4)) snprintf(S.logo_err, sizeof(S.logo_err), "Invalid image file");
-        else if (w != 512 || h != 512) snprintf(S.logo_err, sizeof(S.logo_err), "Image must be exactly 512x512 pixels");
-        else {
-            S.logo_busy = v10_gapi_upload(path, "file", avatar_ui_picked_name(), "image/png", png, n, on_logo_uploaded, NULL);
-            if (!S.logo_busy) snprintf(S.logo_err, sizeof(S.logo_err), "Failed to upload logo");
+
+// the buy button (iÏïiíïï, deob-10.0.7.js:96094-96123): the funds, then a pending logo, then the upload
+static void logo_upload(void) {
+    if (!g_clan || !S.logo_file || !clan_id() || S.logo_busy == 1) return;
+    if (!logo_funds_ok()) snprintf(S.logo_err, sizeof(S.logo_err), "Insufficient clan funds. Need 20,000 krunkies.");
+    else if (logo_pending()) snprintf(S.logo_err, sizeof(S.logo_err), "A logo is already pending approval. Please wait for admin review.");
+    else {
+        S.logo_err[0] = 0;
+        char path[64];
+        snprintf(path, sizeof(path), "/clans/%d/logo", clan_id());
+        if (kio_clan()) { // a FormData with the file as `file` (:96103-96110)
+            size_t n = 0;
+            unsigned char *png = b64_decode(S.logo_file, &n);
+            S.logo_busy = png && v10_gapi_upload(path, "file", S.logo_name, "image/png", png, n, on_logo_uploaded, (void *) (intptr_t) clan_id()) ? 1 : 0;
+            free(png);
+        } else {
+            cJSON *body = cJSON_CreateObject();
+            cJSON_AddStringToObject(body, "file", S.logo_file);
+            S.logo_busy = v10_gapi("POST", path, body, on_logo_uploaded, (void *) (intptr_t) clan_id()) ? 1 : 0;
+            cJSON_Delete(body);
         }
-        free(png);
-        rerender_kept();
-        return;
+        if (!S.logo_busy) snprintf(S.logo_err, sizeof(S.logo_err), FETCH_FAILED);
     }
-    cJSON *body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "file", b64);
-    S.logo_busy = v10_gapi("POST", path, body, on_logo_uploaded, NULL);
-    cJSON_Delete(body);
-    if (!S.logo_busy) snprintf(S.logo_err, sizeof(S.logo_err), "Failed to upload logo");
     rerender_kept();
 }
 
-// while the upload is under review the clan's data is looked at again (the verdict lands in the row)
-static int g_logo_watch;
-static void logo_watch(void *user) {
-    (void) user;
-    if (!g_clan || jnum(g_clan, "clan_logo_pending") <= 0 || g_logo_watch++ >= LOGO_WATCH_MAX) {
-        g_logo_watch = 0;
-        return;
-    }
-    send_cln(3, NULL, NULL);
-    html_timer_add(LOGO_WATCH_MS, logo_watch, NULL);
-}
-
+// the upload's answer: an error throws error.message || "Failed to upload logo"; else no file is selected and the
+// clan is asked for again (sendReq(3)), whose answer mounts the settings again
 static void on_logo_uploaded(void *user, const int status, const cJSON *data, const cJSON *error) {
-    (void) user;
     (void) data;
     S.logo_busy = 0;
-    if (kio_clan()) { // v10.0.7: an error throws error.message || "Failed to upload logo"; else sendReq(3)
-        if (gapi_ok(status, error)) {
-            S.logo_err[0] = 0;
-            send_cln(3, NULL, NULL);
-        } else {
-            snprintf(S.logo_err, sizeof(S.logo_err), "%s", kio_error_text(error, "Failed to upload logo"));
-        }
-        rerender_kept();
-        return;
-    }
-    if (status == 200 && !error) {
+    if (gapi_ok(status, error)) {
         S.logo_err[0] = 0;
-        send_cln(3, NULL, NULL); // the clan's data: the logo is pending now
-        g_logo_watch = 0;
-        html_timer_add(LOGO_WATCH_MS, logo_watch, NULL);
+        if (!kio_clan() && S.logo_file) { // Box Office: the file sent is this client's view of the pending logo
+            logo_sent_clear();
+            const size_t len = strlen(S.logo_file) + 32;
+            g_logo_sent = malloc(len);
+            if (g_logo_sent) {
+                snprintf(g_logo_sent, len, "data:image/png;base64,%s", S.logo_file);
+                g_logo_sent_clan = (int) (intptr_t) user;
+            }
+        }
+        free(S.logo_file);
+        S.logo_file = NULL;
+        send_cln(3, NULL, NULL);
+    } else if (status <= 0) {
+        snprintf(S.logo_err, sizeof(S.logo_err), FETCH_FAILED);
+    } else if (status >= 500) {
+        server_error(S.logo_err, sizeof(S.logo_err), status);
     } else {
-        snprintf(S.logo_err, sizeof(S.logo_err), "%s", v10_gapi_error_text(error, "Failed to upload logo"));
+        snprintf(S.logo_err, sizeof(S.logo_err), "%s", kio_error_text(error, "Failed to upload logo"));
     }
     rerender_kept();
 }
 
+// Remove Logo's answer (iííìíïì, deob-10.0.7.js:95959-95973): an error throws error.message || "Failed to remove logo";
+// else sendReq(3)
 static void on_logo(void *user, const int status, const cJSON *data, const cJSON *error) {
     (void) user;
     (void) data;
@@ -1666,8 +1907,12 @@ static void on_logo(void *user, const int status, const cJSON *data, const cJSON
     if (gapi_ok(status, error)) {
         S.logo_err[0] = 0;
         send_cln(3, NULL, NULL); // windows[12].sendReq(3)
+    } else if (status <= 0) {
+        snprintf(S.logo_err, sizeof(S.logo_err), FETCH_FAILED);
+    } else if (status >= 500) {
+        server_error(S.logo_err, sizeof(S.logo_err), status);
     } else {
-        snprintf(S.logo_err, sizeof(S.logo_err), "%s", error ? v10_gapi_error_text(error, "Failed to remove logo") : "Failed to remove logo");
+        snprintf(S.logo_err, sizeof(S.logo_err), "%s", kio_error_text(error, "Failed to remove logo"));
     }
     rerender_kept();
 }
@@ -1740,9 +1985,7 @@ static void transfer_send(const int kind, const int accept) {
     if (!g_clan || S.transfer_busy) return;
     sync_forms();
     if (kio_clan()) { // v10.0.7: the socket's rpc(name, ...args) (deob-10.0.7.js:220556, :220631, :220638)
-        const char *p = S.transfer_name;
-        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-        if (kind == 0 && !*p) { // name.trim() || "Please enter a player name" (:96035-96048)
+        if (kind == 0 && !has_text(S.transfer_name)) { // name.trim() || "Please enter a player name" (:96030, :96043)
             snprintf(S.transfer_err, sizeof(S.transfer_err), "Please enter a player name");
             clan_rerender();
             return;
@@ -1766,7 +2009,7 @@ static void transfer_send(const int kind, const int accept) {
     snprintf(path, sizeof(path), kind == 2 ? "/clans/%d/transfer/respond" : "/clans/%d/transfer", clan_id());
     cJSON *body = NULL;
     if (kind == 0) {
-        if (!S.transfer_name[0]) {
+        if (!has_text(S.transfer_name)) { // name.trim() || "Please enter a player name" (deob-10.0.7.js:96030, :96043)
             snprintf(S.transfer_err, sizeof(S.transfer_err), "Please enter a player name");
             clan_rerender();
             return;
@@ -1781,6 +2024,99 @@ static void transfer_send(const int kind, const int accept) {
     S.transfer_busy = v10_gapi(kind == 1 ? "DELETE" : "POST", path, body, on_transfer, (void *) (intptr_t) kind);
     cJSON_Delete(body);
     clan_rerender();
+}
+
+// ------------------------------------------------------------------ live inputs (Svelte's bound values)
+// v10's bound inputs update their section as they are typed into; the section's other parts change in place here,
+// so the field keeps its focus and caret.
+
+// a main button's disabled state, both the attribute and main-button-disabled
+static void set_main_disabled(HtmlElem b, const int disabled) {
+    if (!b) return;
+    if (disabled) html_dom_set_attr(b, "disabled", "");
+    else html_dom_remove_attr(b, "disabled");
+    html_dom_set_class(b, "main-button-disabled", disabled);
+}
+
+// the MOTD textarea (bind:value, deob-10.0.7.js:96495): Save turns on with text, Remove shows while there is text
+static void motd_input(void) {
+    HtmlElem in = html_dom_by_id("clanMotdInput");
+    if (!in) return;
+    html_dom_get_value(in, S.motd_text, sizeof(S.motd_text));
+    HtmlElem actions = html_dom_query(0, "#clan-settings .motd-actions");
+    if (!actions) return;
+    HtmlElem save = html_dom_query(actions, ".main-button-accept"), remove = html_dom_query(actions, ".main-button-danger");
+    set_main_disabled(save, S.motd_busy || !has_text(S.motd_text));
+    if (S.motd_text[0] && !remove && save) {
+        StrBuf sb = {0};
+        sb_append(&sb, " ");
+        motd_remove_button(&sb);
+        char *html = sb_finish(&sb);
+        html_dom_insert_html(save, HTML_INSERT_AFTER_END, html);
+        free(html);
+    } else if (!S.motd_text[0] && remove) {
+        html_dom_remove(remove);
+    }
+}
+
+// the loot config's inputs: the clan cut's hint and the Top N description follow their bound values; the top share's
+// own input handler (iìïiïìï, deob-10.0.7.js:27781-27785) clamps it to 0-100 and sets the remainder to 100 - it
+static void loot_input(const int top_share) {
+    sync_forms();
+    if (top_share) {
+        S.loot_rem = 100 - S.loot_top_pct;
+        HtmlElem in = html_dom_by_id("lootTopPct");
+        char typed[32] = "", v[16];
+        if (in) html_dom_get_value(in, typed, sizeof(typed));
+        snprintf(v, sizeof(v), "%d", S.loot_top_pct);
+        if (in && strcmp(typed, v)) html_dom_set_value(in, v);
+        HtmlElem rem = html_dom_by_id("lootRemainder");
+        snprintf(v, sizeof(v), "%d%%", S.loot_rem);
+        if (rem) html_dom_set_text(rem, v);
+    }
+    char text[160];
+    HtmlElem cut = html_dom_by_id("lootClanPct");
+    const HtmlElem cut_field = cut ? html_dom_closest(cut, ".loot-field") : 0;
+    HtmlElem hint = cut_field ? html_dom_query(cut_field, ".loot-mode-desc") : 0;
+    snprintf(text, sizeof(text), "Percentage of rewards kept by the clan treasury. Players split the remaining %d%%.", 100 - S.loot_clan_pct);
+    if (hint) html_dom_set_text(hint, text);
+    HtmlElem mode = html_dom_by_id("lootMode");
+    const HtmlElem mode_field = mode ? html_dom_closest(mode, ".loot-field") : 0;
+    HtmlElem desc = mode_field ? html_dom_query(mode_field, ".loot-mode-desc") : 0;
+    if (desc && !strcmp(S.loot_mode, "top_performance")) {
+        snprintf(text, sizeof(text), "Only the top %d players are paid, in proportion to their kills.", S.loot_top_count);
+        html_dom_set_text(desc, text);
+    }
+}
+
+// one recruitment field's validation (field-error and its message under the input)
+static void recruit_field(const char *id, const int ok, const char *message) {
+    HtmlElem in = html_dom_by_id(id);
+    if (!in) return;
+    html_dom_set_class(in, "field-error", !ok);
+    HtmlElem field = html_dom_closest(in, ".field");
+    HtmlElem msg = field ? html_dom_query(field, ".field-error-msg") : 0;
+    if (!ok && !msg) {
+        char html[160];
+        snprintf(html, sizeof(html), " <span class=\"field-error-msg svelte-1o06kdk\">%s</span>", message);
+        html_dom_insert_html(in, HTML_INSERT_AFTER_END, html);
+    } else if (ok && msg) {
+        html_dom_remove(msg);
+    }
+}
+
+// Min Level / Min K/D (bind:value): their checks show as typed and hold the Create / Update button
+// (deob-10.0.7.js:96872-96874, :97034-97038)
+static void recruit_input(void) {
+    read_value("recruit-level", S.r_level, sizeof(S.r_level));
+    read_value("recruit-kd", S.r_kd, sizeof(S.r_kd));
+    const int lv = level_ok(S.r_level), kd = kd_ok(S.r_kd);
+    recruit_field("recruit-level", lv, "Level must be a whole number between 0 and 200");
+    recruit_field("recruit-kd", kd, "K/D must be between 0 and 99.99");
+    HtmlElem save = html_dom_query(0, "#clan-settings .recruitment-manage .actions .io-button");
+    if (!save) return;
+    if (S.recruit_saving || !lv || !kd) html_dom_set_attr(save, "disabled", "");
+    else html_dom_remove_attr(save, "disabled");
 }
 
 // ------------------------------------------------------------------ handler table
@@ -1806,35 +2142,27 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         snprintf(id, sizeof(id), "clanInp%d", action);
         read_value(id, value, sizeof(value));
         send_req(action, value);
-    } else if (!strcmp(m, "switchTab")) {
-        sync_forms();
+    } else if (!strcmp(m, "switchTab")) { // tabIndex = i; updateWindow(13): the new tab's components mount
         g_clan_tab = arg_num(args, argc, 0, 0);
-        if (g_clan_tab == 4) { // the settings component mounts again: fresh loads
-            cJSON_Delete(S.motd);
-            S.motd = NULL;
-            S.motd_err[0] = 0;
-            S.recruit_loaded = 0;
-            cJSON_Delete(S.loot);
-            S.loot = NULL;
-            S.loot_failed = 0;
-            S.loot_err[0] = 0;
-            S.loot_mode[0] = 0;
-            S.banner_err[0] = S.logo_err[0] = S.transfer_err[0] = S.recruit_err[0] = S.recruit_ok[0] = 0;
-        }
         menu_rerender_if_open(13);
-    } else if (!strcmp(m, "kickReq")) { // confKickClan(name, id)
+    } else if (!strcmp(m, "kickReq")) { // confKickClan(name, id) (deob-10.0.7.js:223017-223020)
         const char *who = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? args[0].str : "";
+        StrBuf esc = {0};
+        sb_append_esc(&esc, who);
+        char *ewho = sb_finish(&esc);
+        char text[256];
+        I18N_F(text, "windows.clan.kick", "Are you sure you want kick {0} from the clan?", ewho);
+        free(ewho);
         StrBuf sb = {0};
-        sb_append(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>Are you sure you want kick ");
-        sb_append_esc(&sb, who);
-        sb_appendf(&sb, " from the clan?</div><div id='confirmBtn' onclick='kickClanConfirmed(%d)' onmouseover='playTick(0.1)'>YES</div><div id='declineBtn' onclick='clearPops()' onmouseover='playTick(0.1)'>NO</div>", arg_num(args, argc, 1, 0));
+        sb_appendf(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>%s</div><div id='confirmBtn' onclick='kickClanConfirmed(%d)' onmouseover='playTick(0.1)'>YES</div><div id='declineBtn' onclick='clearPops()' onmouseover='playTick(0.1)'>NO</div>",
+                   text, arg_num(args, argc, 1, 0));
         char *html = sb_finish(&sb);
         generic_popup(html, "confPop", NULL);
         free(html);
-    } else if (!strcmp(m, "delReq") && g_clan) { // confDelClan(isLeader)
+    } else if (!strcmp(m, "delReq") && g_clan) { // confDelClan(isLeader) (deob-10.0.7.js:223009-223011)
         char html[640];
-        snprintf(html, sizeof(html), "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>Are you sure you want to %s the clan?</div><div id='confirmBtn' onclick='delClanConfirmed()' onmouseover='playTick(0.1)'>YES</div><div id='declineBtn' onclick='clearPops()' onmouseover='playTick(0.1)'>NO</div>",
-                 i_am_leader() ? "delete" : "leave");
+        snprintf(html, sizeof(html), "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>%s</div><div id='confirmBtn' onclick='delClanConfirmed()' onmouseover='playTick(0.1)'>YES</div><div id='declineBtn' onclick='clearPops()' onmouseover='playTick(0.1)'>NO</div>",
+                 i_am_leader() ? I18N("windows.clan.delete", "Are you sure you want to delete the clan?") : I18N("windows.clan.leave", "Are you sure you want to leave the clan?"));
         generic_popup(html, "confPop", NULL);
     } else if (!strcmp(m, "updReq") && g_clan) { // io.send("clnR", id, ok); local list update
         const int index = arg_num(args, argc, 0, 0), pid = arg_num(args, argc, 1, 0), ok = arg_num(args, argc, 2, 0);
@@ -1844,10 +2172,9 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         cJSON *reqs = cJSON_GetObjectItem(g_clan, "requests");
         cJSON *members = cJSON_GetObjectItem(g_clan, "members");
         const cJSON *req = cJSON_GetArrayItem(reqs, index);
-        if (req && ok == 1 && members) {
+        if (req && ok == 1 && members) { // members.push({p}) (deob-10.0.7.js:220437-220441): no role until the clan is read again
             cJSON *nm = cJSON_CreateObject();
             cJSON_AddStringToObject(nm, "p", jstr(req, "player_name"));
-            cJSON_AddNumberToObject(nm, "i", pid);
             cJSON_AddItemToArray(members, nm);
         }
         if (req) cJSON_DeleteItemFromArray(reqs, index);
@@ -1924,21 +2251,8 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         motd_send(0);
     } else if (!strcmp(m, "motdRemove")) {
         motd_send(1);
-    } else if (!strcmp(m, "motdRetry")) { // the failed load is asked again by the next render (gen_motd)
-        cJSON_Delete(S.motd);
-        S.motd = NULL;
-        S.motd_for = 0;
-        S.motd_load_failed = 0;
-        clan_rerender();
-    } else if (!strcmp(m, "lootRetry")) {
-        cJSON_Delete(S.loot);
-        S.loot = NULL;
-        S.loot_failed = 0;
-        clan_rerender();
-    } else if (!strcmp(m, "recruitRetry")) {
-        S.recruit_loaded = 0;
-        S.recruit_failed = 0;
-        clan_rerender();
+    } else if (!strcmp(m, "motdInput")) {
+        motd_input();
     } else if (!strcmp(m, "clanRetry")) { // the clan's own load: sendReq(3) again on the render
         g_clan_failed = 0;
         g_req_sent = 0;
@@ -1951,14 +2265,10 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         banner_apply();
     } else if (!strcmp(m, "lootChange")) {
         rerender_kept();
-    } else if (!strcmp(m, "lootInput")) { // the remainder follows the top share; the clan cut's hint
-        sync_forms();
-        HtmlElem rem = html_dom_by_id("lootRemainder");
-        if (rem) {
-            char v[16];
-            snprintf(v, sizeof(v), "%d%%", S.loot_rem);
-            html_dom_set_text(rem, v);
-        }
+    } else if (!strcmp(m, "lootInput")) {
+        loot_input(arg_num(args, argc, 0, 0));
+    } else if (!strcmp(m, "recruitInput")) {
+        recruit_input();
     } else if (!strcmp(m, "saveLoot")) {
         save_loot();
     } else if (!strcmp(m, "recruitSave")) {
@@ -1971,6 +2281,10 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         recruit_remove();
     } else if (!strcmp(m, "logoPick")) {
         logo_pick();
+    } else if (!strcmp(m, "logoUnset")) {
+        logo_unset();
+    } else if (!strcmp(m, "logoUpload")) {
+        logo_upload();
     } else if (!strcmp(m, "logoRemove")) {
         io_prompt(I18N("windows.clans.settings.logo.remove.title", "Remove Clan Logo"),
                   I18N("windows.clans.settings.logo.remove.description", "Are you sure you want to remove the clan logo? This action cannot be undone."),
@@ -1980,8 +2294,9 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         ui_loadout_clear_pops();
         char path[64];
         snprintf(path, sizeof(path), "/clans/%d/logo", clan_id());
-        S.logo_busy = v10_gapi("DELETE", path, NULL, on_logo, NULL);
-        if (!S.logo_busy) snprintf(S.logo_err, sizeof(S.logo_err), "Failed to remove logo");
+        S.logo_err[0] = 0;
+        S.logo_busy = v10_gapi("DELETE", path, NULL, on_logo, NULL) ? 2 : 0;
+        if (!S.logo_busy) snprintf(S.logo_err, sizeof(S.logo_err), FETCH_FAILED);
         rerender_kept();
     } else {
         return -1;
@@ -1993,8 +2308,10 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
 void clan_ui_frame(const cJSON *frame) {
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
     if (!label) return;
-    if (!strcmp(label, "clnL")) { // del(): clanData = null; acc.clan = null; showWindow(5)
+    if (!strcmp(label, "clnL")) { // del(): clanData = null; acc.clan = null; showWindow(5); tabIndex is kept
+        const int tab = g_clan_tab;
         clan_ui_reset();
+        g_clan_tab = tab;
         set_acc_clan(NULL);
         ui_loadout_clear_pops();
         menu_show_window(5, 1);
@@ -2013,7 +2330,7 @@ void clan_ui_frame(const cJSON *frame) {
             menu_rerender_if_open(13);
             result_popup(1, "Success");
         } else {
-            result_popup(0, msg ? msg : NULL);
+            result_popup(0, msg && msg[0] ? msg : "Error"); // iíïííiì(null, msg || "Error")
         }
         return;
     }
@@ -2027,31 +2344,26 @@ void clan_ui_frame(const cJSON *frame) {
             }
             result_popup(1, "Success");
         } else {
-            result_popup(0, msg ? msg : NULL);
+            result_popup(0, msg && msg[0] ? msg : "Error");
         }
         return;
     }
-    if (action == 9 && ok) ui_loadout_clear_pops(); // the Discord popup: the link is saved
-    if (action == 9 && !ok && msg) {
-        result_popup(0, msg);
-        return;
-    }
+    // any other action (the Discord link's 9 too: its popup stays open) is the generic answer (deob-10.0.7.js:220506-220509)
     if (action == 3) {
         g_req_sent = 0;
         html_timer_cancel(g_clan_timer);
         g_clan_timer = 0;
         g_clan_failed = 0;
         if (!has_data && !(msg && msg[0])) { // not in a clan any more (kicked, deleted): the create/join form
-            account_set_clan(NULL);
+            set_acc_clan(NULL);
             menu_rerender_if_open(13);
             return;
         }
     }
     if (msg && msg[0] && html_dom_by_id("clanErr")) {
         clan_err(msg, ok);
-    } else if (has_data && cJSON_GetObjectItem(data, "clan_name")) {
-        set_acc_clan(jstr(data, "clan_name"));
-        sync_forms();
+    } else if (has_data) { // acc.clan = clan_name; clanData = data; updateWindow(13) (its components mount again)
+        set_acc_clan(jstr(data, "clan_name")[0] ? jstr(data, "clan_name") : NULL);
         cJSON_Delete(g_clan);
         g_clan = cJSON_Duplicate(data, 1);
         if (!cJSON_GetObjectItem(g_clan, "members")) cJSON_AddItemToObject(g_clan, "members", cJSON_CreateArray());

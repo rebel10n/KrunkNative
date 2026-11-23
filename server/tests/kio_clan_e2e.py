@@ -28,8 +28,8 @@ client_bin runs (--offline, no brain):
   A. signed in with the clan KPD (id 9001, the account its owner, one Red Paint): the home tab's loot display and the
      settings tab's MOTD, loot config and recruitment post come from krunker.io; then the MOTD is saved and removed,
      the loot config saved, the Red Paint applied, the logo removed, the recruitment post saved and removed; the
-     ownership transfer refused, started and cancelled, a respond; a logo uploaded (KRUNKNATIVE_PICK_FILE: a 512 x 512
-     PNG); the Discord link set, a member's role changed, KR deposited, the member kicked, a request accepted and the
+     ownership transfer refused, started and cancelled, a respond; a logo picked (KRUNKNATIVE_PICK_FILE: a 512 x 512
+     PNG) and bought with the button it shows; the Discord link set (its popup stays open), a member's role changed, KR deposited, the member kicked, a request accepted and the
      rest declined; the clan left, and a new one created
   B. signed in with no clan as a moderator: the Recruitment board lists krunker.io's posts, my-applications marks one
      Applied, Apply on the other sends applyToClan and marks it Applied, a Take Down removes a post; the Clans window's
@@ -321,6 +321,10 @@ def script_a():
           "%d call windows.12.transferRespond 1" % (u + 5200),
           # the logo upload (v10's FormData), the file being KRUNKNATIVE_PICK_FILE
           "%d call windows.12.logoPick" % (u + 6600),
+          # the picked file shows the buy button (iÏïiíïï's BUY 20,000 KR), which uploads it
+          "%d waitfor .upload-button-container .main-button" % (u + 6700),
+          "%d nodes @logobuy .upload-button-container .buy-button" % (u + 6800),
+          "%d call windows.12.logoUpload" % (u + 7200),
           "%d grep @logoerr logo .error-message" % (u + 8500),
           # Discord (owner): ["cln", 9, link]
           "%d call windows.12.discordPop" % (u + 8600),
@@ -360,6 +364,9 @@ def script_a():
           "%d nodes @form [id=clanInp1]" % (u + 19000),
           "%d clickid clanInp1" % (u + 19100), "%d type %s" % (u + 19200, NEW_CLAN),
           "%d call windows.12.sendReq 1" % (u + 19500),
+          # v10 keeps windows[12].tabIndex over del() and the new clan (Requests, the owner's): then Home
+          "%d text @newtab .bigMenTabA" % (u + 21400),
+          "%d call windows.12.switchTab 0" % (u + 21450),
           "%d grep @nwc %s .setHed" % (u + 21500, NEW_CLAN),
           "%d quit" % (u + 22000)]
     return "\n".join(s) + "\n"
@@ -561,6 +568,7 @@ def checks_a_socket(text, stub):
     # the logo upload
     r = one(stub, "POST", "/api/clans/%d/logo" % CLAN_ID)
     mp = multipart(r) if r else None
+    check("A. logoPick: the picked file shows the buy button", nodes(text, "logobuy") == 1, nodes(text, "logobuy"))
     check("A. uploadLogo: POST /clans/9001/logo with the Bearer and an X-Idempotency-Key", r is not None and bearer(r) and
           r[3].get("x-idempotency-key"), r and {k: v for k, v in r[3].items() if k != "authorization"})
     check("A. ... as multipart/form-data with Chromium's boundary (----WebKitFormBoundary + 16)",
@@ -575,7 +583,8 @@ def checks_a_socket(text, stub):
 
     # the game socket's writes
     check("A. updateDis: [\"cln\", 9, the link] (the owner)", frames("cln", 9) == [["cln", 9, DISCORD]], frames("cln", 9))
-    check("A. ... its ok closes the Discord popup", nodes(text, "dispop") == 0, nodes(text, "dispop"))
+    check("A. ... its ok leaves the Discord popup open (v10's resp(9) takes the generic path: no msg, no data)",
+          nodes(text, "dispop") == 1, nodes(text, "dispop"))
     check("A. updRol: [\"cln\", 6, id, {r}] (the select's rank)", frames("cln", 6) == [["cln", 6, MEMBER_ID, {"r": 1}]], frames("cln", 6))
     check("A. ... the answer's rank is the member's: Success, the select reads Captain",
           grep(text, "rolok") > 0 and nodes(text, "rol0") == 1 and "Captain" in text_of(text, "rolsel"), (grep(text, "rolok"), text_of(text, "rolsel")))
@@ -593,6 +602,8 @@ def checks_a_socket(text, stub):
     check("A. sendReq(1): [\"cln\", 1, the tag]", frames("cln", 1) == [["cln", 1, NEW_CLAN]], frames("cln", 1))
     check("A. ... the answer has no clan_id: the clan is asked for (sendReq(3)), and the window is the new clan's",
           asked_after(("ws", ["cln", 1, NEW_CLAN])) and grep(text, "nwc") > 0, grep(text, "nwc"))
+    check("A. ... on the tab the window was left on (v10 keeps tabIndex: Requests)", text_of(text, "newtab") == "Requests",
+          text_of(text, "newtab"))
     bad = [f for f in WS if f[0] == "cln" and (len(f) < 2 or f[1] not in (1, 3, 4, 5, 6, 7, 9))]
     check("A. no other clan frame went out", not bad, bad)
 

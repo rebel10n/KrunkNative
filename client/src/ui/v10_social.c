@@ -2750,9 +2750,28 @@ static void sb_clan(StrBuf *sb, View *v) {
     const char *creator = jstr(d, "creator_name");
     char score[32];
     commas(score, sizeof(score), jnum(d, "clan_score"));
-    // no clan logos are hosted: v10's placeholder
-    sb_appendf(sb, "<div class=\"clan-view-body svelte-5j94nj\"><section class=\"clan-view-identity svelte-5j94nj\"><div class=\"clan-view-logo-placeholder svelte-5j94nj\"><i class=\"material-icons svelte-5j94nj\">shield</i></div> "
-                   "<div class=\"clan-view-name svelte-5j94nj\" style=\"color: %s;\">[", clan_color(name, "#fff"));
+    // the clan's logo while clan_logo is set (deob-10.0.7.js:104326-104337): v10's iíïiììï URL, clans/<id>.png?v=<clan_logo>
+    // on Krunker's user-assets host; a Box Office clan's is the brain's GET /api/clans/<id>/logo?v= (clan_logo.c).
+    // Otherwise the shield placeholder.
+    const cJSON *logo = cJSON_GetObjectItem(d, "clan_logo");
+    const double cid = jnum(d, "clan_id");
+    const int has_logo = cid > 0 && ((cJSON_IsNumber(logo) && logo->valuedouble != 0) || (cJSON_IsString(logo) && logo->valuestring[0]));
+    const char *base = backend_url();
+    sb_append(sb, "<div class=\"clan-view-body svelte-5j94nj\"><section class=\"clan-view-identity svelte-5j94nj\">");
+    if (has_logo && (kio() || (base && base[0]))) {
+        char ver[64];
+        if (cJSON_IsString(logo)) snprintf(ver, sizeof(ver), "%s", logo->valuestring);
+        else snprintf(ver, sizeof(ver), "%.17g", logo->valuedouble);
+        if (kio()) sb_appendf(sb, "<img class=\"clan-view-logo svelte-5j94nj\" src=\"https://user-assets.krunker.io/clans/%.0f.png?v=", cid);
+        else sb_appendf(sb, "<img class=\"clan-view-logo svelte-5j94nj\" src=\"%s/api/clans/%.0f/logo?v=", base, cid);
+        sb_append_esc(sb, ver);
+        sb_append(sb, "\" alt=\"");
+        sb_append_esc(sb, name);
+        sb_append(sb, "\"> ");
+    } else {
+        sb_append(sb, "<div class=\"clan-view-logo-placeholder svelte-5j94nj\"><i class=\"material-icons svelte-5j94nj\">shield</i></div> ");
+    }
+    sb_appendf(sb, "<div class=\"clan-view-name svelte-5j94nj\" style=\"color: %s;\">[", clan_color(name, "#fff"));
     sb_append_esc(sb, name);
     sb_append(sb, "]</div> <div class=\"clan-view-info svelte-5j94nj\"><div class=\"clan-view-info-item svelte-5j94nj\"><span class=\"clan-view-info-label svelte-5j94nj\">Creator</span> "
                   "<button class=\"clan-view-link svelte-5j94nj\" type=\"button\" onclick=\"openPlayerProfile(");
