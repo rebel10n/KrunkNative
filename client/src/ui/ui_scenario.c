@@ -1391,6 +1391,20 @@ static int ui_scenario_apply(Client *client) {
         snprintf(state.target, sizeof(state.target), "%s", t ? t : "");
         snprintf(state.voter, sizeof(state.voter), "%s", v ? v : "");
         hud_votekick_on_state(client, &state);
+        // voteKick.update {voter, votes}: then krunker.io's update [voter, votes, needed] as the link passes it on (the voter
+        // in .target, krunker_link.c on_vote_kick); "@me" is our own name
+        const cJSON *up = cJSON_GetObjectItem(vk, "update");
+        if (cJSON_IsObject(up)) {
+            NetVoteKickStatePacket u;
+            memset(&u, 0, sizeof(u));
+            u.active = 1;
+            u.votes = (int32_t) cJSON_GetNumberValue(cJSON_GetObjectItem(up, "votes"));
+            u.needed = state.needed;
+            const char *voter = cJSON_GetStringValue(cJSON_GetObjectItem(up, "voter"));
+            if (voter && !strcmp(voter, "@me")) voter = client->me && client->me->name[0] ? client->me->name : client->menu_name;
+            snprintf(u.target, sizeof(u.target), "%s", voter ? voter : "");
+            hud_votekick_on_state(client, &u);
+        }
     }
 
     strike_ui_scenario(client, st("strike")); // Krunker Strike's screens / in-game UI (no-op on the base page)

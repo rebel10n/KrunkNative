@@ -1643,6 +1643,11 @@ else ()
             add_test(NAME player_rank_flag_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/player_rank_flag_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(player_rank_flag_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # votekick_official_e2e: a krunker.io lobby's vote kick update, our own vote's "Vote Submitted - a/b" chat line
+            # (hud_votekick.c, deob-10.0.7.js:226852-226855) on --render-scenario fixtures (client/tests/votekick_official_e2e.py)
+            add_test(NAME votekick_official_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/votekick_official_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(votekick_official_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # player_rank_flag_server_e2e: the same two slots from a brain-linked server_bin (ranked_rank, stats.flg, the
             # showBadges.rank / anonMode gates) and a protocol 1.3.1 peer that gets none (server/tests/player_rank_flag_e2e.py)
             add_test(NAME player_rank_flag_server_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/player_rank_flag_e2e.py

@@ -210,6 +210,20 @@ void hud_votekick_on_state(Client *client, const NetVoteKickStatePacket *state) 
     target[sizeof(target) - 1] = voter[sizeof(voter) - 1] = 0;
     g_vk.votes = state->votes;
     g_vk.needed = state->needed;
+    // krunker.io's update [voter, votes, needed] (deob-10.0.7.js:226852-226855; krunker_link.c puts the first alias in
+    // .target): our own vote is "Vote Submitted - a/b" in the chat (updateGameMessage(-1, null, .., 2)), the name and
+    // keys rows go and the count follows, the box as it was. Our server says it to the voter itself (votekick.c) and
+    // its updates carry the vote's target.
+    if (!state->opened && client && client->game.is_official && target[0] && !strcmp(target, my_alias(client))) {
+        char line[64];
+        snprintf(line, sizeof(line), "Vote Submitted - %d/%d", state->votes, state->needed);
+        hud_ui_add_chat(NULL, line, "#fc03ec"); // addChat(-1, null, .., 2): a server line's default colour
+        dom_display("voteKickName", "none");
+        dom_display("voteKickKeys", "none");
+        snprintf(line, sizeof(line), "Votes: %d/%d", state->votes, state->needed);
+        dom_html("voteKickNum", line);
+        return;
+    }
     if (state->opened || !g_vk.active) {
         g_vk.active = 1;
         snprintf(g_vk.target, sizeof(g_vk.target), "%s", target);
