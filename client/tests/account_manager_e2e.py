@@ -174,8 +174,10 @@ def forget_brain_sessions(db, name):
 
 
 def auth_requests(stub):
-    """The krunker.io stub's auth requests so far (a sign-in or a token refresh)."""
-    return len([r for r in stub.requests if r[1].startswith("/frvr/v1/auth")])
+    """The krunker.io stub's auth requests so far (a sign-in or a token refresh). FRVR's anonymous guest login, which an
+    official game's join starts on its own (krunker_account.c start_anon, {"platform": "anonymous"}), is not a sign-in."""
+    return len([r for r in stub.requests if r[1].startswith("/frvr/v1/auth")
+                and not (isinstance(r[4], dict) and r[4].get("platform") == "anonymous")])
 
 
 # the popup's login card by username (a guest keeps no saved name: the popup opens on Email)
