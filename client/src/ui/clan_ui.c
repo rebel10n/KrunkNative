@@ -291,6 +291,12 @@ void clan_ui_reset(void) {
     logo_sent_clear();
 }
 
+// The active account changed (account_ui.c active_changed): its clanData goes. A --render-scenario's state.clan
+// stays: the scenario's account is applied after the first frame, which counts as a change of account.
+void clan_ui_account_changed(void) {
+    if (!g_scenario) clan_ui_reset();
+}
+
 // a name inside onclick='openPlayerProfile("NAME")': quotes backslash-escaped, then HTML-escaped
 static void sb_js_name(StrBuf *sb, const char *name) {
     char buf[96];

@@ -171,6 +171,7 @@ void v10_market_tick(void);                 // per frame: the open Create Trade 
 void v10_market_scenario(const cJSON *state); // --render-scenario: state.market
 int  v10_market_owns_frame(const char *label); // 1 = the open exchange answers this reply (account_ui.c skips it)
 void clan_ui_reset(void);                   // account changed: drop clanData
+void clan_ui_account_changed(void);         // the active account changed: clan_ui_reset, but not in a --render-scenario
 void clan_ui_scenario(const cJSON *state);  // --render-scenario: state.clan {data, tab, motd, loot, recruit}
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count
 // acc.addSkin(skin, 1, id, m) (deob-10.0.7.js:115267-115276): an instance (a spin's minted copy: m {wear, serial}) as its

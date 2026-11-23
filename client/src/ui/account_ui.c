@@ -2586,7 +2586,7 @@ static void active_changed(void) {
     g_active.generation++;
     g_active.identity++;
     battlepass_ui_reset(); // windows[5].data, account.BP: the other account's
-    clan_ui_reset();       // clanData: the other account's
+    clan_ui_account_changed(); // clanData: the other account's (a --render-scenario keeps its own)
     apply_menu_name();
     update_header();       // v10_menu_account_changed(): the header bars, the nav, the login modal
     rerender_windows();    // the Account window, Battle Pass, Store, ... of the open window
