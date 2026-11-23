@@ -299,6 +299,9 @@ void dom_mark_dirty(Dom *dom, HtmlElem e, uint32_t flags);
 void dom_mark_selector_dirty(Dom *dom, HtmlElem e);
 void dom_mark_all_dirty(Dom *dom);
 int dom_any_style_dirty(Dom *dom);
+/* Changes whenever a <style> element is added, removed, moved or has its text replaced
+ * (the engine then reloads those sheets' @keyframes). */
+uint32_t dom_style_epoch(const Dom *dom);
 
 #ifdef __cplusplus
 }

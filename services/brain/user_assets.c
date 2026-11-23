@@ -11,6 +11,10 @@
  *
  * p<id>/profile.png, the path Krunker's hub loads a player's picture from, is a Box Office player's approved profile
  * picture (avatar.c avatar_serve_public), never fetched upstream: id is a Box Office account, not Krunker's player.
+ * m<id>/thumb.png, the path Krunker's hub loads a map's thumbnail from (hub-10.0.7.js:3023, 3163, 4886, 6179, 6534), is
+ * the thumbnail of Box Office's published map <id> when there is one: the PNG the editor's Publish captured
+ * (["uploadM", data, thumbDataUrl, ...], creations.c; published_maps.map_image, map_info.t = 1), 404 for a Box Office
+ * map without one. An id no Box Office map has is Krunker's, mirrored as below.
  *
  * Not an open proxy: only the paths of shared/include/user_asset_path.h (an asset id, md<id> or
  * m<id>, and one of Krunker's file names), capped in size (user_asset_max_bytes), checked
@@ -61,9 +65,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "db_procs.h"
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
+#include "knsvc/db.h"
 #include "knsvc/http.h"
+#include "knsvc/json.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
 #include "knv.h"
@@ -574,6 +581,70 @@ static long long pfp_player(const char *id) {
     return v;
 }
 
+/* m<digits>: a map's folder (m<id>/thumb.png); its id, else 0 (md<id> is a mod's) */
+static long long map_folder(const char *id) {
+    if (!id || id[0] != 'm' || !id[1] || strlen(id) > 12) return 0;
+    long long v = 0;
+    for (const char *c = id + 1; *c; c++) {
+        if (*c < '0' || *c > '9') return 0;
+        v = v * 10 + (*c - '0');
+    }
+    return v;
+}
+
+static void asset_mirror(kn_http_req *req, const char *prefix, const char *id, const char *file);
+
+typedef struct MapThumbReq {
+    kn_http_req *req;
+    char id[16], file[16];
+} MapThumbReq;
+
+/* the map's row: its map_image when it is a PNG data URL, else 404; no row: Krunker's m<id>, the mirror */
+static void map_thumb_row(kn_db_result *res, void *ud) {
+    MapThumbReq *t = ud;
+    kn_http_req *req = t->req;
+    if (!kn_http_req_alive(req)) {
+        free(t);
+        return;
+    }
+    if (!kn_db_ok(res)) {
+        KN_WARN(MOD, "map thumbnail %s: %s", t->id, kn_db_error(res));
+        free(t);
+        reply_status(req, 503);
+        return;
+    }
+    cJSON *rows = kn_db_result_to_json(res);
+    const cJSON *row = cJSON_GetArrayItem(rows, 0);
+    if (!row) {
+        cJSON_Delete(rows);
+        asset_mirror(req, "", t->id, t->file);
+        free(t);
+        return;
+    }
+    free(t);
+    static const char prefix[] = "data:image/png;base64,";
+    const char *img = kn_json_str(row, "img", "");
+    const size_t len = strlen(img);
+    uint8_t *png = !strncmp(img, prefix, sizeof prefix - 1) ? malloc(len) : NULL;
+    const int n = png ? kn_base64_decode(img + sizeof prefix - 1, len - (sizeof prefix - 1), png, len) : -1;
+    cJSON_Delete(rows);
+    if (n <= 0 || !user_asset_content_ok("m1/thumb.png", png, (size_t) n)) {
+        free(png);
+        reply_status(req, 404);
+        return;
+    }
+    /* a republish replaces the thumbnail: revalidate (no-cache) against the bytes' sha256, as a Box Office asset */
+    uint8_t digest[KN_SHA256_LEN];
+    char hex[2 * KN_SHA256_LEN + 1] = "", etag[2 * KN_SHA256_LEN + 3] = "";
+    if (kn_sha256(png, (size_t) n, digest) == 0 && kn_hex_encode(digest, sizeof digest, hex, sizeof hex) > 0) snprintf(etag, sizeof etag, "\"%s\"", hex);
+    kn_http_set_header(req, "Cache-Control", "no-cache");
+    const char *inm = etag[0] ? kn_http_header_get(req, "If-None-Match") : NULL;
+    if (etag[0]) kn_http_set_header(req, "ETag", etag);
+    if (inm && !strcmp(inm, etag)) kn_http_respond(req, 304, "image/png", NULL, 0);
+    else kn_http_respond(req, 200, "image/png", png, (size_t) n);
+    free(png);
+}
+
 /* ud: the rel's prefix, NULL or "skins/" (a custom skin's skins/<_id>/<file>: a map studio's on Krunker's host, a Skin
  * Manager skin's in the upload store, user_asset_rel_is_kn) */
 static void h_asset(kn_http_req *req, void *ud) {
@@ -584,6 +655,23 @@ static void h_asset(kn_http_req *req, void *ud) {
         avatar_serve_public(req, pfp);
         return;
     }
+    const long long map = prefix[0] ? 0 : map_folder(id);
+    MapThumbReq *t = map > 0 && file && !strcmp(file, "thumb.png") && g_b && g_b->db ? calloc(1, sizeof *t) : NULL;
+    if (t) {
+        t->req = req;
+        snprintf(t->id, sizeof t->id, "%s", id);
+        snprintf(t->file, sizeof t->file, "%s", file);
+        char idtxt[24];
+        snprintf(idtxt, sizeof idtxt, "%lld", map);
+        kn_db_query_sql(g_b->db, SQL(.any = "SELECT coalesce(map_image, '') AS img__t FROM published_maps WHERE map_id = {int:$1} AND deleted_at IS NULL"),
+                        KN_DB_ARGS(idtxt), map_thumb_row, t);
+        return;
+    }
+    asset_mirror(req, prefix, id, file);
+}
+
+/* the asset tree, the cache, else Krunker's host (the header comment) */
+static void asset_mirror(kn_http_req *req, const char *prefix, const char *id, const char *file) {
     if (!C.enabled) {
         reply_status(req, 503);
         return;

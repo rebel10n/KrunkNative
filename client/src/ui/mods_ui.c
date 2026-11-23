@@ -53,6 +53,16 @@ void ed_pick_file(const char *accept, EdFileFn fn, void *user);
 #define LOADER_WINDOW 18
 #define PUBLISH_WINDOW 19
 #define USER_ASSETS "https://user-assets.krunker.io"
+
+// the thumbnails' user-assets host (iíiiiîì, config-10.0.7.js:4729-4744): Krunker's for a krunker.io account, else
+// kn_brain's /user-assets, which has a Box Office mod's md<id>/thumb.png (the remote image loader fetches the URL as
+// given; mod.zip goes through mod_pack.c, which knows both hosts)
+static const char *thumb_host(void) {
+    static char host[300];
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER || !backend_url()[0]) return USER_ASSETS;
+    snprintf(host, sizeof host, "%s/user-assets", backend_url());
+    return host;
+}
 #define CHUNK (512u * 1024u)        // kn_brain's request bodies are 1 MiB at most
 #define CHUNK_TIMEOUT_MS 60000
 #define CHUNK_RETRIES 20            // a request that failed outright (status 0): a restarting brain
@@ -232,7 +242,7 @@ static void card(StrBuf *sb, const cJSON *r) {
     sb_appendf(sb, "&quot;,%d)'><span class='material-icons' style='font-size:70px;color:#fff;'>play_arrow</span></div></div></div>", thumb);
     sb_appendf(sb, "<span title='Favorite' class='material-icons creationAction%s' onclick='favoriteM(1, this, %s);'>grade</span>", fav ? " sel" : "", id);
     sb_append(sb, "<div class='mapListThumbHolder'><img draggable='false' class='mapListThumb' loading='lazy' src='");
-    if (thumb) sb_appendf(sb, USER_ASSETS "/md%s/thumb.png", id);
+    if (thumb) sb_appendf(sb, "%s/md%s/thumb.png", thumb_host(), id);
     else {
         const char *img = jstr(r, "mod_image", NULL);
         esc(sb, *img ? img : "./img/noimg.png");
@@ -331,7 +341,7 @@ static char *manager_gen(void) {
         for (int i = 0; i < M.nloaded; i++) {
             const LoadedMod *m = &M.loaded[i];
             sb_append(&sb, "<div class='mapListItem'><div style='height:200px;width:100%;overflow:hidden;'><img class='mapListThumb' src='");
-            if (m->thumb && m->id[0]) sb_appendf(&sb, USER_ASSETS "/md%s/thumb.png", m->id);
+            if (m->thumb && m->id[0]) sb_appendf(&sb, "%s/md%s/thumb.png", thumb_host(), m->id);
             else sb_append(&sb, "./img/noimg.png");
             sb_append(&sb, "' /></div><div style='margin-top:1px'><a href='javascript:;'>");
             esc(&sb, m->name);
@@ -582,7 +592,7 @@ char *mods_ui_hub_publish(const char *name, const char *mod_id, const int thumb,
     P.done = done;
     P.update = name && *name;
     snprintf(P.prefill, sizeof P.prefill, "%s", P.update ? name : "");
-    if (P.update && thumb && mod_id && *mod_id) snprintf(P.thumb_src, sizeof P.thumb_src, USER_ASSETS "/md%s/thumb.png", mod_id);
+    if (P.update && thumb && mod_id && *mod_id) snprintf(P.thumb_src, sizeof P.thumb_src, "%s/md%s/thumb.png", thumb_host(), mod_id);
     else P.thumb_src[0] = 0;
     return hub_publish_form();
 }

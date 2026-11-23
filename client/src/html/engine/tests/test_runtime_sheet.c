@@ -196,6 +196,33 @@ static void many_sheets(void)
     check("#knRtNews", "display", "grid");             /* sheet 23 beats 22's flex on a tie */
 }
 
+/* dom_style_epoch: the engine reloads the @keyframes of <style> elements added after load
+ * (`<style>@keyframes sprayAnm2 {...}</style>` in the hub's innerHTML) when it moves. */
+static void style_epoch(void)
+{
+    const HtmlElem body = dom_query(g_dom, 0, "body");
+    uint32_t e = dom_style_epoch(g_dom);
+    const char plain[] = "<div id='kfPlain'><span>x</span></div>";
+    dom_insert_html(g_dom, body, DOM_INSERT_BEFORE_END, plain, sizeof(plain) - 1);
+    g_pass += dom_style_epoch(g_dom) == e;
+    if (dom_style_epoch(g_dom) != e) { g_fail++; printf("FAIL style epoch: moved for markup without a <style>\n"); }
+    const HtmlElem holder = dom_query(g_dom, 0, "#kfPlain");
+    const char styled[] = "<style>@keyframes sprayAnm2 {100%{background-position:-400px}}</style><div class='sprayMarketImg'></div>";
+    dom_set_html(g_dom, holder, styled, sizeof(styled) - 1);
+    const uint32_t e1 = dom_style_epoch(g_dom);
+    if (e1 != e) g_pass++; else { g_fail++; printf("FAIL style epoch: a <style> in innerHTML\n"); }
+    const HtmlElem st = dom_query(g_dom, holder, "style");
+    char *text = st ? dom_get_text(g_dom, st) : NULL;
+    check_str("added <style> text", text, "@keyframes sprayAnm2 {100%{background-position:-400px}}");
+    free(text);
+    dom_set_text(g_dom, st, "@keyframes sprayAnm3 {}", 23);
+    const uint32_t e2 = dom_style_epoch(g_dom);
+    if (e2 != e1) g_pass++; else { g_fail++; printf("FAIL style epoch: the <style>'s text replaced\n"); }
+    dom_set_html(g_dom, holder, "<div></div>", 11);
+    if (dom_style_epoch(g_dom) != e2) g_pass++; else { g_fail++; printf("FAIL style epoch: the <style> removed\n"); }
+    dom_remove(g_dom, holder);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
@@ -286,6 +313,7 @@ int main(int argc, char **argv)
     /* the page's own rules are untouched */
     check("#menuWindow", "font-family", "gamefont");
 
+    style_epoch();
     many_sheets();
 
     printf("%d passed, %d failed\n", g_pass, g_fail);

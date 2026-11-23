@@ -69,6 +69,7 @@ class Host:
             "/5000/texture.png": ("text/html", b"<!DOCTYPE html><html><title>Krunker.io</title>Access denied</html>"),
             "/5001/texture.png": ("image/png", PNG_1x1 + b"\0" * (33 << 20)),
             "/5003/texture.png": ("image/png", PNG_1x1),  # slow: concurrent requests wait for one fetch
+            "/m777/thumb.png": ("image/png", PNG_1x1 + b"\0" * 8),  # Krunker's map 777: no Box Office map has the id
         }
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), self.handler())
         self.url = "http://127.0.0.1:%d/" % self.srv.server_address[1]
@@ -260,6 +261,34 @@ def scenario_mirror(port, host, work):
     check(host.count("/9356/texture.png") == 1, "the redirect was not followed")
 
 
+def scenario_map_thumbs(port, host, db_path):
+    """m<id>/thumb.png: a Box Office map's published thumbnail (map_image's PNG data URL), 404 for one without, Krunker's
+    (the mirror) for an id no Box Office map has"""
+    import base64
+    import sqlite3
+    db = sqlite3.connect(db_path)
+    db.execute("INSERT INTO published_maps (map_id, map_name, map_image, map_info) VALUES (501, 'Thumbed', ?, '{\"t\": 1}')",
+               ("data:image/png;base64," + base64.b64encode(PNG_1x1).decode(),))
+    db.execute("INSERT INTO published_maps (map_id, map_name) VALUES (502, 'Plain')")
+    db.execute("INSERT INTO published_maps (map_id, map_name, map_image, deleted_at) VALUES (503, 'Gone', ?, '2026-01-01')",
+               ("data:image/png;base64," + base64.b64encode(PNG_1x1).decode(),))
+    db.commit()
+    db.close()
+    before = host.total()
+    st, body, hd = get(port, "/user-assets/m501/thumb.png")
+    check(st == 200 and body == PNG_1x1 and hd.get("Content-Type", "").startswith("image/png"),
+          "m501/thumb.png: the Box Office map's thumbnail, the PNG of its data URL (%d)" % st)
+    check(hd.get("Cache-Control") == "no-cache" and hd.get("ETag"), "no-cache with an ETag: a republish replaces it (%s)" % hd)
+    st, _, _ = get(port, "/api/user-assets/m502/thumb.png")
+    check(st == 404, "m502: a Box Office map without a thumbnail answers 404 (%d)" % st)
+    check(host.total() == before, "Box Office maps never reach the host")
+    st, body, _ = get(port, "/api/user-assets/m777/thumb.png")
+    check(st == 200 and body == host.files["/m777/thumb.png"][1] and host.count("/m777/thumb.png") == 1,
+          "m777 (no Box Office map): Krunker's, through the mirror (%d)" % st)
+    st, body, _ = get(port, "/api/user-assets/m503/thumb.png")
+    check(host.count("/m503/thumb.png") == 1, "m503 (a deleted map) is not Box Office's any more: the mirror asks the host (%d)" % st)
+
+
 def main():
     scratch = [sys.executable, "-I", os.path.join(HERE, "db_scratch.py"), ROOT]
     r = subprocess.run(scratch + ["create", DRIVER, SCHEMA], capture_output=True)
@@ -282,7 +311,11 @@ def main():
         print("mirror (stub host):")
         proc, log_path = run_brain(env, work, host, "mirror")
         procs.append(proc)
-        scenario_mirror(bound_port(log_path, proc), host, work)
+        port = bound_port(log_path, proc)
+        scenario_mirror(port, host, work)
+        if dbenv.get("KN_DATABASE_DRIVER") == "sqlite" or DRIVER == "sqlite":
+            print("map thumbnails (m<id>/thumb.png):")
+            scenario_map_thumbs(port, host, dbenv["KN_DATABASE_PATH"])
         proc.terminate()
         proc.wait(10)
 

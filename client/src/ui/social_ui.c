@@ -170,6 +170,7 @@ typedef struct {
     // brain (backend.h): the real social socket instead of the game connection
     int brain;              // backend_enabled() when the page was entered
     int fe;                 // fe: a silent token login is in flight (no success popup)
+    int page_after_login;   // the connect's page request waits for that login (hub_connected)
     int logged_in;          // acc != null
     char profile_name[64];  // profile.player_name (follow / followers)
     int profile_id;
@@ -733,6 +734,37 @@ static void sb_pfp(StrBuf *sb, const double id, const int cond, const char *fall
     sb_append_esc(sb, src);
 }
 
+// iíiiiîì(path) (config-10.0.7.js:4729-4744): the user-assets host + path, Krunker's for a krunker.io account, else
+// kn_brain's /user-assets (m<id>/thumb.png: the map's published thumbnail, user_assets.c; md<id>: the mod's)
+static void ua_url(char *out, const size_t n, const char *path) {
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER || !backend_url()[0]) snprintf(out, n, "https://user-assets.krunker.io%s", path);
+    else snprintf(out, n, "%s/user-assets%s", backend_url(), path);
+}
+
+// iîìîííi(info).t: the creation's map_info / mod_info (JSON text, or an object) says it has a thumbnail
+static int info_thumb(const cJSON *r, const char *key) {
+    const cJSON *v = r ? cJSON_GetObjectItemCaseSensitive(r, key) : NULL;
+    cJSON *parsed = cJSON_IsString(v) && v->valuestring ? cJSON_Parse(v->valuestring) : NULL;
+    const cJSON *o = parsed ? parsed : v;
+    const cJSON *t = cJSON_IsObject(o) ? cJSON_GetObjectItemCaseSensitive(o, "t") : NULL;
+    const int yes = t && !cJSON_IsFalse(t) && !cJSON_IsNull(t) && !(cJSON_IsNumber(t) && t->valuedouble == 0) && !(cJSON_IsString(t) && !t->valuestring[0]);
+    cJSON_Delete(parsed);
+    return yes;
+}
+
+// a creation's picture: `info.t ? <host>/<m|md><id>/thumb.png : image || ./img/noimg.png` (hub-10.0.7.js:3023, 3066,
+// 3142, 3163, 6534, 6611)
+static void sb_creation_thumb(StrBuf *sb, const int is_mod, const double id, const int thumb, const char *image) {
+    if (thumb) {
+        char path[48], url[400];
+        snprintf(path, sizeof(path), "/m%s%.0f/thumb.png", is_mod ? "d" : "", id);
+        ua_url(url, sizeof(url), path);
+        sb_append_esc(sb, url);
+    } else {
+        sb_append_esc(sb, image && *image ? image : "./img/noimg.png");
+    }
+}
+
 static cJSON *g_friends; // the last "chtb" rows, online first (owned; the hub chat below)
 static double jnum(const cJSON *o, const char *key);
 static const char *jstr(const cJSON *o, const char *key);
@@ -946,7 +978,7 @@ static void append_map_cards(StrBuf *sb, const cJSON *rows_in, const int tab) {
         if (del) sb_appendf(sb, "<span title='Delete' class='material-icons creationAction del' onclick='deleteCreationConf(%s,0);'>delete_forever</span>", id);
         if (acc && acc->is_dev) sb_appendf(sb, "<span title='Feature' class='material-icons creationAction%s' onclick='featureCreation(this, %s,0);'>check_circle</span>", row_num2(r, "map_featured", NULL) ? " sel" : "", id);
         sb_appendf(sb, "<span title='Favorite' class='material-icons creationAction%s' onclick='favoriteM(0, this, %s);'>grade</span></div><div class='mapListThumbHolder'><img draggable='false' class='mapListThumb' loading='lazy' src='", fav ? " sel" : "", id);
-        sb_append(sb, image && *image ? image : "./img/noimg.png");
+        sb_creation_thumb(sb, 0, map_id, info_thumb(r, "map_info") || info_thumb(r, "mi"), image);
         sb_append(sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' onclick='openMap(&quot;");
         sb_append_js_escape(sb, name);
         sb_append(sb, "&quot;)'/>");
@@ -1030,7 +1062,7 @@ static void append_mod_cards(StrBuf *sb, const cJSON *rows, const int tab) {
         }
         if (acc && acc->is_dev) sb_appendf(sb, "<span class='material-icons creationAction%s' onclick='featureCreation(this, %s,1);'>check_circle</span>", row_num2(r, "mod_featured", NULL) ? " sel" : "", id);
         sb_appendf(sb, "<span title='Favorite' class='material-icons creationAction%s' onclick='favoriteM(1, this, %s);'>grade</span></div><div class='mapListThumbHolder'><img draggable='false' class='mapListThumb' loading='lazy' src='", fav ? " sel" : "", id);
-        sb_append(sb, image && *image ? image : "./img/noimg.png");
+        sb_creation_thumb(sb, 1, mod_id, info_thumb(r, "mod_info") || info_thumb(r, "minf"), image);
         sb_append(sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' onclick='openMod(&quot;");
         sb_append_js_escape(sb, name);
         sb_append(sb, "&quot;)'/><div class='mapListCrdI'><a href='javascript:;' style='color:#fff !important;margin-left:6px;' onclick='openMod(&quot;");
@@ -1118,7 +1150,8 @@ static char *maps_gen(void) {
             comma_number(pl, sizeof(pl), row_num2(f, "map_pl", NULL));
             comma_number(vt, sizeof(vt), row_num2(f, "vte", "map_votes"));
             sb_append(&out, "<div class='bigMFeatHold' style='background-image:linear-gradient(to right, black, rgba(0, 0, 0, 0.4)),url(");
-            sb_append(&out, image && *image ? image : "./img/noimg.png"); // KrunkNative: the catalogue thumbnail, no user-assets thumb
+            (void) image;
+            sb_creation_thumb(&out, 0, row_num2(f, "mid", "map_id"), 1, NULL); // hub-10.0.7.js:6179: always the map's thumb.png
             sb_appendf(&out, ");'><div id='bigMFeatName'>%s</div><div id='bigMFeatVbar'><span style='color:#fff;'>%s</span><span class='material-icons' style='margin-top:-8px;margin-left:0px;font-size:46px;vertical-align:middle;color:rgba(255,255,255,0.5);margin-right:10px;'>play_arrow</span>%s<span class='material-icons' style='margin-left:10px;font-size:33px;vertical-align:top;color:rgba(255,255,255,0.5);'>thumb_up</span><div style='color:#7d7d7d;margin-left:20px;margin-top:-12px;display:inline-block;vertical-align:middle;'>by <a target='_blank' href='/social.html?p=profile&q=%s' style='color: #2196F3;'>%s</a></div></div><div id='bigMFeatDesc'>%s</div><div id='bigMFeatIBtn' class='button' onclick='openURL(&quot;/social.html?p=map&q=%s&quot;, 1)' style='color:#fff !important;'>?</div><div id='bigMFeatPBtn' class='btnAnim buttonS' onclick='openURL(&quot;/?play=%s&quot;, 1)' style='color:#fff !important;'>Play Now</div></div>",
                        name ? name : "", pl, vt, creator ? creator : "", creator ? creator : "", descr ? descr : "undefined", name ? name : "", name ? name : "");
             // the featured video (config.fetMapVids / map_videolink) is a YouTube iframe in v10: no
@@ -1171,9 +1204,16 @@ static char *mods_gen(void) {
         if (n >= 1) {
             const cJSON *f = cJSON_GetArrayItem(list->home_rows, rand_int(0, n - 1));
             const char *name = row_str2(f, "mna", "mod_name"), *creator = row_str2(f, "ctn", "creatorname");
-            char vt[32];
+            char vt[32], thumb[400] = "";
             comma_number(vt, sizeof(vt), row_num2(f, "vte", "mod_votes"));
-            sb_appendf(&out, "<div class='bigMFeatHold' style='background-image:linear-gradient(to right, black, rgba(0, 0, 0, 0.4)),url(.png);'><div id='bigMFeatName' style='top:185px;'>%s</div><div id='bigMFeatVbar' style='top:260px;'>%s<span class='material-icons' style='margin-left:10px;font-size:33px;vertical-align:top;color:rgba(255,255,255,0.5);'>thumb_up</span><div style='color:#7d7d7d;margin-left:20px;margin-top:-12px;display:inline-block;vertical-align:middle;'>by <a style='color: #2196F3;'>%s</a></div></div><div id='bigMFeatPBtn' class='btnAnim' style='top:225px;width:232px' onclick='openMod(&quot;",
+            if (info_thumb(f, "mod_info")) {
+                char path[48];
+                snprintf(path, sizeof(path), "/md%.0f/thumb.png", row_num2(f, "mid", "mod_id"));
+                ua_url(thumb, sizeof(thumb), path);
+            }
+            sb_append(&out, "<div class='bigMFeatHold' style='background-image:linear-gradient(to right, black, rgba(0, 0, 0, 0.4)),url(");
+            sb_append_esc(&out, thumb);
+            sb_appendf(&out, ".png);'><div id='bigMFeatName' style='top:185px;'>%s</div><div id='bigMFeatVbar' style='top:260px;'>%s<span class='material-icons' style='margin-left:10px;font-size:33px;vertical-align:top;color:rgba(255,255,255,0.5);'>thumb_up</span><div style='color:#7d7d7d;margin-left:20px;margin-top:-12px;display:inline-block;vertical-align:middle;'>by <a style='color: #2196F3;'>%s</a></div></div><div id='bigMFeatPBtn' class='btnAnim' style='top:225px;width:232px' onclick='openMod(&quot;",
                        name ? name : "", vt, creator ? creator : "");
             sb_append_js_escape(&out, name ? name : "");
             sb_append(&out, "&quot;)'>Load Mod <span class='material-icons' style='font-size:50px;color:#fff;vertical-align:middle;margin-top:-16px;margin-left:5px'>move_to_inbox</span></div></div><div class='bigMFeatVid'><div style='color:rgba(255,255,255,0.4);line-height:320px;'>Missing Preview</div></div>");
@@ -1851,7 +1891,16 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
             sb_append(&sb, "<div class='mapListItem2'>");
             if (age >= 0 && age <= 7) sb_append(&sb, "<div class='mapAgeD' style='background-color:#da00ff'>NEW</div>");
             if (i == 2) {
-                sb_append(&sb, "<div class='mapListThumbHolder' style='width:204px;height: 90px;'><img class='mapListThumb' loading='lazy' style='width:204px;height: 90px;' src='./img/noimg.png' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'/></div><div style='margin-top:1px;text-overflow: ellipsis;overflow: hidden;white-space: nowrap;'><a href='javascript:;'/>");
+                sb_append(&sb, "<div class='mapListThumbHolder' style='width:204px;height: 90px;'><img class='mapListThumb' loading='lazy' style='width:204px;height: 90px;' src='");
+                if (info_thumb(r, "dat")) {
+                    char path[48], url[400];
+                    snprintf(path, sizeof(path), "/%.0f/thumb.png", jnum(r, "id"));
+                    ua_url(url, sizeof(url), path);
+                    sb_append_esc(&sb, url);
+                } else {
+                    sb_append(&sb, "./img/noimg.png");
+                }
+                sb_append(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'/></div><div style='margin-top:1px;text-overflow: ellipsis;overflow: hidden;white-space: nowrap;'><a href='javascript:;'/>");
                 sb_append_served(&sb, nm);
                 sb_append(&sb, "</a></div></div>");
                 continue;
@@ -1861,7 +1910,8 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
             char votes[32];
             js_num(votes, sizeof(votes), row_num2(r, "vte", i == 0 ? "map_votes" : "mod_votes"));
             sb_append(&sb, "<div class='mapListThumbHolder' style='width:204px;height:90px;'><img draggable='false' class='mapListThumb' loading='lazy' style='width:204px;height: 90px;' src='");
-            sb_append_esc(&sb, img && *img ? img : "./img/noimg.png");
+            sb_creation_thumb(&sb, i == 1, row_num2(r, "mid", i == 0 ? "map_id" : "mod_id"),
+                              info_thumb(r, i == 0 ? "map_info" : "mod_info") || (i == 1 && info_thumb(r, "minf")), img);
             sb_appendf(&sb, "' onclick='%s(&quot;", open);
             sb_append_js_escape(&sb, nm);
             sb_appendf(&sb, "&quot;)'/><div class='mapsVotes' style='top: 68px;'>%s<span class='material-icons' style='margin-left: 5px;color:rgba(255, 255, 255, 0.5);vertical-align: middle;margin-top: -3px;font-size: 18px;'>thumb_up</span></div></div><div style='margin-top:1px;text-overflow: ellipsis;overflow: hidden;white-space: nowrap;'><a href='javascript:;' onclick='%s(&quot;", votes, open);
@@ -2033,7 +2083,7 @@ static void hub_render_creation(const int is_mod, const cJSON *t) {
     sb_appendf(&sb, "<span class='material-icons creationAction del canDeleteCreations%s' onclick='deleteCreationConf(%d,%d);'>delete_forever</span><span class='material-icons creationAction canFeatureCreations%s%s' onclick='featureCreation(this, %d,%d);'>check_circle</span></div>",
                dev ? "" : " hide", id, is_mod, featured ? " sel" : "", dev ? "" : " hide", id, is_mod);
     sb_append(&sb, "<img draggable='false' class='mapPageThumb' src='");
-    sb_append_esc(&sb, image && *image ? image : "./img/noimg.png");
+    sb_creation_thumb(&sb, is_mod, id, info_thumb(t, is_mod ? "mod_info" : "mi"), image);
     sb_append(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";'><div style='display: inline-block;width: calc(100% - 260px);'>");
     if (is_mod) {
         sb_append(&sb, "<div style='font-size:22px;margin-bottom: 2px;color:#fff'>");
@@ -2175,8 +2225,13 @@ static void append_post_author(StrBuf *sb, const cJSON *e) {
     if (jnum(e, "ftr")) sb_append(sb, " <i class='material-icons' style='margin-bottom:5px;font-size:25px;color:#40C4FF;vertical-align:middle;margin-left:-2px'>check_circle</i>");
 }
 
-// f516(post, single, fromProfile): one feed post (text posts, game / mod links, invites;
-// skin unboxings need the v7 skin table KrunkNative's viewer data does not carry yet)
+// iïiïiìî's post (hub-10.0.7.js:4878-4944): text posts, game / mod links and invites with their thumb.png, skin
+// unboxings with the skin's picture (game results, typ 8, and KR giveaways, typ 9, are not drawn yet)
+static const ViewerSkin *hub_skin(int index);
+static const char *rarity_color(const ViewerSkin *s);
+static int rarity_animate(const ViewerSkin *s);
+static void skin_preview(char *out, size_t n, const ViewerSkin *skin);
+
 static void append_post(StrBuf *sb, const cJSON *e, const int single) {
     char ago[64] = "Just Now";
     if (jnum(e, "tim") > 0) {
@@ -2189,11 +2244,48 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
     sb_pfp(sb, jnum(e, "pli"), jnum(e, "prm") > 0, "./img/player_pfp.png");
     sb_append(sb, "' /><div class='postInfo'><div>");
     append_post_author(sb, e);
-    sb_appendf(sb, "<span class='postTime'>%s</span></div><span class='postSubInfo'>%s Followers</span></div><div class='postContent'><div style='overflow-x:hidden;color:rgba(255,255,255,0.8);user-select: text;'>", ago, flw);
-    const char *txt = jstr(e, "txt");
-    if (txt) sb_append_served(sb, txt);
+    sb_appendf(sb, "<span class='postTime'>%s</span></div><span class='postSubInfo'>%s Followers</span></div><div class='postContent'>", ago, flw);
     const int typ = (int) jnum(e, "typ");
     const char *lnk = jstr(e, "lnk"), *lnk2 = jstr(e, "lnk2");
+    // the post's picture (hub-10.0.7.js:4883-4910, 4944): a game's or mod's thumb.png (lnk / lnk2 as parseInt), an
+    // unboxed skin's thumbnail with its name over it
+    const cJSON *lj = cJSON_GetObjectItemCaseSensitive(e, "lnk"), *l2j = cJSON_GetObjectItemCaseSensitive(e, "lnk2");
+    const long long lnk_n = cJSON_IsNumber(lj) ? (long long) lj->valuedouble : lnk ? atoll(lnk) : 0;
+    const long long lnk2_n = cJSON_IsNumber(l2j) ? (long long) l2j->valuedouble : lnk2 ? atoll(lnk2) : 0;
+    char img[400] = "", path[48];
+    const ViewerSkin *unboxed = typ == 5 ? hub_skin((int) lnk_n) : NULL;
+    if ((typ == 2 || typ == 3) && lnk_n > 0) {
+        snprintf(path, sizeof(path), "/m%s%lld/thumb.png", typ == 3 ? "d" : "", lnk_n);
+        ua_url(img, sizeof(img), path);
+    } else if (typ == 7 && lnk2_n > 0) {
+        snprintf(path, sizeof(path), "/m%lld/thumb.png", lnk2_n);
+        ua_url(img, sizeof(img), path);
+    } else if (unboxed) {
+        skin_preview(img, sizeof(img), unboxed);
+    }
+    if (img[0]) {
+        sb_append(sb, "<img class='postIMG' onclick='");
+        if (typ == 2 || typ == 3) {
+            sb_append(sb, typ == 2 ? "playMap(&quot;" : "playMod(&quot;");
+            if (lnk2) sb_append_js_escape(sb, lnk2);
+            else sb_append(sb, "null");
+            sb_append(sb, "&quot;)");
+        } else if (unboxed) {
+            sb_appendf(sb, "viewItem(%lld)", lnk_n);
+        }
+        sb_append(sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' src='");
+        sb_append_esc(sb, img);
+        sb_append(sb, "'/>");
+        if (unboxed) {
+            const char *col = rarity_color(unboxed);
+            sb_appendf(sb, "<div class='imgTextO %s' style='color:%s'>", rarity_animate(unboxed) ? "rainbowText" : "", !strcmp(col, "#292929") ? "#fff" : col);
+            sb_append_esc(sb, unboxed->name);
+            sb_append(sb, "</div>");
+        }
+    }
+    sb_append(sb, "<div style='overflow-x:hidden;color:rgba(255,255,255,0.8);user-select: text;'>");
+    const char *txt = jstr(e, "txt");
+    if (txt) sb_append_served(sb, txt);
     if (typ == 2 && lnk2) {
         sb_append(sb, " <a href='/?play=");
         sb_append_served(sb, lnk2);
@@ -2206,6 +2298,10 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
         sb_append(sb, " <a href='/?game=");
         sb_append_served(sb, lnk);
         sb_append(sb, "' target='_blank' class='blueLink'>Join Now!</a>");
+    } else if (unboxed) {
+        sb_append(sb, "Just unboxed a ");
+        sb_append_esc(sb, unboxed->name);
+        sb_append(sb, "!");
     }
     sb_append(sb, "</div></div></div>");
     if (!single) append_post_footer(sb, e, 0);
@@ -2386,9 +2482,45 @@ static void append_item_label(StrBuf *sb, const ViewerSkin *s, const char *cls, 
     }
 }
 
+// A spray's animation, v10's iìïîìiî(skin, name) (config-10.0.7.js:4870): the sheet steps through the store item's
+// `frames` in 1 + frameT / 1000 s. The frames come from the skin table (store.skins frames / frameT, the viewer
+// table's .frames / .frame_t, gen_viewer_store.js). The list collects each sheet length it drew, and its <style> has
+// one "@keyframes <name><frames>" per length, shifting the sheet by frames * the list's width (hub-10.0.7.js:2706
+// offers 60, 3264 / 3353 / 4149 market cards 200, 3432 / 3529 / 4852 the sales page and popups 220, 4026 / 5518
+// the trade windows 60).
+typedef struct SprayAnims {
+    const char *name; // the animation's name: "sprayAnm", "sprayAnmOf", "sprayPopAnm"
+    int n, frames[32];
+} SprayAnims;
+static SprayAnims *g_spray_anims; // the list being drawn (append_skin_img), NULL for none
+
+static void spray_anim_style(StrBuf *sb, const ViewerSkin *s, const char *name) {
+    if (s->frames) sb_appendf(sb, "animation: %s%d %.15gs steps(%d) infinite;", name, s->frames, 1 + s->frame_t / 1000.0, s->frames);
+}
+
+static void spray_anims_add(SprayAnims *a, const ViewerSkin *s) {
+    if (!a || s->type != 4 || !s->frames) return;
+    for (int i = 0; i < a->n; i++)
+        if (a->frames[i] == s->frames) return;
+    if (a->n < (int) (sizeof(a->frames) / sizeof(a->frames[0]))) a->frames[a->n++] = s->frames;
+}
+
+// the list's "<style>@keyframes <name><frames> {100%{background-position:-<frames * width>px}}...</style>", "" for none
+static void spray_anims_keyframes(StrBuf *sb, const SprayAnims *a, const int width) {
+    if (!a || !a->n) return;
+    sb_append(sb, "<style>");
+    for (int i = 0; i < a->n; i++) sb_appendf(sb, "@keyframes %s%d {100%%{background-position:-%dpx}}", a->name, a->frames[i], a->frames[i] * width);
+    sb_append(sb, "</style>");
+}
+
 static void append_skin_img(StrBuf *sb, const ViewerSkin *s, const char *preview, const char *spray_cls, const char *img_cls) {
     if (s->type == 4) {
-        sb_appendf(sb, "<div class='%s' style='background: url(&quot;%s&quot;);'></div>", spray_cls, preview);
+        sb_appendf(sb, "<div class='%s' style='background: url(&quot;%s&quot;);", spray_cls, preview);
+        if (g_spray_anims) {
+            spray_anim_style(sb, s, g_spray_anims->name);
+            spray_anims_add(g_spray_anims, s);
+        }
+        sb_append(sb, "'></div>");
     } else {
         sb_appendf(sb, "<img draggable='false' class='%s%s' src='%s'/>", img_cls, (s->flags & VS_RGB) ? " rgbHue" : "", preview);
     }
@@ -2602,6 +2734,8 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
         return;
     }
     *shown = 1;
+    SprayAnims anims = {.name = "sprayAnmOf"};
+    g_spray_anims = &anims;
     StrBuf pe[3] = {{0}, {0}, {0}};
     int fe[3] = {0, 0, 0};
     offers_clear(); // the rows viewOffer reads back
@@ -2690,6 +2824,8 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
     static const char *const ids[3] = {"in", "out", "his"};
     static const char *const heads[3][2] = {{"social.trades.in.head", "Incoming Offers ({0})"}, {"social.trades.out.head", "Outgoing Offers ({0})"},
                                             {"social.trades.history.head", "Trade History ({0})"}};
+    g_spray_anims = NULL;
+    spray_anims_keyframes(out, &anims, 60);
     // iiîiïií(trades, acc, more) (hub-10.0.7.js:2677-2714): the three columns side by side, no tabs
     for (int i = 0; i < 3; i++) {
         char count[64], head[160], decline[128] = "";
@@ -2706,8 +2842,11 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
 }
 
 // One market / inventory / sales card (row v of g_market_rows; showPopup reads it back).
+static SprayAnims g_market_anims = {.name = "sprayAnm"};
+
 static void market_card(StrBuf *sb, const int pos, void *user) {
     (void) user;
+    g_spray_anims = &g_market_anims;
     if (pos < 0 || pos >= g_market_view_n) return;
     const int v = g_market_view[pos];
     const MarketRow *m = &g_market_rows[v];
@@ -2739,6 +2878,7 @@ static void market_card(StrBuf *sb, const int pos, void *user) {
     if (!inventory) sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='searchItem(%d)'>Search</a>", m->skin);
     else sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='quickSell(%d,%d,%d)'>Quick Sell</a>", m->skin, pe->rarity, m->uid);
     sb_appendf(sb, "<div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='openLink(&quot;/social.html?p=itemsales&i=%d&quot;, &quot;_blank&quot;)'>Info</a></div></div>", m->skin);
+    g_spray_anims = NULL;
 }
 
 // io_0("market", sub, rows): the market / inventory / sales / stats / trades lists
@@ -2772,6 +2912,8 @@ static void hub_render_market(const char *a, const cJSON *t) {
         } else if (!strcmp(sub, "blackm")) {
             // every store.skins entry with `illicit` (re = 1: never "No Items Found")
             shown = 1;
+            SprayAnims anims = {.name = "sprayAnm"};
+            g_spray_anims = &anims;
             int n_illicit = 0;
             const IllicitSkin *illicit = econ_black_market(&n_illicit);
             for (int i = 0; i < n_illicit; i++) {
@@ -2790,6 +2932,8 @@ static void hub_render_market(const char *a, const cJSON *t) {
                 comma_number(price, sizeof(price), il->funds);
                 sb_appendf(&sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div><div class='purchInfoBtn' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openLink(&quot;/social.html?p=itemsales&i=%d&quot;, &quot;_blank&quot;)'>?</div></div>", price, il->skin);
             }
+            g_spray_anims = NULL;
+            spray_anims_keyframes(&sb, &anims, 200);
         } else if (!strcmp(sub, "trades")) {
             hub_render_trades(&sb, t, &shown);
             if (shown < 0) {
@@ -2831,6 +2975,13 @@ static void hub_render_market(const char *a, const cJSON *t) {
                 }
                 if (shown) {
                     vgrid_begin(&g_market_grid, "marketList", g_market_view_n, market_card, NULL);
+                    g_market_anims.n = 0;
+                    for (int i = 0; i < g_market_view_n; i++) spray_anims_add(&g_market_anims, hub_skin(g_market_rows[g_market_view[i]].skin));
+                    StrBuf kf = {0};
+                    spray_anims_keyframes(&kf, &g_market_anims, 200); // hub-10.0.7.js:3353
+                    char *kfs = sb_finish(&kf);
+                    vgrid_set_prefix(&g_market_grid, kfs);
+                    free(kfs);
                     vgrid_html(&g_market_grid, &sb);
                 }
                 // #invStats (hub-10.0.7.js:3349): "N / <skins> Items" and Est. Value, or My Sales' "N / 20 (40 premium)
@@ -2875,7 +3026,12 @@ static void hub_render_itemsales(const cJSON *t, const cJSON *owners) {
     skin_preview(prev, sizeof(prev), pe);
     const char *col = rarity_color(pe);
     StrBuf sb = {0};
-    if (pe->type == 4) sb_appendf(&sb, "<div class='sprayPopupImg' style='background: url(&quot;%s&quot;);margin-top:0px;border:5px solid %s'></div>", prev, col);
+    if (pe->type == 4) {
+        if (pe->frames) sb_appendf(&sb, "<style>@keyframes sprayAnm%d {100%%{background-position:-%dpx}}</style>", pe->frames, pe->frames * 220);
+        sb_appendf(&sb, "<div class='sprayPopupImg' style='background: url(&quot;%s&quot;);margin-top:0px;border:5px solid %s;", prev, col);
+        spray_anim_style(&sb, pe, "sprayAnm");
+        sb_append(&sb, "'></div>");
+    }
     else sb_appendf(&sb, "<div class='imgWepH%s' style='border:5px solid %s'><img draggable='false' class='imgWep%s' src='%s'></div>", rarity_animate(pe) ? " rainbowBorder" : "", col, (pe->flags & VS_RGB) ? " rgbHue" : "", prev);
     append_item_label(&sb, pe, "itemLabel", "top: 202px;left: 0px;");
     sb_appendf(&sb, "<div class='popupImgSeason' style='top: 8px;left: 12px;'>Season %d</div>", pe->seas ? pe->seas : 1);
@@ -3328,7 +3484,12 @@ static void market_popup_html(StrBuf *out, const MarketPop *p) {
     const char *col = rarity_color(g);
     StrBuf sb = {0};
     sb_appendf(&sb, "<div class='popupImgSeason'>Season %d</div>", g->seas ? g->seas : 1);
-    if (g->type == 4) sb_appendf(&sb, "<div class='sprayPopupImg' style='background: url(&quot;%s&quot;);border:5px solid %s;'></div>", p->preview, col);
+    if (g->type == 4) {
+        if (g->frames) sb_appendf(&sb, "<style>@keyframes sprayPopAnm%d {100%%{background-position:-%dpx}}</style>", g->frames, g->frames * 220);
+        sb_appendf(&sb, "<div class='sprayPopupImg' style='background: url(&quot;%s&quot;);border:5px solid %s;", p->preview, col);
+        spray_anim_style(&sb, g, "sprayPopAnm");
+        sb_append(&sb, "'></div>");
+    }
     else sb_appendf(&sb, "<div class='popupImgH%s' style='border:5px solid %s;'><img draggable='false' class='popupImg%s' src='%s'/></div><div class='popupImgInfo' onclick='openViewer(%d)'>3D</div>", rarity_animate(g) ? " rainbowBorder" : "", col, (g->flags & VS_RGB) ? " rgbHue" : "", p->preview, p->skin);
     const IllicitSkin *il = illicit_skin(p->skin);
     if (il) sb_append(&sb, "<div class='itemLabel' style='background-color:#00ffff'>?\?\?</div>");
@@ -3945,10 +4106,17 @@ static int login_modal_message(const char *msg);
 // io_a(error, id, username, data, token): the login reply (account_ui.c keeps the account
 // itself: storage keys, level, KR). A guest game server refuses every login.
 static void io_a(const char *error) {
+    // the page request hub_connected held back: v10's socket is signed in from its URL (pat=), so
+    // its first page request already answers as the account; the brain's session signs in with "a"
+    const int page = g_hub.page_after_login && strcmp(g_hub.v, "feed"); // the feed requests below
+    g_hub.page_after_login = 0;
     if (!error) {
         // success: acc = new Account(...)
         const AccountInfo *acc = active_account();
-        if (!acc) return;
+        if (!acc) {
+            if (page) request_page();
+            return;
+        }
         if (!g_hub.fe) io_po(1, NULL);
         g_hub.fe = 0;
         g_hub.logged_in = 1;
@@ -3974,6 +4142,7 @@ static void io_a(const char *error) {
             set_display("postEntryC", "inline-block");
             request_page();
         }
+        if (page) request_page();
         chat_sidebar(acc);
         return;
     }
@@ -3981,7 +4150,7 @@ static void io_a(const char *error) {
     set_html("profileName", "");
     set_display("profileLogin", "inline-block");
     set_display("chatHolder", "none");
-    if (!strcmp(g_hub.v, "feed")) request_page(); // Qa()
+    if (!strcmp(g_hub.v, "feed") || page) request_page(); // Qa()
     if (!g_hub.fe && !login_modal_message(error)) io_po(0, error); // v10: the modal's message line
     g_hub.fe = 0;
 }
@@ -5302,6 +5471,8 @@ static void trade_update_fee(void) {
     set_html("trdSubBt", t);
 }
 
+static SprayAnims g_trade_anims = {.name = "sprayAnm"};
+
 static void trade_item_html(StrBuf *sb, const int side, const TradeItem *it, const int in_list) {
     const ViewerSkin *pa = hub_skin(it->i);
     if (!pa) return;
@@ -5311,7 +5482,9 @@ static void trade_item_html(StrBuf *sb, const int side, const TradeItem *it, con
                             side, it->i, g_hub.rarity_anim && rarity_animate(pa) ? " rainbowBorder" : "", it->i, side, it->i, rarity_color(pa));
     else sb_appendf(sb, "<div id='trd_inv_%d_%d' class='tItemHolder%s' onclick='addItem(%d, %d)' data-index='%d' style='border: 2px solid %s;'>",
                     side, it->i, g_hub.rarity_anim && rarity_animate(pa) ? " rainbowBorder" : "", it->i, side, it->i, rarity_color(pa));
+    g_spray_anims = &g_trade_anims;
     append_skin_img(sb, pa, prev, "tItemSprayImg", "tItemImg");
+    g_spray_anims = NULL;
     sb_append(sb, "<div class='tItemN'>");
     sb_append_esc(sb, pa->name);
     sb_appendf(sb, "</div><div class='tItemCnt' id='%s_%d_%d'>x%d</div>", in_list ? "trd_cnt" : "trd_inv_cnt", side, it->i, it->c);
@@ -5354,6 +5527,7 @@ static void io_trd(const char *name, const int id, const cJSON *invs) {
     g_trade.msg[0] = 0;
     const int mx = trade_max_items();
     StrBuf sb = {0};
+    g_trade_anims.n = 0;
     for (int side = 0; side < 2; side++) {
         sb_appendf(&sb, "<div class='%s'><div class='tListN inv'>", side ? "tHolderR" : "tHolderL");
         if (side) {
@@ -5381,6 +5555,7 @@ static void io_trd(const char *name, const int id, const cJSON *invs) {
     sb_append(&sb, "<div style='clear:both'></div><textarea id='tMsg' placeholder='Add a message to the offer'></textarea>");
     sb_appendf(&sb, "<div class='tSubOffer' id='trdSubBt' onclick='confSubmitOffer(%d)'>Submit Offer</div>", id);
     sb_append(&sb, "<div class='material-icons tradeSwap' title='Toggle Missing Items' onclick='showMissingItems(this)'>rule</div>");
+    spray_anims_keyframes(&sb, &g_trade_anims, 60);
     char *html = sb_finish(&sb);
     generic_popup(html, "tradePop", NULL);
     free(html);
@@ -5694,6 +5869,8 @@ H(h_view_offer) {
     qsort(take, (size_t) o->ntake, sizeof(int), cmp_offer_ids);
     const int most = o->ngive > o->ntake ? o->ngive : o->ntake, pad = (most + 4) / 5 * 5;
     StrBuf sb = {0};
+    SprayAnims anims = {.name = "sprayAnm"};
+    g_spray_anims = &anims;
     sb_appendf(&sb, "<div style='display: block;height:unset'><div class='tHolderL'><div class='tListN inv'>Your Items [%d]</div>", o->ngive);
     offer_side_html(&sb, give, o->ngive, pad, o->kr_give);
     sb_append(&sb, "</div><div class='tHolderR'><div class='tListN inv'>");
@@ -5701,6 +5878,8 @@ H(h_view_offer) {
     sb_appendf(&sb, "'s Items [%d]</div>", o->ntake);
     offer_side_html(&sb, take, o->ntake, pad, o->kr_take);
     sb_append(&sb, "</div><div style='clear:both'></div></div>");
+    g_spray_anims = NULL;
+    spray_anims_keyframes(&sb, &anims, 60);
     if (o->message && o->message[0]) {
         if (g_hub.show_trade_msg) {
             sb_append(&sb, "<textarea id='tMsg' style='cursor: none;' readonly>");
@@ -5857,6 +6036,8 @@ static void io_ul(const cJSON *rows) {
         }
         set_market_rows(m, k, "market");
         sb_appendf(&sb, "<div class='scrollItemNew' style='width:%dpx'>", k > 3 ? 1000 : 900);
+        SprayAnims anims = {.name = "sprayAnm"};
+        g_spray_anims = &anims;
         for (int i = 0; i < k; i++) {
             const ViewerSkin *pe = hub_skin(m[i].skin);
             if (!pe || (pe->flags & (VS_FREE | VS_BLOCKED))) continue;
@@ -5874,6 +6055,8 @@ static void io_ul(const cJSON *rows) {
             sb_appendf(&sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='showPopup(&quot;market&quot;,%d,%d)'>Purchase</a><div class='cardActionSep'></div>", m[i].skin, i);
             sb_appendf(&sb, "<a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='searchItem(%d)'>Search</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openSales(%d)'>Info</a></div></div>", m[i].skin, m[i].skin);
         }
+        g_spray_anims = NULL;
+        spray_anims_keyframes(&sb, &anims, 200);
         sb_append(&sb, "</div>");
     } else {
         sb_append(&sb, "<div class='scrollItemNew'><div class='noneText'>No Market Listings!</div></div>");
@@ -7856,6 +8039,7 @@ static void hub_connected(void) {
             set_display("profileLogin", "none");
             set_html("profileName", I18N("social.login.proccessing", "Logging in..."));
             g_hub.fe = 1;
+            g_hub.page_after_login = 1;
         }
     } else {
         set_display("profileLogin", "inline-block");
@@ -7869,7 +8053,7 @@ static void hub_connected(void) {
     // API_CLIENT.listMaps(2, 0): the featured games of the maps Home card (v3540); KN's /maps
     // index 1 is Featured
     api_request("/maps", 1, 0, NULL, NULL, NO_CATEGORY);
-    request_page(); // Xa(v, b, K, q, k, V, x)
+    if (!g_hub.page_after_login) request_page(); // Xa(v, b, K, q, k, V, x); else at io_a
 }
 
 // URL parameter of "p=profile&q=x" (decoded: %XX and '+').

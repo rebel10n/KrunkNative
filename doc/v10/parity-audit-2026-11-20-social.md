@@ -242,7 +242,80 @@ otherwise) and hub_creator_e2e (a seeded approved WebP drawn in a chat message a
     are Box Office additions.
   - The developers' Creator button (`creatorPopup`).
   - The map page's Versions tab (`revertMapVersion`).
-  - The catalogue thumbnails where v10 uses `<assets>/m<id>/thumb.png`. Box Office has no per-map thumbnail upload.
-  - Animated sprays (`sprayAnmOf<frames>` keyframes). The viewer's skin table does not carry `frames`, and only one
-    catalogue item has them. Sprays show their first frame.
+  - The catalogue thumbnails where v10 uses `<assets>/m<id>/thumb.png`, and still-frame sprays. Both are done
+    since, see "Sprays and map thumbnails" below. (The note here said the skin table lacked `frames`. That was
+    wrong: the viewer table has had `.frames` / `.frame_t` from gen_viewer_store.js all along.)
+
+
+## Sprays and map thumbnails, 2026-11-23
+
+- **Animated sprays.**
+  - How v10 knows a spray's frames: from the store item's `frames` and `frameT` (store.skins; a studio skin's are
+    copied the same way, config-BDN_kuhS.js:5208-5210). Nothing is derived from the texture.
+  - KN's viewer table already has these fields as `.frames` / `.frame_t` (gen_viewer_store.js:86, from
+    assets/skins.json). 41 sprays have them.
+  - The hub now draws each one as v10 does, through iìïîìiî (config:4870): `animation: <name><frames>
+    <1 + frameT/1000>s steps(<frames>) infinite`.
+  - Each list's `<style>` carries one `@keyframes <name><frames> {100%{background-position:-<frames * W>px}}` per
+    length, with v10's name and width W for each list:
+
+    | List | Name | W |
+    |---|---|---|
+    | Trade offer rows (:2706) | `sprayAnmOf` | 60 |
+    | Market, Inventory, My Sales and Black Market cards (:3264, :3353) | `sprayAnm` | 200 |
+    | The profile's Listings (:4149) | `sprayAnm` | 200 |
+    | The item sales page (:3432) | `sprayAnm` | 220 |
+    | showPopup (:4852) | `sprayPopAnm` | 220 |
+    | viewOffer (:4026) | `sprayAnm` | 60 |
+    | The trade window (:5518) | `sprayAnm` | 60 |
+
+  - The market lists draw cards lazily (ui_vgrid.c), so their keyframes cover every row of the list.
+  - The Market Stats tab is left still. v10 names its cards' animation `sprayAnm` but writes `sprayStatAnm`
+    keyframes (:3210, :3224), so nothing moves there in v10 either.
+  - The native HTML engine read `<style>` only at page load, so these keyframes (and the events popup's
+    `sprayAnmB`, Settings' `sprayAnmD` and the loadout's `sprayAnm` / `custIconAnm`) never registered and the
+    sprays stood still. Fixed in engine.c (engine_style_elements):
+    - dom.c counts every `<style>` element added, removed or moved, and every change to its text
+      (dom_style_epoch);
+    - when that count moves, the engine registers the @keyframes of the `<style>` elements added since load. It
+      rebuilds the sets as Chrome resolves them: the UA sheet, the author sheets, then those elements in
+      document order, the later one winning a name. A removed element's sets go with it;
+    - only @keyframes are taken from them, which is all the UI writes in a runtime `<style>`.
+  - hub_creator_e2e: an Inventory spray (Clickbait, 2 frames, frameT 550) has `sprayAnm2 1.55s steps(2)`, the
+    list has its keyframes, and screenshots of the card show both frames. html_runtime_sheet_test checks the
+    epoch.
+- **Map thumbnails.**
+  - kn_brain answers `m<id>/thumb.png` for a live Box Office map from the PNG the editor's Publish sent (see
+    doc/backend.md, user assets). A map without one is a 404, and an id with no Box Office map goes to the
+    Krunker mirror.
+  - The hub uses v10's URLs wherever v10 does, with the same `map_info.t` / `mod_info.t` / `dat.t` conditions:
+    - the Games and Mods lists (:6534, :6611);
+    - the profile's Creations (:3023, :3066, :3085);
+    - the map and mod pages (:3142, :3163; the map page reads `mi`);
+    - the featured map card, always (:6179);
+    - the featured mod card. Its string is v10's own: `url(<thumb or ''>.png)`, so `thumb.png.png` (:6322).
+  - Feed posts now show v10's `postIMG`: a game's or mod's thumb.png (typ 2, 3, 7), and an unboxed skin's
+    picture with its name and "Just unboxed a <name>!" (typ 5) (:4883-4944).
+  - The Mod Manager (mods_ui.c) points Box Office mods' thumbnails at kn_brain's host; they were on Krunker's.
+  - brain_user_assets_e2e: served, 404, mirror, deleted. hub_creator_e2e: the map page's src, the bytes, and the
+    drawn colour.
+- **The first page waits for the saved login.**
+  - v10's hub socket is signed in from its URL (`pat=`, hub:7050). So the page request it sends on connect
+    (:7063-7065) already answers as the account.
+  - kn_brain's session signs in with the `a` that account_ui.c's restore sends. When that is still in flight
+    ("Logging in..."), hub_connected used to request the page anyway. The brain answered a guest's null, and
+    ?p=market&q=trades stayed on "You must be logged in....".
+  - Now that request waits for the login reply (io_a, either way).
+  - economy_hub_e2e's "bob sees the incoming offer" failed on this.
+- **Still different, found while doing this.** These are bigger than this round:
+  - The Market Stats tab is v3.1.1's "Rarest Items" list. v10 shows market cards with "In Circulation" (:3197-3226).
+  - The market and Black Market cards miss v10's fields:
+    - `data-index` and the tip (Black Market);
+    - the developer's "ID:" line;
+    - `marketImgP` / `marketImgS`;
+    - v10's isAnim conditions and the `hasSnd` icon;
+    - Preview / Info actions;
+    - `blackMDone`.
+  - KN's `showPopup(page, skin, row)` is v3.1.1's signature, not v10's twelve arguments.
+  - Feed posts do not draw game results (typ 8, `#postGameRes`) or KR giveaways (typ 9, `krGivPost`).
 

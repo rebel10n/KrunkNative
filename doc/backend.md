@@ -1190,6 +1190,16 @@ this way at it: the navbar, the profile, the feed composer, posts, comments, cha
 (`social_ui.c` `pfp_url`). A krunker.io account's hub uses `user-assets.krunker.io`. Tests:
 `brain_avatar_e2e`, `hub_creator_e2e`.
 
+`m<id>/thumb.png` is a map's thumbnail, at the path Krunker's hub builds for one (`<userAssetsHost>/m<id>/thumb.png`
+when the map's `map_info.t` is set, hub-10.0.7.js:3023, 3163, 6534; the featured card and feed posts always,
+:4886, :6179). When Box Office has a live published map with that id, it is that map's thumbnail: the PNG the
+editor's Publish sends (`["uploadM", data, thumbDataUrl, ...]`, stored as `published_maps.map_image`, which also
+sets `map_info.t`). It is answered with `Cache-Control: no-cache` and an ETag of its sha256, since a republish
+replaces it. A Box Office map without a thumbnail is a 404. Any other id is Krunker's map, mirrored as above. A
+Box Office mod's `md<id>/thumb.png` is its upload's file (ids from `USER_ASSET_KN_ID_BASE`, `asset_upload.c`).
+The hub and the Mod Manager point at these URLs on kn_brain's `/user-assets` (`social_ui.c` `ua_url`,
+`mods_ui.c` `thumb_host`). Tests: `brain_user_assets_e2e`, `hub_creator_e2e`.
+
 `<id>/video.mp4.knv` is not on Krunker's host: it is the asset's `video.mp4` (fetched as above) as
 KrunkNative's frame sidecar (`shared/include/knv.h`), made with `user_assets.ffmpeg` (role `kn_brain`
 installs ffmpeg) and cached like a fetched file; the clients play it on the map object

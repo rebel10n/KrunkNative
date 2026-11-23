@@ -87,6 +87,7 @@ struct Dom {
 
     int any_dirty;
     const DomInvalidation *inv;      /* rule-aware invalidation (not owned) */
+    uint32_t style_epoch;            /* bumped when a <style> element is added, removed, moved or its text changes */
 };
 
 static ElemData *elem_data(Dom *dom, HtmlElem e)
@@ -145,6 +146,9 @@ static ElemData *register_node(Dom *dom, lxb_dom_node_t *node)
     }
     d->handle = dom->table_len++;
     d->node = node;
+    if (node->local_name == LXB_TAG_STYLE) {
+        dom->style_epoch++;
+    }
     d->dirty = DOM_DIRTY_STYLE | DOM_DIRTY_CHILDREN | DOM_DIRTY_TEXT;
     node->user = d;
     dom->table[d->handle] = d;
@@ -171,6 +175,9 @@ static void unregister_node(Dom *dom, lxb_dom_node_t *node)
     }
     dom->table[d->handle] = NULL;
     dom->live--;
+    if (node->local_name == LXB_TAG_STYLE) {
+        dom->style_epoch++;
+    }
     inline_clear(d);
     free(d->computed);
     free(d->before);
@@ -1274,9 +1281,38 @@ lxb_tag_id_t dom_tag_id(Dom *dom, HtmlElem e)
 /* Mutation                                                                   */
 /* ------------------------------------------------------------------------- */
 
+/* `node` is, holds or sits in a <style> element (its sheet text changes with it). */
+static int touches_style(lxb_dom_node_t *node)
+{
+    if (node->parent != NULL && node->parent->local_name == LXB_TAG_STYLE) {
+        return 1;
+    }
+    lxb_dom_node_t *n = node;
+    while (n != NULL) {
+        if (n->type == LXB_DOM_NODE_TYPE_ELEMENT && n->local_name == LXB_TAG_STYLE) {
+            return 1;
+        }
+        if (n->first_child != NULL) {
+            n = n->first_child;
+            continue;
+        }
+        while (n != node && n->next == NULL) {
+            n = n->parent;
+        }
+        if (n == node) {
+            break;
+        }
+        n = n->next;
+    }
+    return 0;
+}
+
 static void after_insert(Dom *dom, lxb_dom_node_t *node)
 {
     register_subtree(dom, node);
+    if (touches_style(node)) {
+        dom->style_epoch++; /* moved: the document order of the sheets changed */
+    }
     if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
         mark_node(dom, node, DOM_DIRTY_STYLE | DOM_DIRTY_DESCENDANTS);
         mark_structural(dom, node->parent, node->next);
@@ -1423,6 +1459,9 @@ int dom_set_html(Dom *dom, HtmlElem e, const char *html, size_t len)
         return -1;
     }
     remove_children(dom, n);
+    if (n->local_name == LXB_TAG_STYLE) {
+        dom->style_epoch++;
+    }
     frag = parse_fragment(dom, n, html, len);
     if (frag == NULL) {
         return -1;
@@ -1486,6 +1525,9 @@ void dom_set_text(Dom *dom, HtmlElem e, const char *text, size_t len)
         return;
     }
     remove_children(dom, n);
+    if (n->local_name == LXB_TAG_STYLE) {
+        dom->style_epoch++;
+    }
     if (len > 0) {
         lxb_dom_text_t *t = lxb_dom_document_create_text_node(lxb_dom_interface_document(dom->doc), (const lxb_char_t *)text, len);
         if (t != NULL) {
@@ -1505,6 +1547,9 @@ void dom_append_text(Dom *dom, HtmlElem parent, const char *text, size_t len)
     t = lxb_dom_document_create_text_node(lxb_dom_interface_document(dom->doc), (const lxb_char_t *)text, len);
     if (t != NULL) {
         lxb_dom_node_insert_child(n, lxb_dom_interface_node(t));
+    }
+    if (n->local_name == LXB_TAG_STYLE) {
+        dom->style_epoch++;
     }
     mark_node(dom, n, DOM_DIRTY_CHILDREN | DOM_DIRTY_TEXT);
 }
@@ -2246,6 +2291,11 @@ void dom_mark_all_dirty(Dom *dom)
         mark_node(dom, elem_node(dom, root), DOM_DIRTY_STYLE | DOM_DIRTY_DESCENDANTS);
     }
     dom->any_dirty = 1;
+}
+
+uint32_t dom_style_epoch(const Dom *dom)
+{
+    return dom != NULL ? dom->style_epoch : 0;
 }
 
 int dom_any_style_dirty(Dom *dom)

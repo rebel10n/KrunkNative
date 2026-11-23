@@ -243,6 +243,20 @@ def map_page(port, ids, tokens, names, map_name, map_id, stamp):
     c = Client(port, names[0], tokens[0], "p=map&q=" + map_name, "creator")
     try:
         check(c.has("mapTabsP", 60), "the creator's map page")
+        # the map's picture: map_info.t, so v10's <user assets>/m<id>/thumb.png (hub-10.0.7.js:3163), which kn_brain answers
+        # with the PNG the editor's Publish sent (user_assets.c)
+        thumb_url = "http://127.0.0.1:%d/user-assets/m%d/thumb.png" % (port, map_id)
+        check(c.count(".mapPageThumb[src='%s']" % thumb_url) == 1, "the map page's thumbnail is m%d/thumb.png" % map_id)
+        import urllib.request
+        with urllib.request.urlopen(thumb_url, timeout=10) as resp:
+            check(resp.status == 200 and resp.read() == png(64, 32), "kn_brain serves the published thumbnail at m%d/thumb.png" % map_id)
+        rgb = None
+        for _ in range(20):
+            rgb = c.pixel_at_centre(".mapPageThumb", "map-thumb")
+            if near(rgb, (128, 64, 32)):
+                break
+            time.sleep(0.5)
+        check(near(rgb, (128, 64, 32)), "and the page draws it: %r" % (rgb,))
         # iíïïiìi(am(map_name) + " - Krunker Hub") (hub-10.0.7.js:3164, 7136-7141)
         check(c.textof("title") == map_name + " - Krunker Hub", "document.title: %r" % c.textof("title"))
         c.ui("updateMapTab(2, true)")
@@ -401,6 +415,7 @@ def trade_history(port, ids, tokens, names):
         q("INSERT INTO trades (sender_id, receiver_id, status, closed_at) VALUES (?, ?, 'declined', strftime('%Y-%m-%d %H:%M:%f', 'now'))",
           A if i % 2 else B, B if i % 2 else A)
     q("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, 20, 1)", A)
+    q("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, 867, 1)", A)  # Clickbait: a 2-frame spray, frameT 550
     q("INSERT INTO market_listings (seller_id, skin_id, price) VALUES (?, 21, 1234)", A)
     c = Client(port, names[0], tokens[0], "p=market&q=trades", "trades")
     try:
@@ -431,8 +446,20 @@ def trade_history(port, ids, tokens, names):
         check(c.text_has(".kn-image-grid", "Blue Scope", 10), "the new image is in the collection")
         # the Inventory / My Sales stats (#invStats, hub-10.0.7.js:3308-3349)
         c.ui("clearPops();updateWindow('market','inventory',null,null,'store')")
-        check(wait(lambda: re.match(r"^1 / \d+ ItemsEst\. Value [\d,]+ KR$", c.textof("#invStats") or ""), 15),
+        check(wait(lambda: re.match(r"^2 / \d+ ItemsEst\. Value [\d,]+ KR$", c.textof("#invStats") or ""), 15),
               "Inventory: N / <skins> Items, Est. Value: %r" % c.textof("#invStats"))
+        # the spray's sheet animates (config-10.0.7.js:4870, hub-10.0.7.js:3334-3353): animation sprayAnm<frames>
+        # (1 + frameT / 1000)s steps(frames), the list's @keyframes moving it frames * 200px
+        spray = "#marketList .sprayMarketImg[style*='sprayAnm2 1.55s steps(2) infinite']"
+        check(wait(lambda: c.count(spray) == 1, 10) and c.count("#marketList style") == 1,
+              "Clickbait's card has v10's animation and the list its keyframes: %d" % c.count(spray))
+        seen = []
+        for k in range(8):
+            rgb = c.pixel_at_centre("#marketList .sprayMarketImg", "spray-%d" % k)
+            if rgb and not any(near(rgb, o, 30) for o in seen):
+                seen.append(rgb)
+            time.sleep(0.25)
+        check(len(seen) >= 2, "and the card steps through its two frames: %r" % (seen,))
         c.ui("updateWindow('market','sales',null,null,'store')")
         check(wait(lambda: (c.textof("#invStats") or "") == "1 / 20 On SalePotential Earnings 1,234 KR", 15),
               "My Sales: 1 / 20 On Sale, Potential Earnings (the listing's price): %r" % c.textof("#invStats"))
@@ -697,7 +724,9 @@ def main():
             map_name = "Hubc_" + stamp
             doc = {"name": map_name, "modes": [0, 1], "spawns": [[0, 1, 0], [4, 1, 0]],
                    "objects": [{"p": [0, 0, 0], "s": [10, 1, 10]}, {"i": PREFAB_LEADERBOARD, "p": [0, 5, 0], "s": [4, 2, 1]}]}
-            r = await socks[0].call("pubMR", "uploadM", json.dumps(doc), None, "", "", 1)
+            import base64
+            thumb = "data:image/png;base64," + base64.b64encode(png(64, 32)).decode()  # the editor's capture: (128, 64, 32)
+            r = await socks[0].call("pubMR", "uploadM", json.dumps(doc), thumb, "", "", 1)
             check(r is not None, "the creator published a map with a LEADERBOARD: %r" % (r,))
             return socks, ids, tokens, map_name
 

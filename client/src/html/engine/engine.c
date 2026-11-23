@@ -98,6 +98,12 @@ struct Engine {
     CssSheet *ua;
     CssSheet *sheets[HTML_ENGINE_MAX_SHEETS];
     int n_sheets;
+    /* <style> elements added after load (innerHTML): their @keyframes, reloaded in document
+     * order after the author sheets' whenever dom_style_epoch moves (engine_style_elements) */
+    HtmlElem page_styles[64];                /* the load-time <style>s, already in sheets[] */
+    int n_page_styles;
+    uint32_t style_epoch;
+    uint64_t dyn_style_hash;                 /* FNV-1a of the added <style>s' texts in order; 0 = none */
 
     TextSystem *text;
     ImageCache *images;
@@ -462,6 +468,56 @@ static void register_keyframes(Engine *g, const CssSheet *sheet)
     if (np) vlog("%s: %d @property rules", css_sheet_name(sheet), np);
 }
 
+static CssSheet *load_sheet_text(Engine *g, const char *text, size_t len, const char *name);
+
+/* <style> elements inserted after load (the hub's spray lists, the events popup, the
+ * loadout, Settings' drops: `<style>@keyframes sprayAnm<N> {...}</style>` in innerHTML).
+ * Chrome applies every <style> in the document, the later one winning a @keyframes name,
+ * and drops a removed one's. The engine keeps the load-time sheets' rules; for the added
+ * elements it registers their @keyframes, which is all the UI puts in them: on a change
+ * of their texts the sets are rebuilt (UA, the author sheets, then the added <style>s in
+ * document order) and everything restyles so running animations pick the new sets up. */
+static void engine_style_elements(Engine *g)
+{
+    const uint32_t epoch = dom_style_epoch(g->dom);
+    if (epoch == g->style_epoch) return;
+    g->style_epoch = epoch;
+    HtmlElem found[256];
+    const size_t n = dom_query_all(g->dom, 0, "style", found, 256);
+    char *texts[256];
+    size_t nt = 0;
+    uint64_t h = 1469598103934665603ULL;
+    for (size_t i = 0; i < n; i++) {
+        int page = 0;
+        for (int k = 0; k < g->n_page_styles && !page; k++) page = g->page_styles[k] == found[i];
+        if (page) continue;
+        char *text = dom_get_text(g->dom, found[i]);
+        if (!text || !strstr(text, "@keyframes")) {
+            free(text);
+            continue;
+        }
+        for (const unsigned char *c = (const unsigned char *) text; *c; c++) h = (h ^ *c) * 1099511628211ULL;
+        h = (h ^ 0xff) * 1099511628211ULL; /* the element boundary */
+        texts[nt++] = text;
+    }
+    if (!nt) h = 0;
+    if (h != g->dyn_style_hash) {
+        g->dyn_style_hash = h;
+        anim_keyframes_clear(&g->anim);
+        if (g->ua) anim_keyframes_load_sheet(&g->anim, g->ua, css_computed_initial());
+        for (int i = 0; i < g->n_sheets; i++) anim_keyframes_load_sheet(&g->anim, g->sheets[i], css_computed_initial());
+        for (size_t i = 0; i < nt; i++) {
+            CssSheet *sheet = load_sheet_text(g, texts[i], strlen(texts[i]), "<style>");
+            if (!sheet) continue;
+            anim_keyframes_load_sheet(&g->anim, sheet, css_computed_initial());
+            css_sheet_destroy(sheet);
+        }
+        g->lctx.memo_epoch++;
+        dom_mark_all_dirty(g->dom);
+    }
+    for (size_t i = 0; i < nt; i++) free(texts[i]);
+}
+
 static CssSheet *load_sheet_text(Engine *g, const char *text, size_t len, const char *name)
 {
     CssSheet *sheet = css_sheet_load(text, len, name);
@@ -483,6 +539,7 @@ static void load_author_sheets(Engine *g)
     for (size_t i = 0; i < n && g->n_sheets < HTML_ENGINE_MAX_SHEETS; i++) {
         const char *tag = dom_tag(g->dom, found[i]);
         if (tag && !strcmp(tag, "style")) {
+            if (g->n_page_styles < (int) (sizeof(g->page_styles) / sizeof(g->page_styles[0]))) g->page_styles[g->n_page_styles++] = found[i];
             char *text = dom_get_text(g->dom, found[i]);
             if (!text) continue;
             CssSheet *sheet = load_sheet_text(g, text, strlen(text), g->page);
@@ -1489,6 +1546,7 @@ static void post_restyle(Engine *g)
 void engine_flush_style(Engine *g)
 {
     if (!g || !g->dom) return;
+    engine_style_elements(g);
     /* Animated inherited values may have queued descendant restyles; loop a
      * bounded number of times so those settle in the same frame. */
     for (int pass = 0; pass < 3 && (dom_any_style_dirty(g->dom) || g->structure_dirty); pass++) {
@@ -2410,6 +2468,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
         register_font_faces(g, g->sheets[i]);
         register_keyframes(g, g->sheets[i]);
     }
+    g->style_epoch = dom_style_epoch(g->dom); /* the load-time <style>s are in sheets[] */
     css_values_set_font_ratio_fn(layout_font_unit_ratios, g->text);   /* ch / ex; after the @font-face faces */
 
     /* events + widgets */
