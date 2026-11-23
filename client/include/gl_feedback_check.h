@@ -109,8 +109,8 @@ static inline void kn_gl_feedback_check(const char *file, const int line) {
             glGetIntegerv(binding, &bound);
             for (int t = 0; bound && t < n; t++) {
                 if (bound != textures[t]) continue;
-                static char seen[64][96]; // warn mode: each call site once (per translation unit)
-                char site[96];
+                static char seen[64][512]; // warn mode: each call site once (per translation unit); a long checkout path must not cut the line off
+                char site[512];
                 snprintf(site, sizeof(site), "%s:%d", file, line);
                 int known = 0, slot = -1;
                 for (int s = 0; s < 64; s++) {
