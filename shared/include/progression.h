@@ -102,6 +102,11 @@ int challenge_progress(const cJSON *challenge, const cJSON *events, const Challe
 // CHALLENGE_COMPLETED [index, true, REW]; the commit (challenges_finalize) still decides and credits it.
 int challenge_reached_mid_match(const cJSON *challenge, double before, double now);
 
+// The same event's UPDATE_CHALLENGES_PROGRESS [CI, progVal] entry (challenges.update, deob-10.0.7.js:180733-180741): 1
+// when progVal moved from `before` (still short of DAT.val) to `now` (at most DAT.val); a set / max key (kstk, uwk ...)
+// only on the event that `completed` it. The client sets PV, and PT = 1 once PV >= DAT.val (:225206-225215).
+int challenge_progress_reported(const cJSON *challenge, double before, double now, int completed);
+
 // challenges.updateNames(): a challenge without a name N gets i18n "chall.name.<ky>"
 // ("Get {val} headshots {with <weapon>}"); the weapon part only for "daily" challenges with a
 // DAT.wep. `weapon_name` maps a weapon index to its name (NULL / unknown: no weapon part).

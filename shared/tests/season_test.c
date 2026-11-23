@@ -299,6 +299,18 @@ static void test_mid_match(void) {
     c = cJSON_Parse("{\"CI\":4,\"T\":\"daily\",\"DAT\":{\"ky\":\"d\",\"val\":2,\"lesser\":1},\"REW\":{},\"PV\":0,\"PT\":0}");
     CHECK(!challenge_reached_mid_match(c, 0, 0) && challenge_reached_mid_match(c, 0, 1), "lesser: 0 is not reached, 1 is");
     cJSON_Delete(c);
+    // the event's uchp entry (deob-10.0.7.js:180733-180741): progress short of the target and the event that lands on
+    // it; not a jump past it, not an unchanged value, not after the target; a set / max key only when it completes
+    c = cJSON_Parse("{\"CI\":5,\"T\":\"daily\",\"DAT\":{\"ky\":\"k\",\"val\":5},\"REW\":{},\"PV\":0,\"PT\":0}");
+    CHECK(challenge_progress_reported(c, 2, 3, 0) && challenge_progress_reported(c, 4, 5, 1), "uchp: progress and the target");
+    CHECK(!challenge_progress_reported(c, 4, 6, 1) && !challenge_progress_reported(c, 3, 3, 0) && !challenge_progress_reported(c, 5, 6, 0),
+          "uchp: not past the target, not unchanged, not after it");
+    cJSON_Delete(c);
+    c = cJSON_Parse("{\"CI\":6,\"T\":\"weekly\",\"DAT\":{\"ky\":\"kstk\",\"val\":10},\"REW\":{},\"PV\":0,\"PT\":0}");
+    CHECK(!challenge_progress_reported(c, 2, 3, 0) && challenge_progress_reported(c, 9, 10, 1), "uchp: kstk only when it completes");
+    cJSON_ReplaceItemInObject(c, "PT", cJSON_CreateNumber(1));
+    CHECK(!challenge_progress_reported(c, 9, 10, 1), "uchp: none for a completed (PT 1) challenge");
+    cJSON_Delete(c);
 }
 
 int main(void) {

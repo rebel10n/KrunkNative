@@ -723,27 +723,44 @@ static void acc_challenges_update(ClientConnection *client, const Player *player
         .lt_off = g_rk.active || (mode && mode->no_profile_stats),
         .quit = 0,
     };
+    // the event's CHALLENGE_COMPLETED per challenge it completes (in list order), then its UPDATE_CHALLENGES_PROGRESS
+    // [CI, progVal, ...] (deob-10.0.7.js:180731-180741, :180933): one "challenge_reached" {id, cis, prog} to kn_brain,
+    // which pushes the chgC frames, then the uchp frame, to the account's sockets
+    cJSON *cis = cJSON_CreateArray(), *prog = cJSON_CreateArray();
     k = 0;
     cJSON_ArrayForEach(c, a->challenges) {
         if (k >= SERVER_CHALLENGES_MAX) break;
         if (!(a->chal_told >> k & 1u) && acc_challenge_key_is(c, key)) {
-            double pv = a->chal_pv[k];
-            challenge_progress(c, events, &match, &pv);
-            if (challenge_reached_mid_match(c, a->chal_pv[k], pv)) {
+            const double before = a->chal_pv[k], ci = cJSON_GetNumberValue(cJSON_GetObjectItem(c, "CI"));
+            double pv = before;
+            const int touched = challenge_progress(c, events, &match, &pv);
+            const int done = challenge_reached_mid_match(c, before, pv);
+            if (done) {
                 a->chal_told |= 1ull << k;
-                cJSON *frame = cJSON_CreateObject();
-                cJSON_AddStringToObject(frame, "type", "acct");
-                cJSON_AddNumberToObject(frame, "rid", brain_next_rid());
-                cJSON_AddStringToObject(frame, "op", "challenge_reached");
-                cJSON *args = cJSON_AddObjectToObject(frame, "args");
-                cJSON_AddNumberToObject(args, "id", a->account_id);
-                cJSON_AddNumberToObject(args, "ci", cJSON_GetNumberValue(cJSON_GetObjectItem(c, "CI")));
-                brain_post(frame, 0);
-                server_log("[accounts] %s: challenge %g reached mid-match", client->name, cJSON_GetNumberValue(cJSON_GetObjectItem(c, "CI")));
+                cJSON_AddItemToArray(cis, cJSON_CreateNumber(ci));
+                server_log("[accounts] %s: challenge %g reached mid-match", client->name, ci);
             }
-            a->chal_pv[k] = pv;
+            if (touched && challenge_progress_reported(c, before, pv, done)) {
+                cJSON_AddItemToArray(prog, cJSON_CreateNumber(ci));
+                cJSON_AddItemToArray(prog, cJSON_CreateNumber(pv));
+            }
+            if (touched) a->chal_pv[k] = pv;
         }
         k++;
+    }
+    if (cJSON_GetArraySize(cis) || cJSON_GetArraySize(prog)) {
+        cJSON *frame = cJSON_CreateObject();
+        cJSON_AddStringToObject(frame, "type", "acct");
+        cJSON_AddNumberToObject(frame, "rid", brain_next_rid());
+        cJSON_AddStringToObject(frame, "op", "challenge_reached");
+        cJSON *args = cJSON_AddObjectToObject(frame, "args");
+        cJSON_AddNumberToObject(args, "id", a->account_id);
+        cJSON_AddItemToObject(args, "cis", cis);
+        cJSON_AddItemToObject(args, "prog", prog);
+        brain_post(frame, 0);
+    } else {
+        cJSON_Delete(cis);
+        cJSON_Delete(prog);
     }
     cJSON_Delete(events);
 }

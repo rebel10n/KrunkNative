@@ -4950,6 +4950,16 @@ static int progress_frame(const char *label, const cJSON *frame) {
         }
         menu_rerender_if_open(33); // if (!inGame) updateWindow(33)
         battlepass_ui_challenges_changed();
+    } else if (!strcmp(label, "uchp")) { // io_updateChallengesProgress([CI, PV, ...], deob-10.0.7.js:225206-225215): during
+        // the match, PV and PT = 1 once PV >= DAT.val, for the first challenge with that CI; no redraw
+        for (int i = 0; g_chal && i + 1 < cJSON_GetArraySize(a1); i += 2) {
+            cJSON *c = chal_by_ci(cJSON_GetNumberValue(cJSON_GetArrayItem(a1, i)));
+            if (!c) continue;
+            const double pv = cJSON_GetNumberValue(cJSON_GetArrayItem(a1, i + 1));
+            chal_set(c, "PV", pv);
+            if (pv >= cnum(cJSON_GetObjectItem(c, "DAT"), "val")) chal_set(c, "PT", 1);
+            KN_LOG_DEBUG1("[challenges] CI %g PV %g PT %g\n", cnum(c, "CI"), pv, cnum(c, "PT"));
+        }
     } else if (!strcmp(label, "chgC")) { // io_challengeCompleted: the end screen's "Completed!" cards
         if (cJSON_IsNumber(a1)) { // v10's [index, midGame, REW] (deob-10.0.7.js:225216-225229)
             if (g_logged_in) challenge_completed(g_chal, frame);

@@ -165,16 +165,26 @@ Against `~/jails/kru/src/Krunker_v10.0.7/deob/game.deob.js` (deob-10.0.7.js):
   and `REW.bpp`, and `chlR` carries all eight fields (`accounts.c`). Mid-match, as v10's `challenges.update`
   (180731-180732): server_bin reads the account's active list from kn_brain (internal op `challenges`, the menu's
   `chgL` order) at the join and at each round start, runs the commit's rule over the round's tallies after every
-  event (`challenge_progress`, `challenge_reached_mid_match`, shared/src/progression.c) and, when one reaches its
-  target, sends `challenge_reached {id, ci}`; kn_brain pushes `["chgC", index, true, REW]` to the account's social
-  sockets (the chat line and REW's skins in the match summary). kn_brain still decides and pays at the commit
+  event (`challenge_progress`, `challenge_reached_mid_match`, `challenge_progress_reported`, shared/src/progression.c)
+  and sends the event's `challenge_reached {id, cis, prog}`: the CIs it completed, in list order, and its
+  UPDATE_CHALLENGES_PROGRESS list `[CI, progVal, ...]` (180733-180741: progress short of the target or landing on it;
+  a set / max key such as `kstk` only when it completes). kn_brain pushes `["chgC", index, true, REW]` for each
+  completed one, then `["uchp", prog]`, to the account's social sockets: the chat line and REW's skins in the match
+  summary, then PV and PT = 1 once PV >= `DAT.val` (225206-225215; until 2026-11-23 Box Office sent no `uchp`, so a
+  challenge stayed unmarked until the match end). kn_brain still decides and pays at the commit
   (`db_progress.c`), whose `chgC` (the list form) gives the "Completed!" cards; the client adds a challenge's
   skins once (the mid-match ones are marked, `account_ui.c`) and requests the list at the login, as v10's account
   carries `activeChallenges`. Migration 0397 gives the daily rows
   (15-22) a `REW.bpp` (50; the spray and assist rows 25): no official capture of the dailies is in the repo, so
-  the values follow the offline v10 sandbox's daily rows (`tools/uidiff/scenarios/rewards-bp-chal.json`). The
-  v10.0.7 bundle (its challenge defaults carry `bpp: 0`) and the kru tree (bundles of v10.0.3-v10.0.7, no
-  account captures) have no official daily values either, so 0397 stands (checked 2026-11-23).
+  the values follow the offline v10 sandbox's daily rows (`tools/uidiff/scenarios/rewards-bp-chal.json`). No
+  official daily value can be read (checked again 2026-11-23, round 12): the v10.0.7 bundle has no challenge
+  definitions (its `bpp: 0` at 180859, 195134 and 209970 are the starting values of running totals; daily rewards
+  come only from the server), the kru tree holds bundles and static assets only (v10.0.3-v10.0.7, no HAR, socket
+  dump or account JSON), and the repo's daily `bpp` values are all KrunkNative fixtures (the uidiff scenarios and
+  `season_fixture.json` use the brain's own CIs 15/16/20; the krunker.io stubs of `krunker_challenges_e2e.py` carry
+  no daily rows). No `KRUNKNATIVE_CHALLENGE_CAPTURE` file exists. For a krunker.io account KrunkNative already draws
+  the `REW.bpp` krunker.io sends (`battlepass_ui.c` `gen_daily_card` over the account's `activeChallenges`), so 0397
+  only sets Box Office's values, and stands.
 - **Weekly.** v10.0.7's Battle Pass Challenges tab draws the dailies only; KrunkNative keeps its weekly section
   there, since Box Office's weekly rows (23-26) are drawn nowhere else.
 
@@ -195,4 +205,12 @@ Against `~/jails/kru/src/Krunker_v10.0.7/deob/game.deob.js` (deob-10.0.7.js):
 - `client/tests/chal_card_e2e.py` (ctest `chal_card_e2e`): the Challenges window and the Battle Pass Challenges tab
   on their `--render-scenario` fixtures with a title + RP reward, a `DAT.bits` row and progress past the goal.
 - `services/brain/tests/progress_test.py` (ctest `brain_progress`): the dailies carry `REW.bpp`; a challenge with
-  `jnk`, `rp` and a title sends the eight-field `chlR`.
+  `jnk`, `rp` and a title sends the eight-field `chlR`; `challenge_reached` pushes each completion's `chgC`, then
+  `uchp`, and a progress-only event `uchp` alone.
+- `server/tests/challenge_mid_match_e2e.py` (ctest `challenge_mid_match_e2e`): kn_brain, a brain-linked server_bin on
+  Burg FFA and a signed-in client_bin. The account's seeded daily 16 ("Get 3000 score", kr 5, bpp 50), the seeded
+  "Get 25 kills on Burg" and a test row with a skin are completed mid-match by killing bots: `chgC [index, true,
+  REW]` with each one's index in the account's list, `uchp` at the targets, the chat line, PT mid-match on the
+  client, nothing credited before the round end; the round end credits the KR once (one `challenge` transaction),
+  the skin once and the daily's 50 BPP (`bpEnd` cbp), and the end screen shows "Completed!"; after a rejoin no
+  `chgC` and no credit again.

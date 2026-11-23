@@ -361,13 +361,28 @@ async def scenario(port):
                   "the game server reads the menu's list: %s" % err)
             idx9 = [c["CI"] for c in menu].index(9)
             err, data = await n.op("challenge_reached", id=alice_id, ci=9)
-            check(err is None and data == {"index": idx9}, "challenge 9 reached: index %s: %s %s" % (idx9, err, data))
+            check(err is None and data == {"index": idx9, "indexes": [idx9]}, "challenge 9 reached: index %s: %s %s" % (idx9, err, data))
             await s.drain(1.0)
             f = s.take("chgC")
             check(f == ["chgC", idx9, True, by_ci(menu, 9)["REW"]], "chgC [index, true, REW] pushed: %s" % f)
             err, data = await n.op("challenge_reached", id=alice_id, ci=1)
             await s.drain(0.5)
-            check(err is None and data == {"index": -1} and s.take("chgC") is None, "a completed one: no push: %s" % data)
+            check(err is None and data == {"index": -1, "indexes": [-1]} and s.take("chgC") is None, "a completed one: no push: %s" % data)
+            # one event's frames (deob-10.0.7.js:180731-180741): the chgC of each challenge it completed, in list order,
+            # then its UPDATE_CHALLENGES_PROGRESS [CI, progVal, ...]; a progress-only event pushes uchp alone
+            idx10 = [c["CI"] for c in menu].index(10)
+            err, data = await n.op("challenge_reached", id=alice_id, cis=[9, 10], prog=[9, 50, 10, 15, 11, 7])
+            await s.drain(1.0)
+            order = [f[0] for f in s.inbox if f[0] in ("chgC", "uchp")]
+            f9, f10, u = s.take("chgC"), s.take("chgC"), s.take("uchp")
+            check(err is None and data == {"index": idx9, "indexes": [idx9, idx10]} and f9 and f9[1] == idx9 and f10 and f10[1] == idx10
+                  and u == ["uchp", [9, 50, 10, 15, 11, 7]] and order == ["chgC", "chgC", "uchp"],
+                  "an event with two completions: chgC, chgC, then uchp: %s %s %s" % (data, order, u))
+            err, data = await n.op("challenge_reached", id=alice_id, prog=[11, 8])
+            await s.drain(0.5)
+            u = s.take("uchp")
+            check(err is None and data == {"index": -1, "indexes": []} and u == ["uchp", [11, 8]] and s.take("chgC") is None,
+                  "progress only: uchp alone: %s %s" % (data, u))
             err, _ = await n.op("challenges", id=0)
             check(err == "Account not found.", "no account: %s" % err)
 

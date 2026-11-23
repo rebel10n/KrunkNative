@@ -262,6 +262,17 @@ int challenge_reached_mid_match(const cJSON *challenge, const double before, con
     return before < val && reached(dat, now, 1);
 }
 
+int challenge_progress_reported(const cJSON *challenge, const double before, const double now, const int completed) {
+    const cJSON *dat = cJSON_GetObjectItemCaseSensitive(challenge, "DAT");
+    if (!dat || field_num(challenge, "PT", NULL) == 1.0) return 0;
+    const double val = field_num(dat, "val", NULL);
+    // deob-10.0.7.js:180733-180741: (DAT.lesser ? before > val : before < val) && progVal <= val && before != progVal, and
+    // not for a set key (kstk tower pkr island time) or a max key (amc uwk rnd) that did not complete with this event
+    if (!(field_truthy(dat, "lesser") ? before > val : before < val) || now > val || before == now) return 0;
+    const ChallengeKeyKind kind = challenge_key_kind(field_str(dat, "ky"));
+    return completed || (kind != CHALLENGE_KEY_SET && kind != CHALLENGE_KEY_MAX);
+}
+
 // The "chall" filter: a completed challenge of the same type and the meta challenge's filters.
 static int same_field(const cJSON *meta_dat, const cJSON *dat, const char *key) {
     int has = 0;

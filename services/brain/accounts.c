@@ -802,6 +802,7 @@ typedef struct OpCtx {
     char *progress; /* WP-E part 2c: the commit's P_PROGRESS payload (op "stats") */
     char *items;    /* the commit's itemRewards (v10.0.3 event kill pools), JSON, NULL none */
     cJSON *raid;    /* the commit's raid run (v10.0.3 raid record, raids.c), NULL none */
+    cJSON *chal;    /* "challenge_reached": {cis: [CI...], prog: [CI, progVal...]}, NULL none */
     char match[160];
 } OpCtx;
 
@@ -818,6 +819,7 @@ static void op_ctx_free(OpCtx *o) {
     free(o->progress);
     free(o->items);
     cJSON_Delete(o->raid);
+    cJSON_Delete(o->chal);
     free(o);
 }
 
@@ -1189,39 +1191,58 @@ static void progress_run(int64_t id, const char *payload) {
                KN_DB_ARGS(payload, acct_itoa(now, (int64_t) time(NULL)), acct_itoa(season, acct_current_season())), progress_done, c);
 }
 
-/* v10.0.7's mid-match CHALLENGE_COMPLETED (players.challengeCompleted, deob-10.0.7.js:176746-176748, sent by
- * challenges.update at :180731-180732): the game server saw a challenge of the account reach its target during the
- * match (server/src/accounts.c acc_challenges_update) and names it by CI. kn_brain reads the list the account's menu
- * shows (P_CHALLENGES, the "chgL" order) and pushes ["chgC", index, true, REW] to its social sockets: the client's
- * "Finish the game to complete: [N] challenge" chat line and REW's junk and skins in the match summary (v10's
- * io_challengeCompleted, :225216-225229). Nothing is credited here: the commit's P_PROGRESS decides and pays. */
+/* v10.0.7's mid-match CHALLENGE_COMPLETED and UPDATE_CHALLENGES_PROGRESS (players.challengeCompleted,
+ * deob-10.0.7.js:176746-176748, and the event's progress list, both sent by challenges.update at :180731-180741, :180933):
+ * the game server ran an event over the account's challenges (server/src/accounts.c acc_challenges_update) and names the
+ * ones it completed by CI ("cis", in list order; "ci" one) with the progress list "prog" [CI, progVal, ...]. kn_brain reads
+ * the list the account's menu shows (P_CHALLENGES, the "chgL" order) and pushes ["chgC", index, true, REW] for each one
+ * to its social sockets: the client's "Finish the game to complete: [N] challenge" chat line and REW's junk and skins in
+ * the match summary (v10's io_challengeCompleted, :225216-225229); then ["uchp", prog]: PV, and PT = 1 once PV >= DAT.val
+ * (:225206-225215). Nothing is credited here: the commit's P_PROGRESS decides and pays. */
+static void challenge_push_progress(const OpCtx *o) {
+    const cJSON *prog = cJSON_GetObjectItemCaseSensitive(o->chal, "prog");
+    if (!cJSON_IsArray(prog) || cJSON_GetArraySize(prog) < 2) return;
+    cJSON *f = social_frame("uchp");
+    cJSON_AddItemToArray(f, cJSON_Duplicate(prog, 1));
+    social_push_account(o->id, f);
+}
+
 static void challenge_reached_done(kn_db_result *res, void *ud) {
     OpCtx *o = ud;
     if (!kn_db_ok(res)) {
+        challenge_push_progress(o);
         op_reply(o, acct_db_error(res, o->what), NULL);
         return;
     }
     cJSON *list = acct_db_json(res);
-    const int64_t ci = (int64_t) strtoll(o->match, NULL, 10);
-    int index = -1, i = 0;
-    const cJSON *c, *found = NULL;
-    cJSON_ArrayForEach(c, list) {
-        if (index < 0 && kn_json_int(c, "CI", -1) == ci && kn_json_int(c, "PT", 0) != 1) {
-            index = i;
-            found = c;
-        }
-        i++;
-    }
-    if (found) {
-        const cJSON *rew = cJSON_GetObjectItemCaseSensitive(found, "REW");
-        cJSON *f = social_frame("chgC");
-        cJSON_AddItemToArray(f, cJSON_CreateNumber(index));
-        cJSON_AddItemToArray(f, cJSON_CreateTrue());
-        cJSON_AddItemToArray(f, rew ? cJSON_Duplicate(rew, 1) : cJSON_CreateObject());
-        social_push_account(o->id, f);
-    }
     cJSON *out = cJSON_CreateObject();
-    cJSON_AddNumberToObject(out, "index", index);
+    cJSON *indexes = cJSON_CreateArray();
+    const cJSON *want;
+    cJSON_ArrayForEach(want, cJSON_GetObjectItemCaseSensitive(o->chal, "cis")) {
+        const int64_t ci = cJSON_IsNumber(want) ? (int64_t) want->valuedouble : -1;
+        int index = -1, i = 0;
+        const cJSON *c, *found = NULL;
+        cJSON_ArrayForEach(c, list) {
+            if (index < 0 && kn_json_int(c, "CI", -1) == ci && kn_json_int(c, "PT", 0) != 1) {
+                index = i;
+                found = c;
+            }
+            i++;
+        }
+        if (found) {
+            const cJSON *rew = cJSON_GetObjectItemCaseSensitive(found, "REW");
+            cJSON *f = social_frame("chgC");
+            cJSON_AddItemToArray(f, cJSON_CreateNumber(index));
+            cJSON_AddItemToArray(f, cJSON_CreateTrue());
+            cJSON_AddItemToArray(f, rew ? cJSON_Duplicate(rew, 1) : cJSON_CreateObject());
+            social_push_account(o->id, f);
+        }
+        if (!cJSON_GetObjectItemCaseSensitive(out, "index")) cJSON_AddNumberToObject(out, "index", index);
+        cJSON_AddItemToArray(indexes, cJSON_CreateNumber(index));
+    }
+    if (!cJSON_GetObjectItemCaseSensitive(out, "index")) cJSON_AddNumberToObject(out, "index", -1);
+    cJSON_AddItemToObject(out, "indexes", indexes);
+    challenge_push_progress(o);
     cJSON_Delete(list);
     op_reply(o, NULL, out);
     cJSON_Delete(out);
@@ -1614,7 +1635,24 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         OpCtx *o = op_new(cb, ud, op);
         if (!o) return -1;
         o->id = id;
-        snprintf(o->match, sizeof o->match, "%lld", (long long) kn_json_int(args, "ci", -1));
+        if (reached) { /* {cis: [CI...] | ci: CI, prog: [CI, progVal...]} */
+            o->chal = cJSON_CreateObject();
+            const cJSON *cis = cJSON_GetObjectItemCaseSensitive(args, "cis"), *ci = cJSON_GetObjectItemCaseSensitive(args, "ci");
+            cJSON *list = cJSON_IsArray(cis) ? cJSON_Duplicate(cis, 1) : cJSON_CreateArray();
+            if (cJSON_IsNumber(ci)) cJSON_AddItemToArray(list, cJSON_CreateNumber(ci->valuedouble));
+            cJSON_AddItemToObject(o->chal, "cis", list);
+            const cJSON *prog = cJSON_GetObjectItemCaseSensitive(args, "prog");
+            if (cJSON_IsArray(prog)) cJSON_AddItemToObject(o->chal, "prog", cJSON_Duplicate(prog, 1));
+            if (!cJSON_GetArraySize(list)) { /* progress only: no list to read */
+                challenge_push_progress(o);
+                cJSON *out = cJSON_CreateObject();
+                cJSON_AddNumberToObject(out, "index", -1);
+                cJSON_AddItemToObject(out, "indexes", cJSON_CreateArray());
+                op_reply(o, NULL, out);
+                cJSON_Delete(out);
+                return 0;
+            }
+        }
         kn_db_call(g_acct_brain->db, &P_CHALLENGES, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, (int64_t) time(NULL))),
                    reached ? challenge_reached_done : op_json_done, o);
         return 0;
