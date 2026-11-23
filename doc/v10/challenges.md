@@ -144,6 +144,32 @@ event; daily / weekly only when the capture carries them), then upserts the capt
 Per-account fields (`PV`, `PT`, `SV`, `TR`, `PER`) are dropped. Progress stays in `player_challenges`. A
 re-capture is a new migration; a row it drops is retired. Test: `services/brain/tests/challenges_capture_test.py`.
 
+### 4d. v10.0.7 cards, frames and rewards (2026-11-23)
+
+Against `~/jails/kru/src/Krunker_v10.0.7/deob/game.deob.js` (deob-10.0.7.js):
+
+- **Progress.** Both card kinds (`genChallengeCard` 221427-221458 in `v10_rewards.c`, `genDailyCard`
+  219232-219243 in `battlepass_ui.c`) draw `displayProgress / displayGoal` (180768-180806, `account_ui.c`
+  `account_challenge_progress` / `account_challenge_goal`): a `DAT.bits` row counts the set bits of `PV` and of
+  `DAT.val`; a `DAT.lt` row shows the larger of `PV` and the lifetime stat (kills, wins, `stats.n`). The bar is
+  `Math.min(100, progress / goal * 100)`.
+- **Reward tiles.** `REW.sk` (array, number or comma list; falsy = none), then each `REW.title` (the title's colour
+  and name, a click opens the Titles window), then `REW.rp` in `#4caf50` with `commaNumber` (15601, 23949).
+- **Frames.** `chg` sets `PV` / `PT` and redraws window 33; `uchp` sets `PV` and `PT = 1` once `PV >= DAT.val`, no
+  redraw (225195-225215). `chgC [index, midGame, REW]` (225216-225229): mid-match, the chat line "Finish the game
+  to complete: [N] challenge" and the reward skins; at the end, the "Completed!" card. `chlR [skins, funds, junk,
+  jnk, kr, titles, rp, rankedPoints]` (215154-215197): the balances, the skins, each title into `account.titles`
+  with its "Title unlocked!" card, the ranked points when points were won.
+- **Box Office.** kn_brain's challenge finalize (`db_progress.c`, v10's 180855-180902) now credits `REW.jnk` (the
+  Junk wallet), `REW.title` (`player_titles`, source `challenge`) and `REW.rp` (`ranked_points`) besides KR, skins
+  and `REW.bpp`, and `chlR` carries all eight fields (`accounts.c`). The game server only tallies a match's
+  events and kn_brain completes challenges at the commit, so Box Office sends `chgC` at the match end only (its
+  list form); the mid-match `chgC` is handled for krunker.io servers. Migration 0397 gives the daily rows
+  (15-22) a `REW.bpp` (50; the spray and assist rows 25): no official capture of the dailies is in the repo, so
+  the values follow the offline v10 sandbox's daily rows (`tools/uidiff/scenarios/rewards-bp-chal.json`).
+- **Weekly.** v10.0.7's Battle Pass Challenges tab draws the dailies only; KrunkNative keeps its weekly section
+  there, since Box Office's weekly rows (23-26) are drawn nowhere else.
+
 ## 5. Tests
 
 - `services/brain/tests/challenges_capture_test.py` (run by ctest with the brain tests): the tool on a fixture
@@ -158,3 +184,7 @@ re-capture is a new migration; a row it drops is retired. Test: `services/brain/
   Box Office brain. Checks: every map name on Box Office; the official list rows and maps, and no brain row
   on the official type; no "Loading" or error text on either type, including an official account without
   `activeChallenges` and a brain that does not answer.
+- `client/tests/chal_card_e2e.py` (ctest `chal_card_e2e`): the Challenges window and the Battle Pass Challenges tab
+  on their `--render-scenario` fixtures with a title + RP reward, a `DAT.bits` row and progress past the goal.
+- `services/brain/tests/progress_test.py` (ctest `brain_progress`): the dailies carry `REW.bpp`; a challenge with
+  `jnk`, `rp` and a title sends the eight-field `chlR`.

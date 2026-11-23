@@ -3671,6 +3671,47 @@ void hud_ui_end_challenge_completed(const int icon, const char *name) {
     html_dom_insert_html(holder, HTML_INSERT_BEFORE_END, html);
 }
 
+// UPDATE_CHALLENGE_REWARDS' titles (deob-10.0.7.js:215181-215184): a .endChalCard into #endChals per title won, its
+// icon in the title's tag style, the title as a .leaderTitle tag (_iiiiìïí(id, true)) or "Title", "Title unlocked!"
+void hud_ui_end_title_unlocked(const int title_id) {
+    const HtmlElem holder = html_dom_by_id("endChals");
+    if (!holder) return;
+    const cJSON *t = v10_customize_title_get(title_id);
+    StrBuf style = {0};
+    v10_customize_title_style(&style, t);
+    char *st = sb_finish(&style);
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class='endChalCard' onclick='showTitlesWindow()' onmouseenter='playTick()'><div class='endChalImg endChalTitleIco' style='%s'>"
+                    "<span class='material-icons'>workspace_premium</span></div><div class='endChalRight'>", st);
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(t, "name"));
+    if (t) {
+        sb_appendf(&sb, "<span class='leaderTitle' style='%s'>", st);
+        sb_append_esc(&sb, name ? name : "");
+        sb_append(&sb, "</span>");
+    } else {
+        sb_append_esc(&sb, I18N("chall.reward.title", "Title"));
+    }
+    sb_append(&sb, "<div class='endChalDesc'>");
+    sb_append_esc(&sb, I18N("chall.reward.titleUnlocked", "Title unlocked!"));
+    sb_append(&sb, "</div></div></div>");
+    char *html = sb_finish(&sb);
+    html_dom_insert_html(holder, HTML_INSERT_BEFORE_END, html);
+    free(html);
+    free(st);
+}
+
+// CHALLENGE_COMPLETED during the match (deob-10.0.7.js:225218-225219): io_addChat(-1, null, html, 1), always shown
+void hud_ui_challenge_mid_game(const char *name) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    StrBuf sb = {0};
+    sb_append(&sb, "<span style='color:#fff'>Finish the game to complete:</span> <span style='color:#FBC02D'>[");
+    sb_append_esc(&sb, name ? name : "");
+    sb_append(&sb, "]</span> challenge");
+    char *markup = sb_finish(&sb);
+    hud_add_chat_markup(markup);
+    free(markup);
+}
+
 // tabs.medals.gen(): medal_<i> on badge_0, the name and "x<count>"
 static void hud_end_medals_html(char *out, const size_t size, size_t *len) {
     if (!g_end_medals.count) {

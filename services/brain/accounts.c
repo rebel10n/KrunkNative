@@ -1112,7 +1112,8 @@ static cJSON *stats_args(const cJSON *a) {
 
 /* WP-E part 2c: P_PROGRESS after a commit -> the account's social sockets get v7's match-end
  * frames: ["chg", [done, CI, PV, ...]], ["chgC", [challenge...]] (KrunkNative: the completed
- * challenge objects, v7 sends one index per frame), ["chlR", skins, funds, junk, jnk, kr] and
+ * challenge objects, v7 sends one index per frame), ["chlR", skins, funds, junk, jnk, kr, titles, rp,
+ * rankedPoints] and
  * ["nbdgr", [badge...]]. */
 typedef struct {
     int64_t id;
@@ -1136,15 +1137,23 @@ static void progress_done(kn_db_result *res, void *ud) {
         cJSON_AddItemToArray(f, cJSON_Duplicate(completed, 1));
         social_push_account(c->id, f);
     }
+    /* v10.0.7's UPDATE_CHALLENGE_REWARDS (deob-10.0.7.js:180902): [skins, funds, junk, jnk, kr, titles, rp, rankedPoints]
+     * (the balances after the rewards; junk null when none was won, titles the ones granted) */
     const cJSON *skins = cJSON_GetObjectItemCaseSensitive(reward, "skins");
-    const double kr = kn_json_int(reward, "kr", 0);
-    if (kr > 0 || cJSON_GetArraySize(skins) > 0) {
+    const cJSON *titles = cJSON_GetObjectItemCaseSensitive(out, "titles");
+    const cJSON *junk = cJSON_GetObjectItemCaseSensitive(out, "junk");
+    const double kr = kn_json_int(reward, "kr", 0), jnk = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(reward, "jnk"));
+    const double rp = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(out, "rp"));
+    if (kr > 0 || cJSON_GetArraySize(skins) > 0 || (jnk > 0 && junk) || cJSON_GetArraySize(titles) > 0 || rp > 0) {
         cJSON *f = social_frame("chlR");
         cJSON_AddItemToArray(f, skins ? cJSON_Duplicate(skins, 1) : cJSON_CreateArray());
         cJSON_AddItemToArray(f, cJSON_CreateNumber((double) kn_json_int(out, "funds", 0)));
-        cJSON_AddItemToArray(f, cJSON_CreateNumber(0)); /* junk: not in KrunkNative's economy */
-        cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
+        cJSON_AddItemToArray(f, cJSON_IsNumber(junk) ? cJSON_CreateNumber(junk->valuedouble) : cJSON_CreateNull());
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(jnk > 0 ? jnk : 0));
         cJSON_AddItemToArray(f, cJSON_CreateNumber(kr));
+        cJSON_AddItemToArray(f, titles ? cJSON_Duplicate(titles, 1) : cJSON_CreateArray());
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(rp > 0 ? rp : 0));
+        cJSON_AddItemToArray(f, cJSON_CreateNumber((double) kn_json_int(out, "rankedPoints", 0)));
         social_push_account(c->id, f);
     }
     if (cJSON_GetArraySize(badges) > 0) {

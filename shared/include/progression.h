@@ -83,9 +83,9 @@ typedef struct {
 //            nonWep), with a weapon the weapon streak.
 //   results: appended v7's chg triples [done, CI, PV] (vA759).
 //   completed: appended the challenge objects completed by this match (chgC).
-//   reward:  {kr, skins[], bpp} summed over the completed challenges' REW (Battle Pass points:
-//            vLN02439, account.BP.bpp; junk is not part of KrunkNative's economy and is left
-//            out).
+//   reward:  {kr, skins[], bpp, jnk, rp, titles[]} summed over the completed challenges' REW (Battle
+//            Pass points: vLN02439, account.BP.bpp; jnk, rp and the title ids > 0, each once: v10.0.7's
+//            finalize, deob-10.0.7.js:180855-180902). jnk, rp and titles are present only when won.
 // Returns the number of challenges whose progress changed.
 int challenges_finalize(cJSON *active, const cJSON *events, const ChallengeMatch *match, cJSON *results, cJSON *completed,
                         cJSON *reward);

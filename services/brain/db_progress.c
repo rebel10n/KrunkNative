@@ -24,6 +24,7 @@
 
 #include "badges.h"
 #include "country_flag.h" // COUNTRY_FLAG_COUNT: stats.flg range
+#include "junk.h"         // junk_hundredths / junk_value: a challenge's REW.jnk
 #include "knsvc/json.h"
 #include "progression.h"
 #include "season.h"
@@ -198,7 +199,8 @@ static int claim_has_skin(void *ud, const int skin) {
 
 /* ({id, final, prog: [[key, value, weapon, streak, item]...], medals: {name: count}, mapIndex,
  *   mapId, mode, classIndex, ranked, ltOff, match, bpp, kills, deaths, score, won, games, timePlayed},
- *   now unix s, season) -> {results, completed, reward {kr, skins, bpp}, newBadges, funds, bp,
+ *   now unix s, season) -> {results, completed, reward {kr, skins, bpp, jnk, rp, titles}, newBadges, funds, junk (when
+ *   junk was won), titles (granted), rp + rankedPoints (when points were won), bp,
  *   bpProgress}. Runs after the match's kn_commit_stats (the badge rules read its stats). */
 static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
@@ -248,13 +250,34 @@ static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
                                " updated_at = now()"),
                  5, args);
     }
-    /* challenge rewards (proc 176 "chall"): KR, skins and Battle Pass points (db_season_match);
-     * junk has no KrunkNative economy */
+    /* challenge rewards (v10.0.7's proc 215 "chall", deob-10.0.7.js:180855-180902): KR, junk, skins, the titles,
+     * the ranked points and Battle Pass points (db_season_match). The answer's balances (funds, junk, rankedPoints)
+     * and the titles granted go back in UPDATE_CHALLENGE_REWARDS (accounts.c) */
     const int64_t kr = (int64_t) jnum(reward, "kr");
     if (kr > 0) db_add_funds(&x, id, kr, "challenge", ref, NULL);
     const cJSON *sk;
     cJSON_ArrayForEach(sk, cJSON_GetObjectItemCaseSensitive(reward, "skins")) {
         if (cJSON_IsNumber(sk) && sk->valueint >= 0) db_add_skin(&x, id, sk->valueint, 1, "challenge", ref, NULL);
+    }
+    const int64_t jnk = junk_hundredths(jnum(reward, "jnk"));
+    if (jnk > 0 && !dbx_failed(&x)) {
+        int64_t balance = 0;
+        if (junk_credit(&x, id, jnk, "challenge", &balance) == 0) cJSON_AddNumberToObject(out, "junk", junk_value(balance));
+    }
+    cJSON *granted = cJSON_AddArrayToObject(out, "titles"); /* the titles this match gave (v10's "tit") */
+    cJSON_ArrayForEach(sk, cJSON_GetObjectItemCaseSensitive(reward, "titles")) {
+        if (!cJSON_IsNumber(sk) || sk->valuedouble <= 0 || dbx_failed(&x)) continue;
+        if (dbx_exists(&x, SQL(.any = "SELECT 1 FROM player_titles WHERE account_id = $1 AND title_id = {int:$2}"), KN_DB_ARGS(I64S(id), I64S(sk->valueint))))
+            continue;
+        dbx_exec(&x, SQL(.any = "{insert_ignore} INTO player_titles (account_id, title_id, source, ref) VALUES ($1, {int:$2}, 'challenge', {int:$3}) {ignore_conflicts}"),
+                 KN_DB_ARGS(I64S(id), I64S(sk->valueint), I64S(-1)));
+        cJSON_AddItemToArray(granted, cJSON_CreateNumber(sk->valueint));
+    }
+    const int64_t rp = (int64_t) jnum(reward, "rp");
+    if (rp > 0 && !dbx_failed(&x)) {
+        const int64_t balance = db_ranked_points_add(&x, id, rp, "challenge", ref);
+        cJSON_AddNumberToObject(out, "rp", (double) rp);
+        cJSON_AddNumberToObject(out, "rankedPoints", (double) balance);
     }
     cJSON_Delete(active);
 

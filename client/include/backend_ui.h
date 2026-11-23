@@ -106,6 +106,8 @@ void account_readable_time(char *out, size_t n, double ms);         // UTILS.get
 const cJSON *account_challenges(void);
 void account_challenges_request(void);
 void account_challenge_name(const cJSON *challenge, char *out, size_t n);
+double account_challenge_progress(const cJSON *challenge); // challenges.displayProgress (DAT.bits, DAT.lt)
+double account_challenge_goal(const cJSON *challenge);     // challenges.displayGoal (DAT.bits)
 
 // ---- battlepass_ui.c (v7.1.4 windows[5], showWindow(6): the Battle Pass; the end screen's #endBPLayout)
 char *battlepass_window_gen(int id, const char **header); // NULL: not window 6 / guest (the captured Sign-in card)

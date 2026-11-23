@@ -14,7 +14,8 @@
 // sets isClaimed (the item says CLAIMED), RPC_ERROR is swallowed (catch {}: nothing shown), and the
 // server's push "dslr" {ticketId} adds the ticket and opens its wheel (261748-261756). Locked, it does
 // nothing, no message; with no official game open (the socket is connected in a game only) nothing is
-// sent and nothing is said. A load failure shows no text either: v10 keeps the store's default
+// sent and nothing is said. Box Office's locked click is silent too (v10.0.7's handler, deob-10.0.7.js:149239-149251):
+// no "dsl" is sent. A load failure shows no text either: v10 keeps the store's default
 // (0/5000), so the item does too.
 #include <ui_logic.h>
 #include <client.h> // glfwGetTime
@@ -216,12 +217,12 @@ int v10_daily_spin_handle(const char *name, const HtmlEvent *ev, const HtmlArg *
     (void) ev;
     if (!name) return -1;
     if (!strcmp(name, "knDailySpin")) { // the item's click: claim it (Box Office answers the claim, "dslr": a ticket or why not)
-        if (g_ds.claiming) return 1;
+        // v10.0.7's handler (deob-10.0.7.js:149239-149251): `if (claimable && !claiming)` rpc(DAILY_SPIN_CLAIM); locked
+        // (below maxScore, or claimed today), the click only plays its sound: no claim, no message, on either server
+        if (g_ds.claiming || !claimable()) return 1;
         if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
-            // v10.0.3's handler (deob-10.0.3.js 164133-164136): `if (claimable && !claiming)` rpc(DAILY_SPIN_CLAIM) on the
-            // game socket; locked, nothing (no claim, no message). The socket is connected in a game only: with no
-            // official game open the claim is not sent (krunker_net_send_account_frame: 0) and nothing is said
-            if (!claimable()) return 1;
+            // the krunker.io game socket is connected in a game only: with no official game open the claim is not sent
+            // (krunker_net_send_account_frame: 0) and nothing is said
             if (!backend_social_send_text("[\"dsl\"]")) { // kio_held_send -> krunker_net_send_account_frame
                 printf("[daily-spin] no official game open: the claim rpc is not sent\n");
                 return 1;

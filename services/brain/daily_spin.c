@@ -80,7 +80,7 @@ static kn_db_result *run_claim(kn_dbconn *c, int n, const char *const *p) {
 }
 static const kn_proc P_DAILY_SPIN_CLAIM = {"daily_spin_claim", NULL, run_claim};
 
-/* ["dsp", null, err]: every "dsp" is answered, a refusal or a failure too (the client's item says Unavailable) */
+/* ["dsp", null, err]: every "dsp" is answered, a refusal or a failure too (the client keeps v10's 0/5000 on a refusal) */
 static void progress_refused(SocialSession *s, const char *err) {
     social_send_n(s, "dsp", 2, cJSON_CreateNull(), cJSON_CreateString(err));
 }

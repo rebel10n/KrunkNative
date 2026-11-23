@@ -158,6 +158,9 @@ extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_
 /* ---- Krunker v10.0.2 ranked (db_ranked.c, 0205_ranked_v10) */
 extern const kn_proc P_RK_JOIN, P_RK_POLL, P_RK_EXPIRE, P_RK_MATCH_RUN, P_RK_MATCH_READY,
     P_RK_MATCH_FAILED, P_RK_MATCH_FINISH, P_RK_CLAIM, P_RK_SEASON_CLOSE, P_RK_PURCHASE, P_RK_MATCH_CANCEL;
+/* Ranked Points (ranked_points + its ledger ranked_points_tx) inside the caller's transaction: + amount (a negative one
+ * refuses below 0) -> the balance after, -1 refused. A challenge's REW.rp (db_progress.c) credits through it. */
+int64_t db_ranked_points_add(Dbx *x, int64_t account_id, int64_t amount, const char *source, const char *ref);
 
 /* ---- the v10 lottery (db_lottery.c, 0348_lottery; lottery.c): the view, an entry, the settlement */
 extern const kn_proc P_LOTTERY_VIEW, P_LOTTERY_PARTICIPATE, P_LOTTERY_SETTLE;

@@ -51,12 +51,30 @@ if not DB and DRIVER == "postgres":
 SCHEMA = "kn_test_kpg_%d" % os.getpid()
 SECRET = "kn-progress-test-%d" % os.getpid()
 FAILS = []
+DBQ = {}  # the test's own database access (exec_sql)
 
 
 def check(cond, what):
     print(("  ok   " if cond else "  FAIL ") + what, flush=True)
     if not cond:
         FAILS.append(what)
+
+
+def exec_sql(sql):
+    """A write the test makes itself (challenge 2's reward, before kn_brain starts)."""
+    if DRIVER == "sqlite":
+        con = sqlite3.connect(DBQ["path"], timeout=30)
+        try:
+            con.execute(sql)
+            con.commit()
+        finally:
+            con.close()
+        return
+    if DRIVER == "mysql":
+        subprocess.run(DBQ["mysql"] + ["-e", sql], env=DBQ["env"], capture_output=True, text=True, check=True)
+        return
+    subprocess.run(DBQ["psql"] + ["-c", "SET search_path TO %s; %s" % (SCHEMA, sql)], env=DBQ["env"], capture_output=True,
+                   text=True, check=True)
 
 
 def bound_port(log_path, proc):
@@ -181,6 +199,8 @@ async def scenario(port):
         c1 = by_ci(rows, 1)
         check(c1 and c1["DAT"] == {"ky": "k", "val": 25, "mp": 0} and c1["REW"] == {"kr": 10} and c1["PV"] == 0 and c1["PT"] == 0
               and c1["N"] == "Get 25 kills on Burg", "challenge 1 object: %s" % c1)
+        daily_rew = {c["CI"]: c["REW"] for c in rows if c["T"] == "daily"}
+        check(all(r.get("bpp", 0) > 0 for r in daily_rew.values()), "the dailies carry REW.bpp (0397): %s" % daily_rew)
         daily = [c for c in rows if c["T"] == "daily"]
         check(all(0 < c.get("TR", 0) <= 86400000 for c in daily), "daily TR within a day")
         r2 = await s.call("chgL", "chg")
@@ -210,6 +230,11 @@ async def scenario(port):
             check(chgc and {c["CI"] for c in chgc[1]} >= {1, 2}, "chgC lists the completed challenges: %s" % (chgc and [c["CI"] for c in chgc[1]]))
             chlr = s.take("chlR")
             check(chlr and chlr[5] >= 25 and chlr[2] >= 25, "chlR: KR reward and funds: %s" % chlr)
+            # v10.0.7's UPDATE_CHALLENGE_REWARDS [skins, funds, junk, jnk, kr, titles, rp, rankedPoints]
+            # (deob-10.0.7.js:180855-180902, 215154-215197): challenge 2's REW (set below) has jnk, rp and a title
+            check(chlr and len(chlr) == 9 and chlr[4] == 2.5 and chlr[3] == 2.5, "chlR: the junk won and the balance: %s" % chlr)
+            check(chlr and chlr[6] == [90], "chlR: title 90 granted: %s" % (chlr and chlr[6:]))
+            check(chlr and chlr[7] == 40 and chlr[8] == 40, "chlR: 40 ranked points won, balance 40: %s" % (chlr and chlr[6:]))
             nb = s.take("nbdgr")
             check(nb and nb[1] == [11], "Nuclear I auto-awarded (stats.n 600): %s" % nb)
             check(s.take("ua") is not None, "ua pushed")
@@ -318,6 +343,11 @@ def main():
         dbenv = {"KN_DATABASE_NAME": DB, "KN_DATABASE_SEARCH_PATH": SCHEMA}
         dbcfg = {}
         drop = pg + ["drop", SCHEMA]
+        DBQ.update(psql=["psql", "-h", os.environ.get("KN_DATABASE_HOST", str(CONFIG_DB.get("host", "127.0.0.1"))),
+                         "-p", os.environ.get("KN_DATABASE_PORT", str(CONFIG_DB.get("port", 5432))),
+                         "-U", os.environ.get("KN_DATABASE_USER", str(CONFIG_DB.get("user", "krunknative"))),
+                         "-d", DB, "-v", "ON_ERROR_STOP=1", "-qAt"],
+                   env=dict(os.environ, PGPASSWORD=os.environ.get("KN_DATABASE_PASSWORD", str(CONFIG_DB.get("password", "")))))
     else:
         scratch = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "db_scratch.py"), ROOT]
         r = subprocess.run(scratch + ["create", DRIVER, SCHEMA], capture_output=True)
@@ -327,6 +357,10 @@ def main():
         dbcfg = json.loads(r.stdout)
         dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in dbcfg.items()}
         drop = scratch + ["drop", DRIVER, SCHEMA]
+        DBQ.update(path=dbcfg.get("path", ""),
+                   mysql=[shutil.which("mariadb") or shutil.which("mysql") or "mysql", "--no-defaults", "--protocol=TCP", "-h", str(dbcfg.get("host", "127.0.0.1")), "-P", str(dbcfg.get("port", 3306)),
+                          "-u", str(dbcfg.get("user", "")), str(dbcfg.get("name", SCHEMA))],
+                   env=dict(os.environ, MYSQL_PWD=str(dbcfg.get("password", ""))))
     work = tempfile.mkdtemp(prefix="kn-progress.")
     env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET, **dbenv)
     log_path = os.path.join(work, "brain.log")
@@ -334,6 +368,8 @@ def main():
     try:
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
+        # challenge 2 (10 headshots on Burg, completed by the commit) also gives junk, ranked points and title 90
+        exec_sql("UPDATE challenges SET rew = '{\"kr\":15,\"jnk\":2.5,\"rp\":40,\"title\":[90]}' WHERE challenge_id = 2")
         with open(log_path, "w") as log:
             proc = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=kpg-%d" % os.getpid()],
                                     cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)

@@ -80,8 +80,8 @@ and the handler ignores the `RPC_SUCCESS` results.
   showed `kn.dailySpin.unavailable` ("Unavailable", `:67-68`; `ui/i18n/kn/en.json:178`). Both keys are
   gone now; the item keeps `0/5000` on a load failure.
 - Box Office's own brain rule is `services/brain/daily_spin.c:68`: `"Play more to unlock the daily spin"`
-  for a claim below the score. It is unchanged. A Box Office click sends `dsl`, and the refusal comes back
-  as the claim's error.
+  for a claim below the score. It is unchanged. A Box Office click sent `dsl`, and the refusal came back
+  as the claim's error (a locked click sends nothing now: below).
 
 ## Krunker Box Office after this change
 
@@ -101,8 +101,10 @@ and the handler ignores the `RPC_SUCCESS` results.
   FREE SPIN. A claim with no answer in 15 s (`DS_CLAIM_TIMEOUT_MS`) returns to FREE SPIN with no text
   (the Box Office "No answer" popup is Box Office's).
 - Krunker.io progress failures show nothing: the item keeps `0/5000`, as v10.
-- Box Office: the progress failure shows nothing (as above); the brain's own refusals and the claim
-  timeout ("No answer from Box Office") are unchanged.
+- Box Office: a locked click does nothing either (v10.0.7's handler, deob-10.0.7.js:149239-149251, `if (claimable
+  && !claiming)`): no `dsl`, no popup. The brain's "Play more to unlock the daily spin" rule
+  (`services/brain/daily_spin.c`) now answers only a client that claims below the score. The progress failure
+  shows nothing (as above); the claim timeout ("No answer from Box Office") is unchanged.
 - The item's click also plays `playSelect()` before the handler, as v10's does.
 
 ## Known differences left in place

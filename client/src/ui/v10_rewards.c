@@ -493,7 +493,8 @@ static void register_rewards_popup(const int skins, const int premium) {
         sb_appendf(&sb, " <div class=\"reward-holder svelte-6dkuug\"><div class=\"cosmetics-reward svelte-6dkuug\" style=\"background-image: url(%s)\">"
                         "+%d Cosmetics</div></div>", url, skins);
     }
-    sb_append(&sb, "</div> <button class=\"io-button io-button--accept\" onmouseenter=\"playTick(0.1)\" "
+    // Customize: a click only (clearPops, playSelect(0.1), showWindow(53)); no hover sound (deob-10.0.7.js:203295-203299, 203336)
+    sb_append(&sb, "</div> <button class=\"io-button io-button--accept\" "
                    "onclick=\"clearPops();playSelect(0.1);showWindow(53)\">Customize</button></div></div></div>");
     char *html = sb_finish(&sb);
     pop_show(html, "registerRewardsPop");
@@ -549,28 +550,95 @@ static void skin_tile(StrBuf *sb, const int index) {
     }
 }
 
-// genChallengeCard(challenge, marginTop)
+// UTILS.commaNumber's regex (deob-10.0.7.js:23949-23951): "1234567" -> "1,234,567"
+static void comma_int(char *out, const size_t n, const double v) {
+    char digits[40];
+    snprintf(digits, sizeof digits, "%.15g", v);
+    const char *d = digits;
+    size_t o = 0;
+    if (*d == '-' && o + 1 < n) out[o++] = *d++;
+    const size_t run = strspn(d, "0123456789");
+    for (size_t i = 0; d[i] && o + 2 < n; i++) {
+        if (i && i < run && (run - i) % 3 == 0) out[o++] = ',';
+        out[o++] = d[i];
+    }
+    out[o] = 0;
+}
+
+// REW.sk: an array, or any other value split at commas (deob-10.0.7.js:221430-221431: (sk + '').split(','));
+// an entry that is not a store skin draws an empty slot (store.skins[x] undefined)
+static int reward_skins(const cJSON *sk, int *out, const int max) {
+    int n = 0;
+    if (!sk || cJSON_IsNull(sk) || cJSON_IsFalse(sk) || (cJSON_IsNumber(sk) && sk->valuedouble == 0.0)) return 0; // REW.sk falsy: []
+    if (cJSON_IsArray(sk)) {
+        const cJSON *it;
+        cJSON_ArrayForEach(it, sk) {
+            if (n >= max) break;
+            out[n++] = cJSON_IsNumber(it) ? it->valueint : cJSON_IsString(it) && it->valuestring[0] ? atoi(it->valuestring) : -1;
+        }
+    } else if (cJSON_IsNumber(sk)) {
+        out[n++] = sk->valueint;
+    } else if (cJSON_IsString(sk)) {
+        for (const char *p = sk->valuestring; p && n < max;) {
+            out[n++] = *p && *p != ',' ? atoi(p) : -1;
+            p = strchr(p, ',');
+            if (p) p++;
+        }
+    }
+    return n;
+}
+
+// a REW.title tile (deob-10.0.7.js:221436-221441): getTitle(id); its style (_iiiíîíî: the title's colour, its rarity's or
+// #cccccc, the Contraband outline), a border of that colour and the title's name (else "Title") as the tooltip
+static void title_tile(StrBuf *sb, const cJSON *id_item) {
+    const int id = cJSON_IsNumber(id_item) ? id_item->valueint : cJSON_IsString(id_item) ? atoi(id_item->valuestring) : -1;
+    const cJSON *t = id >= 0 ? v10_customize_title_get(id) : NULL;
+    StrBuf style = {0};
+    v10_customize_title_style(&style, t);
+    char *st = sb_finish(&style);
+    const char *own = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(t, "color"));
+    const cJSON *r = cJSON_GetObjectItemCaseSensitive(t, "rarity");
+    const int rarity = cJSON_IsNumber(r) ? r->valueint : -1;
+    const char *color = own && own[0] ? own
+                      : rarity >= 0 && rarity < g_viewer_rarity_count && g_viewer_rarities[rarity].color ? g_viewer_rarities[rarity].color
+                                                                                                          : "#cccccc";
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(t, "name"));
+    sb_appendf(sb, "<div class=\"chalRewSkn chalRewTile\" style=\"%sborder:2px solid %s;\" title=\"", st, color);
+    sb_append_esc(sb, t && name ? name : I18N("chall.reward.title", "Title"));
+    sb_append(sb, "\" onclick=\"showTitlesWindow()\"><span class=\"material-icons\">workspace_premium</span></div>");
+    free(st);
+}
+
+#define CARD_TILES 16
+
+// genChallengeCard(challenge, marginTop) (deob-10.0.7.js:221427-221458)
 static void chal_card(StrBuf *sb, const cJSON *c, const int margin) {
     const cJSON *dat = cJSON_GetObjectItem(c, "DAT"), *rew = cJSON_GetObjectItem(c, "REW");
     const int boss = cnum(dat, "boss") != 0.0;
     const int done = cnum(c, "PT") != 0.0;
     const char *ky = cJSON_GetStringValue(cJSON_GetObjectItem(dat, "ky"));
     const int time_key = ky && !strcmp(ky, "time");
-    const double val = cnum(dat, "val"), pv = cnum(c, "PV");
-    // REW.sk (up to 3 shown, last first), then REW.title tiles and an RP tile (v10)
-    int skins[3] = {-1, -1, -1}, n = 0;
-    const cJSON *sk = cJSON_GetObjectItem(rew, "sk"), *it;
-    if (cJSON_IsNumber(sk)) skins[n++] = sk->valueint;
-    cJSON_ArrayForEach(it, (cJSON_IsArray(sk) ? sk : NULL)) if (n < 3 && cJSON_IsNumber(it)) skins[n++] = it->valueint;
-    char tiles[3][320];
+    const double val = cnum(dat, "val");
+    const double prog = account_challenge_progress(c), goal = account_challenge_goal(c); // displayProgress / displayGoal
+    // REW.sk.concat(the title tiles, the RP tile) (:221432-221444); the three slots show [2], [1], [0]
+    int skins[CARD_TILES];
+    const int n = reward_skins(cJSON_GetObjectItem(rew, "sk"), skins, CARD_TILES);
+    StrBuf tiles[3] = {{0}};
     int tile_count = 0;
     const cJSON *title = cJSON_GetObjectItem(rew, "title");
-    if (title && !cJSON_IsNull(title) && tile_count < 3)
-        snprintf(tiles[tile_count++], sizeof tiles[0], "<div class=\"chalRewSkn chalRewTile\" style=\"border:2px solid #fff;\" title=\"Title\" "
-                                                     "onclick=\"showTitlesWindow()\"><span class=\"material-icons\">workspace_premium</span></div>");
-    if (cnum(rew, "rp") > 0 && tile_count < 3)
-        snprintf(tiles[tile_count++], sizeof tiles[0], "<div class=\"chalRewSkn chalRewTile chalRewRP\" style=\"color:#ff6a0b;border:2px solid #ff6a0b;\">"
-                                                     "%.15g<br>RP</div>", cnum(rew, "rp"));
+    if (title && !cJSON_IsNull(title)) { // one title id or an array of them
+        if (cJSON_IsArray(title)) {
+            const cJSON *it;
+            cJSON_ArrayForEach(it, title) if (tile_count < 3) title_tile(&tiles[tile_count++], it);
+        } else {
+            title_tile(&tiles[tile_count++], title);
+        }
+    }
+    if (cnum(rew, "rp") && tile_count < 3) { // the RP tile: currencies.RP.color #4caf50 (:15601), commaNumber(rp)
+        char rp[48];
+        comma_int(rp, sizeof rp, cnum(rew, "rp"));
+        sb_appendf(&tiles[tile_count++], "<div class=\"chalRewSkn chalRewTile chalRewRP\" style=\"color:#4caf50;border:2px solid #4caf50;\">%s<br>RP</div>", rp);
+    }
     char icon[256], path[64], name[160], text[64];
     snprintf(path, sizeof(path), "img/chals/icon_%d.png", (int) cnum(c, "IC"));
     ui_img_url(path, icon, sizeof(icon));
@@ -587,9 +655,9 @@ static void chal_card(StrBuf *sb, const cJSON *c, const int margin) {
     }
     if (done) snprintf(text, sizeof(text), "Completed");
     else if (time_key) account_readable_time(text, sizeof(text), val);
-    else snprintf(text, sizeof(text), "%.15g/%.15g", pv, val);
+    else snprintf(text, sizeof(text), "%.15g/%.15g", prog, goal);
     sb_appendf(sb, "<div class=\"chalXPBar\"><div class=\"chalXPVal\">%s</div><div class=\"chalXPBarC\" style=\"width:%.15g%%;\"></div></div></div>", text,
-               done ? 100.0 : time_key || val == 0.0 ? 0.0 : (pv / val * 100.0 > 100.0 ? 100.0 : pv / val * 100.0));
+               done ? 100.0 : time_key || goal == 0.0 ? 0.0 : (prog / goal * 100.0 > 100.0 ? 100.0 : prog / goal * 100.0));
     const double kr = cnum(rew, "kr"), jnk = cnum(rew, "jnk");
     sb_appendf(sb, "<div class=\"chalRews\" style=\"%s\"><div class=\"chalRewV\" style=\"%s\"><span style=\"color:white\">+</span>%.15g "
                    "<span style=\"color:#fbc02d\">KR</span></div>",
@@ -597,13 +665,13 @@ static void chal_card(StrBuf *sb, const cJSON *c, const int margin) {
     sb_appendf(sb, "<div class=\"chalRewV\" style=\"%s\"><span style=\"color:white\">+</span>%.15g <span class=\"material-icons\" "
                    "style=\"color:#cc51f8;font-size:29px;vertical-align:top;\">plumbing</span></div><div>",
                jnk ? "" : "filter:grayscale(1);", jnk);
-    // _71394 = skins.concat(tiles); the three slots right to left
     for (int i = 0; i < 3; i++) {
         const int at = 2 - i;
         if (at < n) skin_tile(sb, skins[at]);
-        else if (at - n < tile_count) sb_append(sb, tiles[at - n]);
+        else if (at - n < tile_count && tiles[at - n].data) sb_append(sb, tiles[at - n].data);
         else skin_tile(sb, -1);
     }
+    for (int i = 0; i < 3; i++) free(sb_finish(&tiles[i]));
     sb_append(sb, "</div></div></div>");
 }
 

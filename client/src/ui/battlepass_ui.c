@@ -381,13 +381,15 @@ static void gift_pop_v10(void) {
                   NULL, NULL, NULL);
 }
 
-// windows[5].genDailyCard(challenge, marginTop)
+// windows[5].genDailyCard(challenge, marginTop) (deob-10.0.7.js:219232-219243)
 static void gen_daily_card(StrBuf *sb, const cJSON *c, const int margin) {
     const cJSON *dat = cJSON_GetObjectItemCaseSensitive(c, "DAT"), *rew = cJSON_GetObjectItemCaseSensitive(c, "REW");
     const int boss = jnum(dat, "boss") != 0.0;
     const int done = jnum(c, "PT") != 0.0;
     const int time_key = !strcmp(jstr(dat, "ky"), "time");
-    const double val = jnum(dat, "val"), pv = jnum(c, "PV");
+    const double val = jnum(dat, "val");
+    // challenges.displayProgress / displayGoal (DAT.bits, DAT.lt; deob-10.0.7.js:180796-180806)
+    const double pv = account_challenge_progress(c), goal = account_challenge_goal(c);
     char icon[256], path[64], name[160], text[64];
     snprintf(path, sizeof path, "img/chals/icon_%d.png", (int) jnum(c, "IC"));
     ui_img_url(path, icon, sizeof icon); // UTILS.assetsUrl: KrunkNative's ui/ copy (fetch_season_images.sh)
@@ -404,9 +406,10 @@ static void gen_daily_card(StrBuf *sb, const cJSON *c, const int margin) {
     }
     if (done) snprintf(text, sizeof text, "Completed");
     else if (time_key) account_readable_time(text, sizeof text, val);
-    else snprintf(text, sizeof text, "%.15g/%.15g", pv, val);
+    else snprintf(text, sizeof text, "%.15g/%.15g", pv, goal);
+    // Math.min(100, progress / goal * 100)
     sb_appendf(sb, "<div class='chalXPBar'><div class='chalXPVal'>%s</div><div class='chalXPBarC' style='width:%.15g%%;'></div></div></div>", text,
-               done ? 100.0 : time_key || val == 0.0 ? 0.0 : pv / val * 100.0);
+               done ? 100.0 : time_key || goal == 0.0 ? 0.0 : fmin(100.0, pv / goal * 100.0));
     const double bpp = jnum(rew, "bpp"), kr = jnum(rew, "kr"), jnk = jnum(rew, "jnk");
     sb_appendf(sb, "<div class='chalRews' style='%s'>", boss ? "border-left: 3px solid #ff9c00;" : "");
     sb_appendf(sb, "<div class='chalRewV' style='%s'><span style='color:white'>+</span>%.15g <span style='color:#fbc02d'>BPP</span></div>", bpp ? "" : "filter:grayscale(1);", bpp);
@@ -416,8 +419,9 @@ static void gen_daily_card(StrBuf *sb, const cJSON *c, const int margin) {
     // REW.sk: every reward skin (an array or "a,b,c")
     const cJSON *sk = cJSON_GetObjectItemCaseSensitive(rew, "sk");
     int skins[16], n = 0;
-    if (cJSON_IsNumber(sk)) skins[n++] = sk->valueint;
-    else if (cJSON_IsArray(sk)) {
+    if (cJSON_IsNumber(sk)) {
+        if (sk->valuedouble != 0.0) skins[n++] = sk->valueint; // (REW.sk || null): a 0 is no reward
+    } else if (cJSON_IsArray(sk)) {
         const cJSON *it;
         cJSON_ArrayForEach(it, sk) if (n < 16) skins[n++] = cJSON_IsNumber(it) ? it->valueint : atoi(cJSON_IsString(it) ? it->valuestring : "-1");
     } else if (cJSON_IsString(sk)) {
@@ -427,8 +431,8 @@ static void gen_daily_card(StrBuf *sb, const cJSON *c, const int margin) {
             if (p) p++;
         }
     }
-    for (int i = 0; i < n; i++) {
-        const ViewerSkin *skin = skins[i] > 0 ? viewer_skin(skins[i]) : NULL;
+    for (int i = 0; i < n; i++) { // store.skins[id]: any store skin, index 0 included (deob-10.0.7.js:219236-219239)
+        const ViewerSkin *skin = skins[i] >= 0 ? viewer_skin(skins[i]) : NULL;
         if (!skin) continue;
         char url[256];
         store_skin_preview(skins[i], url, sizeof url);

@@ -107,6 +107,10 @@ static int64_t rp_add(Dbx *x, const int64_t acc, const int64_t amount, const cha
     return dbx_int(x, SQL(.any = "SELECT balance FROM ranked_points WHERE account_id = $1"), KN_DB_ARGS(I64S(acc)), 0);
 }
 
+int64_t db_ranked_points_add(Dbx *x, const int64_t account_id, const int64_t amount, const char *source, const char *ref) {
+    return rp_add(x, account_id, amount, source, ref);
+}
+
 /* ------------------------------------------------------------------ queue */
 
 static kn_db_result *run_rk_join(kn_dbconn *c, int n, const char *const *p) {

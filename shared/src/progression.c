@@ -178,6 +178,26 @@ static void add_reward(cJSON *reward, const cJSON *rew) {
     if (kr > 0.0) set_num(reward, "kr", field_num(reward, "kr", NULL) + kr);
     const double bpp = field_num(rew, "bpp", NULL); // vLN02439: REW.bpp -> account.BP.bpp
     if (bpp > 0.0) set_num(reward, "bpp", field_num(reward, "bpp", NULL) + bpp);
+    // v10.0.7's finalize (deob-10.0.7.js:180855-180902): REW.jnk to the junk, REW.title (an id or an array; ids > 0) to
+    // account.titles, REW.rp to the ranked points, sent back in UPDATE_CHALLENGE_REWARDS
+    const double jnk = field_num(rew, "jnk", NULL);
+    if (jnk > 0.0) set_num(reward, "jnk", field_num(reward, "jnk", NULL) + jnk);
+    const double rp = field_num(rew, "rp", NULL);
+    if (rp > 0.0) set_num(reward, "rp", field_num(reward, "rp", NULL) + (double) (long long) rp);
+    const cJSON *title = cJSON_GetObjectItemCaseSensitive(rew, "title");
+    if (title && !cJSON_IsNull(title)) {
+        cJSON *titles = cJSON_GetObjectItemCaseSensitive(reward, "titles");
+        if (!titles) titles = cJSON_AddArrayToObject(reward, "titles");
+        const cJSON *it = cJSON_IsArray(title) ? title->child : title;
+        for (; it; it = cJSON_IsArray(title) ? it->next : NULL) {
+            const double id = cJSON_IsNumber(it) ? it->valuedouble : cJSON_IsString(it) ? atof(it->valuestring) : -1.0;
+            if (id <= 0.0 || !titles) continue;
+            int seen = 0; // titles.filter(id > 0 && first of its value)
+            const cJSON *t;
+            cJSON_ArrayForEach(t, titles) seen |= t->valuedouble == (double) (long long) id;
+            if (!seen) cJSON_AddItemToArray(titles, cJSON_CreateNumber((double) (long long) id));
+        }
+    }
     cJSON *skins = cJSON_GetObjectItemCaseSensitive(reward, "skins");
     if (!skins) skins = cJSON_AddArrayToObject(reward, "skins");
     const cJSON *sk = cJSON_GetObjectItemCaseSensitive(rew, "sk");

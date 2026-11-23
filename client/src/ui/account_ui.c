@@ -516,6 +516,69 @@ static void chal_capture(const char *label, const cJSON *frame) {
 }
 
 static void kio_pfp_frame(const char *label, const cJSON *frame); // the profile picture's upload answers (below)
+static void chal_name(const cJSON *c, char *out, size_t n);
+
+// REW.sk of a challenge: an array or a comma list (deob-10.0.7.js:225219, Array.isArray(sk) ? sk : (sk + "").split(","))
+static void chal_reward_skins(const cJSON *rew) {
+    const cJSON *sk = cJSON_GetObjectItemCaseSensitive(rew, "sk"), *it;
+    if (!sk || cJSON_IsNull(sk) || (cJSON_IsNumber(sk) && sk->valuedouble == 0.0)) return;
+    if (cJSON_IsNumber(sk)) hud_ui_add_reward_skin(sk->valueint);
+    cJSON_ArrayForEach(it, (cJSON_IsArray(sk) ? sk : NULL)) {
+        if (cJSON_IsNumber(it)) hud_ui_add_reward_skin(it->valueint);
+        else if (cJSON_IsString(it) && it->valuestring[0]) hud_ui_add_reward_skin(atoi(it->valuestring));
+    }
+    if (cJSON_IsString(sk))
+        for (const char *p = sk->valuestring; p && *p;) {
+            hud_ui_add_reward_skin(atoi(p));
+            p = strchr(p, ',');
+            if (p) p++;
+        }
+}
+
+// CHALLENGE_COMPLETED [index, midGame, REW] (deob-10.0.7.js:225216-225229), index into account.activeChallenges: during
+// the match a chat line ("Finish the game to complete: [N] challenge") and REW's skins into matchRewardSummary; at the
+// match end the "Completed!" card in #endChals
+static void challenge_completed(const cJSON *list, const cJSON *frame) {
+    const cJSON *idx = cJSON_GetArrayItem(frame, 1);
+    const cJSON *c = cJSON_IsNumber(idx) ? cJSON_GetArrayItem(list, idx->valueint) : NULL;
+    if (!c) return;
+    char name[160];
+    chal_name(c, name, sizeof name);
+    const cJSON *mid = cJSON_GetArrayItem(frame, 2);
+    if (cJSON_IsTrue(mid) || (cJSON_IsNumber(mid) && mid->valuedouble != 0.0)) {
+        hud_ui_challenge_mid_game(name);
+        chal_reward_skins(cJSON_GetArrayItem(frame, 3));
+    } else {
+        const cJSON *ic = cJSON_GetObjectItemCaseSensitive(c, "IC");
+        hud_ui_end_challenge_completed(cJSON_IsNumber(ic) ? ic->valueint : 0, name);
+    }
+}
+
+// UPDATE_CHALLENGE_REWARDS [skins, funds, junk, jnk, kr, titles, rp, rankedPoints] (deob-10.0.7.js:215154-215197): the
+// funds and junk balances, the skins added, each title won into account.titles with its "Title unlocked!" card, and the
+// ranked points balance when points were won
+static void kio_challenge_rewards(const cJSON *frame) {
+    const cJSON *skins = cJSON_GetArrayItem(frame, 1), *funds = cJSON_GetArrayItem(frame, 2), *junk = cJSON_GetArrayItem(frame, 3);
+    const cJSON *titles = cJSON_GetArrayItem(frame, 6), *won = cJSON_GetArrayItem(frame, 7), *balance = cJSON_GetArrayItem(frame, 8), *it;
+    if (cJSON_IsNumber(funds)) {
+        cJSON *v = cJSON_CreateNumber((double) (long long) funds->valuedouble); // parseInt
+        obj_set("player_funds", v);
+        cJSON_Delete(v);
+    }
+    if (cJSON_IsNumber(junk)) obj_set("player_jnk", junk);
+    cJSON_ArrayForEach(it, (cJSON_IsArray(skins) ? skins : NULL)) if (cJSON_IsNumber(it)) account_add_skin(it->valueint);
+    cJSON_ArrayForEach(it, (cJSON_IsArray(titles) ? titles : NULL)) {
+        const int id = cJSON_IsNumber(it) ? it->valueint : cJSON_IsString(it) ? atoi(it->valuestring) : -1;
+        if (id < 0) continue;
+        v10_customize_title_granted(id); // hasTitle || titles.push; titlesVersion++
+        hud_ui_end_title_unlocked(id);
+    }
+    if (cJSON_IsNumber(won) && won->valuedouble != 0) {
+        cJSON *v = cJSON_CreateNumber(cJSON_IsNumber(balance) ? (double) (long long) balance->valuedouble : 0.0); // parseInt(rp) || 0
+        obj_set("ranked_points", v);
+        cJSON_Delete(v);
+    }
+}
 
 // The official game socket's account frames (krunker_net_account_listen), main thread
 static void kio_frame(const char *label, const cJSON *frame) {
@@ -568,9 +631,8 @@ static void kio_frame(const char *label, const cJSON *frame) {
         const cJSON *amount = cJSON_GetObjectItemCaseSensitive(rp, "amount");
         if (cJSON_IsNumber(amount)) obj_set("ranked_points", amount);
         g_kio.gen++;
-    } else if (!strcmp(label, "chlR")) { // UPDATE_CHALLENGE_REWARDS: arg 6 = the points won, arg 7 the balance (v10:208212-208248)
-        const cJSON *won = cJSON_GetArrayItem(frame, 7), *balance = cJSON_GetArrayItem(frame, 8);
-        if (won && cJSON_IsNumber(won) && won->valuedouble != 0 && cJSON_IsNumber(balance)) obj_set("ranked_points", balance);
+    } else if (!strcmp(label, "chlR")) { // UPDATE_CHALLENGE_REWARDS (deob-10.0.7.js:215154-215197)
+        kio_challenge_rewards(frame);
         g_kio.gen++;
     } else if (account_backend() != ACCOUNT_BACKEND_KRUNKER) {
         return; // (the battle pass / clan / challenge answers belong to the krunker.io account's windows)
@@ -595,7 +657,9 @@ static void kio_frame(const char *label, const cJSON *frame) {
         if (rpc && !strcmp(rpc, "dsl")) v10_daily_spin_frame(label, frame);
         else if (rpc && !strncmp(rpc, "clan-transfer-", 14)) clan_ui_rpc(label, frame); // the ownership transfer's
     } else if ((!strcmp(label, "chg") || !strcmp(label, "uchp")) && g_kio.obj) {
-        // UPDATE_CHALLENGES [PT, CI, PV]... / UPDATE_CHALLENGES_PROGRESS [CI, PV]... (v10:218110 / 218121)
+        // UPDATE_CHALLENGES [PT, CI, PV]... (deob-10.0.7.js:225195-225205): PV and PT, then updateWindow(33);
+        // UPDATE_CHALLENGES_PROGRESS [CI, PV]... (:225206-225215): PV, and PT = 1 once PV >= DAT.val, no redraw.
+        // Each pair goes to the first challenge with that CI (activeChallenges.find).
         cJSON *list = cJSON_GetObjectItemCaseSensitive(g_kio.obj, "activeChallenges");
         const cJSON *d = cJSON_GetArrayItem(frame, 1);
         const int step = !strcmp(label, "chg") ? 3 : 2, n = cJSON_GetArraySize(d);
@@ -606,11 +670,24 @@ static void kio_frame(const char *label, const cJSON *frame) {
                 const cJSON *cci = cJSON_GetObjectItemCaseSensitive(c, "CI");
                 if (!cJSON_IsNumber(cci) || cci->valuedouble != ci) continue;
                 const cJSON *pv = cJSON_GetArrayItem(d, i + (step == 3 ? 2 : 1));
-                if (pv) cJSON_ReplaceItemInObjectCaseSensitive(c, "PV", cJSON_Duplicate(pv, 1));
-                if (step == 3) cJSON_ReplaceItemInObjectCaseSensitive(c, "PT", cJSON_CreateNumber(cJSON_GetNumberValue(cJSON_GetArrayItem(d, i))));
+                if (pv) {
+                    if (cJSON_GetObjectItemCaseSensitive(c, "PV")) cJSON_ReplaceItemInObjectCaseSensitive(c, "PV", cJSON_Duplicate(pv, 1));
+                    else cJSON_AddItemToObject(c, "PV", cJSON_Duplicate(pv, 1));
+                }
+                double pt = -1.0;
+                if (step == 3) pt = (double) (long long) cJSON_GetNumberValue(cJSON_GetArrayItem(d, i)); // parseInt(PT)
+                else if (cJSON_IsNumber(pv) && pv->valuedouble >= cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(c, "DAT"), "val")))
+                    pt = 1.0;
+                if (pt >= 0.0) {
+                    if (cJSON_GetObjectItemCaseSensitive(c, "PT")) cJSON_ReplaceItemInObjectCaseSensitive(c, "PT", cJSON_CreateNumber(pt));
+                    else cJSON_AddNumberToObject(c, "PT", pt);
+                }
+                break;
             }
         }
-        menu_rerender_if_open(33);
+        if (step == 3) menu_rerender_if_open(33);
+    } else if (!strcmp(label, "chgC") && g_kio.obj) { // CHALLENGE_COMPLETED [index, midGame, REW]
+        challenge_completed(cJSON_GetObjectItemCaseSensitive(g_kio.obj, "activeChallenges"), frame);
     }
 }
 
@@ -4176,6 +4253,38 @@ void account_challenges_request(void) {
 
 void account_challenge_name(const cJSON *c, char *out, const size_t n) { chal_name(c, out, n); }
 
+// the bits set in a challenge's mask (deob-10.0.7.js:180787-180792: for (; v; v &= v - 1) n++, on JS's int32)
+static int chal_bits(const double v) {
+    uint32_t m = (uint32_t) (int32_t) (long long) v;
+    int n = 0;
+    for (; m; m &= m - 1) n++;
+    return n;
+}
+
+// challenges.displayGoal (deob-10.0.7.js:180796-180798): DAT.bits ? the mask's bit count : DAT.val
+double account_challenge_goal(const cJSON *c) {
+    const cJSON *dat = cJSON_GetObjectItem(c, "DAT");
+    return cnum(dat, "bits") ? chal_bits(cnum(dat, "val")) : cnum(dat, "val");
+}
+
+// challenges.displayProgress (deob-10.0.7.js:180799-180806): DAT.bits ? the bit count of PV; else max(PV, the
+// account's lifetime stat DAT.lt names: kills, wins, stats.n the nukes, :180768-180778)
+double account_challenge_progress(const cJSON *c) {
+    const cJSON *dat = cJSON_GetObjectItem(c, "DAT");
+    const double pv = cnum(c, "PV");
+    if (cnum(dat, "bits")) return chal_bits(pv);
+    const char *lt = cJSON_GetStringValue(cJSON_GetObjectItem(dat, "lt"));
+    const AccountInfo *acc = active_account();
+    double life = 0.0;
+    if (lt && acc) {
+        if (!strcmp(lt, "kills")) life = acc->kills;
+        else if (!strcmp(lt, "wins")) life = acc->wins;
+        else if (!strcmp(lt, "nukes")) life = cnum(acc->stats, "n");
+    }
+    return pv > life ? pv : life;
+}
+
+
 static cJSON *chal_by_ci(const double ci) {
     cJSON *c;
     cJSON_ArrayForEach(c, g_chal) if (cnum(c, "CI") == ci) return c;
@@ -4249,7 +4358,11 @@ static int progress_frame(const char *label, const cJSON *frame) {
         menu_rerender_if_open(33); // if (!inGame) updateWindow(33)
         battlepass_ui_challenges_changed();
     } else if (!strcmp(label, "chgC")) { // io_challengeCompleted: the end screen's "Completed!" cards
-        const cJSON *c;
+        if (cJSON_IsNumber(a1)) { // v10's [index, midGame, REW] (deob-10.0.7.js:225216-225229)
+            if (g_logged_in) challenge_completed(g_chal, frame);
+            return 1;
+        }
+        const cJSON *c; // KrunkNative's match-end form: the completed challenge objects (services/brain/accounts.c)
         cJSON_ArrayForEach(c, a1) {
             char name[160];
             chal_name(c, name, sizeof(name));
@@ -4260,11 +4373,24 @@ static int progress_frame(const char *label, const cJSON *frame) {
             cJSON *mine = chal_by_ci(cnum(c, "CI"));
             if (mine) chal_set(mine, "PT", 1);
         }
-    } else if (!strcmp(label, "chlR")) { // io_updateChallengeRewards(skins, funds, junk, jnk, kr)
+    } else if (!strcmp(label, "chlR")) { // UPDATE_CHALLENGE_REWARDS [skins, funds, junk, jnk, kr, titles, rp, rankedPoints]
+        // (deob-10.0.7.js:215154-215197): the balances, the skins, each title into account.titles with its
+        // "Title unlocked!" card in #endChals, the ranked points when points were won
         if (!g_logged_in) return 1;
-        const cJSON *funds = cJSON_GetArrayItem(frame, 2), *it;
-        if (cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
+        const cJSON *funds = cJSON_GetArrayItem(frame, 2), *junk = cJSON_GetArrayItem(frame, 3), *titles = cJSON_GetArrayItem(frame, 6);
+        const cJSON *won = cJSON_GetArrayItem(frame, 7), *balance = cJSON_GetArrayItem(frame, 8), *it;
+        if (cJSON_IsNumber(funds)) account_set_funds((double) (long long) funds->valuedouble);
+        if (cJSON_IsNumber(junk)) g_acc.junk = junk_value(junk_hundredths(junk->valuedouble));
         cJSON_ArrayForEach(it, (cJSON_IsArray(a1) ? a1 : NULL)) if (cJSON_IsNumber(it)) account_add_skin(it->valueint);
+        cJSON_ArrayForEach(it, (cJSON_IsArray(titles) ? titles : NULL)) {
+            const int id = cJSON_IsNumber(it) ? it->valueint : cJSON_IsString(it) ? atoi(it->valuestring) : -1;
+            if (id < 0) continue;
+            v10_customize_title_granted(id);
+            hud_ui_end_title_unlocked(id);
+        }
+        if (cJSON_IsNumber(won) && won->valuedouble != 0) g_acc.ranked_points = cJSON_IsNumber(balance) ? (double) (long long) balance->valuedouble : 0;
+        mark_header();
+        rerender_windows();
     } else if (!strcmp(label, "mdl")) {
         if (!g_logged_in || !cJSON_IsObject(a1)) return 1;
         cJSON_Delete(g_medal_counts);
