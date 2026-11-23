@@ -94,3 +94,31 @@ in-game chat, and class select / the loadout. Four read-only audits found 87 gap
 Gaps in other owners' files, left to them: `account_ui.c`'s logout should clear the loadout keys and selections as
 v10's does (:216910); `store_ui.c:300` sets `#spectButton` without allowSpect; the ranked icons on the scoreboard and
 end table need `ranked*.c` and a player-info field; `kn/en.json` is stale (`kn.host.creating` unused).
+
+## Round 11: the remaining in-game windows, line by line (2026-11-23)
+
+Round 10's open items, then the Clan window, friends and party, Studios, Rent Servers, the account settings tab
+and Account Manager, Report Player / Votekick and the Social and Notifications panels, each compared element by
+element and handler by handler with `deob-10.0.7.js`. Every gap is fixed unless its row says otherwise; the
+differences kept on purpose are in `doc/v10/kn-additions.md` ("Round 11").
+
+| Area | Gaps | Main fixes | Left open | Tests |
+| --- | --- | --- | --- | --- |
+| Spins (round 10 leftovers) | 13 | item copies with wear and serial from a spin (migration 0398, `item_mints`), `#spinItemName`'s wear tier and `serialTag`, the model's wear and paint, `data.instances` over HTTP, copies kept through listings / trades / quick sell / craft, Spin Error's Purchase More with the Paint Ticket, the client-side KR and ticket checks, a ticket's own wheel, the lottery bulbs' blink (:224246-224790, :115267-115345, :127787-127793) | Box Office copies' wear in game (`player_mesh`), the market's instance view, Name Tags and item styles | `prize_wheel_scenario_e2e`, `lottery_scenario_e2e`, `brain_daily_spin`, `brain_shop` |
+| KrunkCup, challenges, Sales | 5 | KrunkCup teams, contributors and top players from `krunkcup_contributions` (0399), credit by the worn jersey style, the Participation Band status and claim; the game server's mid-match `chgC` with kn_brain still crediting at commit; the Sales tab's line chart (:140281-141145, :27142-27440, :180731, :225216-225229, :109206-109369) | official daily BPP values (none exist); an e2e test of a real mid-match completion | `brain_progress` (3 drivers), `brain_v10_social_e2e`, `chal_card_e2e` |
+| Clan window | 24 | the two-step logo buy and upload, the pending and approved logo, v10's error states and texts, component mounts on every show, the Discord popup staying open, no tab reset on demotion or leave, the loot defaults and clamps, live inputs (:96058-96888, :11859-12030, :220402-220435, :223808-223850) | none | `brain_clan_v10`, `kio_clan_e2e.py`, `loading_screens_e2e.py` |
+| Friends, party, notifications | 22 | `gfrnd` rows into window 5's Friends tab, Remove / Follow, windows[29] with `kml` / `rml`, unread counts per tab, the read text's cleaning and the Post link (0400 `mail.link`, `mail.mail_type`), the Friends panel's conversation and send rules, the unread store, Join always switching, the filter and sort rules, keyboard tabs (:141336-142961, :221216-221354) | none | `brain_social_v10`, `brain_v10_social_e2e`, `brain_v10_party_e2e`, `brain_social_ws` |
+| Studios and Rent Servers | 19 | currency rows with `is_active`, the ID copy button, Publish limits, v10's Edit Currency popup; the rent window's markup, wording, thumbnails, states, the duration select, `rentDediServer`'s reads and texts, the list order of the brain's replies (:138566-139534, :204642-204668, :219811-219935) | none | `brain_studios`, `brain_rentals_sqlite`, `brain_v10_studios_e2e`, `rent_servers_e2e` |
+| Account settings, Report, Votekick | 18 | the password change without the old password, the 2FA io forms, the deletion popups and the sign-in cancel, Twitch and Discord texts and results, the connected apps list, the Usernames popup, Report Player's 10-character rule; Votekick was already at parity (:216941-217146, :219136-219176, :115381-115846, :111760-111843) | the Votekick "Vote Submitted" toast (menu agent's `hud_votekick.c`) | `brain_account_settings_e2e`, `v10_misc_popups_e2e`, `account_manager_e2e`, `brain_account_links` |
+| Scoreboard and end table (from the menu round) | 11 | `rankedRank` and `flagIndex` to the client (EXT 0x81B0 after each PLAYER_INFO, gated by `showBadges.rank` and anonMode), the Tab board's `newLeaderRanked` icon, the end table's flag, picture, link, badges and rank in one cell (:176753, :226755-226764, :227637, :98188-98191) | the end table's reward thumbnail (`endData.ed`, not player info); the spectate flag (`hud_spectate.c`) | `player_rank_flag_e2e`, `player_rank_flag_server_e2e`, `krunker_link_test`, `demo_test` |
+| Menu agent's findings | 5 | logout clears the loadout keys and selections (:216910) and runs `updateWindow(5)`, not `showWindow(5)`: the login modal only replaces an open Account window, a logout with no window up leaves the menu as it is (:216644); the wheel's toggle shows Spectate only where allowed (:163418); 28 unused `kn.*` strings dropped; a render scenario keeps its clan through the account change | none | `v10_menu_e2e.py`, uidiff `clan-settings` |
+
+For the menu agent: the end screen's junk reward card from a mid-match `chgC` (`hud_ui.c`, :210022-210035); the
+`#mailCount` cap of "99" with `inline-block` (`v10_menu.c`, :221232-221235); the end table's Report button's title,
+icon and onclick (`end_share.c`); the Votekick "Vote Submitted" toast (`hud_votekick.c`); `specFlag` in
+`hud_spectate.c` (:216359, :216367); `#newUserGuide`, the guest's tip box that logoutAcc shows and
+`iíiïííi` rotates every 20 s, is not in the menu markup (`v10_menu.c`, :148225, :215666, :216910); weapon wear in `skin_fx_wear_key`; a copy's wear and serial in the loadout
+tooltip (`ui_loadout.c`). `v10_email_login_e2e.py` (not in CTest) fails from its first logout on: with the login
+modal up on the menu and its Email field focused, the first Escape reaches `knV10LoginKey` and closes the modal and
+the second leaves the menu for the game, where the test expects a blur and then the modal closing (`v10_login.c`, the
+menu's Escape).

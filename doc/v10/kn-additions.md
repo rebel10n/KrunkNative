@@ -102,7 +102,9 @@ code tabs were dropped with v10).
 
 v10 has no 2FA code popup on any page (krunker.io's 2FA runs through its own login card). Box Office
 accounts keep v7.1.4's brain 2FA: Account Security's Enable 2FA (QR code, then six code inputs) and a 2FA
-login. `client/src/ui/account_ui.c` (`twofa_res`) shows both in v7.1.4's `#twoFAPop`, so the game page
+login. Since round 11 the Settings tab enables and disables 2FA through v10.0.7's own io form (act2FA / dact2FA,
+deob-10.0.7.js:217005-217146), so `#twoFAPop` is left for the 2FA step of a socket password login only.
+`client/src/ui/account_ui.c` (`twofa_res`) shows that step in v7.1.4's `#twoFAPop`, so the game page
 (`ui/index.html`), like the hub and the editor, carries that popup and `css/kn-twofa.css`
 (`tools/ui-import/v10_hub_editor.py` `add_twofa`; the game page's variant `KN_TWOFA_GAME` has the QR
 block). Test: `services/brain/tests/email_verify_web_e2e.py` (CTest `brain_email_web_e2e`).
@@ -138,17 +140,15 @@ windows") ported every gap it found except these, which are kept on purpose. Aud
 | Ranked shop | the row is looked up again after the confirm | the same, but a shop still loading uses the row the dialog opened for | `ranked_ui.c` |
 | Chat | the official server decides which lines carry `extra.actions` | Box Office puts [Join Queue] on the brain's queued-for-ranked line | the only ranked line Box Office's server sends; `server/src/net.c` |
 | Battle Pass > Challenges | daily challenges only | also a "Weekly Challenges" block | Box Office's weekly rows (23-26) would be shown nowhere else; `battlepass_ui.c` |
-| Challenges | `chgC` mid-match ("Finish the game to complete") from the game server | Box Office sends `chgC` at the match end; the mid-match form only comes from krunker.io servers | kn_brain decides completions at the match commit, the game server only counts events |
 | Challenges | official daily BPP values | 50, and 25 for the spray and assist rows (migration 0397) | no official capture of the dailies; the values are the offline v10 sandbox fixture's |
-| Profile > Sales | a canvas line chart | a bar strip over the same zero-filled days | `v10_social.c` |
+| Profile > Sales | Chart.js measures its tick labels with `measureText`; its tooltip has a caret | the same line chart on the native canvas, labels measured by a GameFont estimate (0.9 x the font size per character), no caret | no text metrics on the native canvas; `v10_social.c` `sales_chart_paint` |
 | Profile staff actions | `/moderation/*` and `/players/:name/verify` over gapi | the same routes to kn_brain over HTTP with `?token=` | the social-socket tunnel does not carry them |
 | Profile data | `player_elo4` is the junk balance | the brain fills `player_elo4` with the junk wallet's text | v10 reads Junk from that field; `db_social.c` |
 | Profile / leaderboards deep links | `?profile=` / `?leaderboards=` | web build only | the desktop client has no page URL; `client/src/main.c` |
-| Market listings on a profile | a listing's nametag | Box Office listings have none | no item instances (doc/v10/ui.md, Market) |
+| Market listings on a profile | a listing's nametag | Box Office listings have none | Box Office sells no Name Tag items; copies do carry their wear and serial now (0398) |
 | Community events | only `http(s)://` links | Box Office's relative `/?play=` and `/social.html` links too | the brain knows no public web base; `v10_news.c`, `community.c` |
 | Prize wheels | spin data and lottery pushes on the game socket | `swu`, `lotEnt`, `lotWinP`, `lotEnd` on the social socket | the client talks only to kn_brain |
-| Prize wheels | a spin's `instances` (wear, serial) | not sent | no item instances |
-| Prize wheels | Spin Error's "Purchase More" (a catalogue entry for the ticket) | not shown | Box Office has no ticket catalogue (no payments) |
+| Prize wheels | Spin Error's "Purchase More" opens a USD catalogue product | the Paint Ticket is a 50 KR product (90001, `kn.paintticket`, migration 0398), bought through the no-payments checkout | no real payments on Box Office |
 | Prize wheels | no Free KR wheel in 10.0.7 | the Free KR wheel through `claimReward` | earlier Box Office addition; `store_ui.c` |
 | Raffle | no deadline | a 15 s deadline and a Retry button on a load that never answers | `v10_misc_popups.c` |
 | Events | every event ends | an open-ended event shows no "Ends in" line | operators may run one without an end |
@@ -157,3 +157,37 @@ windows") ported every gap it found except these, which are kept on purpose. Aud
 | Turf Wars | the post is filtered out after a take-down | the board reloads | `turf_ui.c` |
 | Turf Wars | Daily View fetched each time | a failed read is cached for 30 s like every Turf read | `turf_ui.c` `TTL_MS` |
 | Turf Wars | `isDeputy` from the account | `is_deputy` comes from krunker.io accounts only | Box Office accounts have no Deputy role |
+
+## Round 11: differences kept in the v10.0.7 sweep (2026-11-23)
+
+The line-by-line sweep of the Clan window, friends and party, the Studios windows, Rent Servers, the account
+settings tab and Account Manager, Report Player / Votekick and the Social and Notifications panels, plus round
+10's leftovers (spin instances, Purchase More, the lottery bulbs, KrunkCup, the mid-match `chgC`, the Sales chart),
+ported every gap except these (doc/v10/parity-audit-2026-11-20-ui.md, "Round 11").
+
+| Window | v10.0.7 | KrunkNative (kept) | Why / where |
+|---|---|---|---|
+| Prize wheels | a copy's wear comes from Krunker's server-side distribution | uniform in [0, 1) | the distribution is not in the bundle; `services/brain/store.c` |
+| Prize wheels | a weapon copy shows its wear map on the model | typed items show wear; weapons do not | the assets have no `weapons/weapon_N_wear` textures; `spin_wheel.c` |
+| Prize wheels | Purchase More writes the catalogue key into `onclick` with raw quotes, which breaks its own button | the quotes are escaped (`&quot;`) | a v10 bug; `store_ui.c` `spin_error` |
+| KrunkCup | `/krunkcup/wristband` and its claim are defined but never called | `{claimed, eligible, team, item_id}`, a `{team}` claim and 400 `KRUNKCUP_REFUSED` | the shape is KrunkNative's own; `v10_account.c` |
+| KrunkCup | top players' team from Krunker's tournament data | the team the player scored most for | `services/brain/leaderboards.c` |
+| Challenges | official daily BPP values | 50, and 25 for the spray and assist rows (0397) | still no official values: the bundles have `bpp: 0` defaults and kru has no account captures |
+| Clans | the owner transfer goes over the socket; loot and recruitment reads too | gapi paths for the transfer, kn_brain HTTP routes for the reads | Box Office's clan API; `clan_ui.c` |
+| Clans | the pending logo is `clans/<id>_pending.png` on user-assets | the file this client sent, shown on that client only; the approved logo is `/api/clans/<id>/logo` | kn_brain keeps no pending picture; `clan_ui.c` |
+| Clans | the clan and Settings loads have no deadline (the socket reconnects) | 15 s: "Couldn't load the clan. Try again." with Retry, and v10's "Failed to fetch" state in Settings | the brain can go away; `clan_ui.c` |
+| Notifications | clan notifications (type 1) carry Krunker's server text | the tab and its empty state only | the text is not in the bundle; `account_ui.c` `gen_mail` |
+| Notifications | creator-code mail (type 5) | drawn as v10 draws it, never sent | Box Office has no real-money purchases |
+| Friends | JS `toLowerCase` / `localeCompare` | Latin, Greek and Cyrillic case folding, root collation for ASCII | no full Unicode tables in the C client; `v10_social.c` `js_lower`, `js_name_cmp` |
+| Rent Servers | Krunker's reply texts | Box Office's own (name taken, ...) | server-side, not in the bundle; `services/brain/rentals.c` |
+| Rent Servers | a request is queued while the socket reconnects | "Not connected to Box Office servers." | `rent_servers_ui.c` |
+| Rent Servers | `rdsrv` has the game id | also `cr` and `key`, so kn_rentd knows the map | `rentals.c` |
+| Studios | analytics' circulating and holders from Krunker's currencies | 0 | those figures are the game server's currencies (gameplay); `v10_studios.c` |
+| Studios | the list opens again as a new view | the open list is reused | `v10_studios.c` |
+| Account | no Account Manager | the Account Manager (encrypted alt vault) | a KrunkNative window; `alt_manager_ui.c` |
+| Account | a sign-in may stop at the verify-email challenge (`ensure_verified`, :115846) | not shown | kn_brain sets no email gate on the socket sign-in |
+| Account | Usernames: buying a reservation is a payment | "no purchases" (`kn.store.noPurchases`) | no real payments |
+| Account | Discord linking through Krunker's OAuth app; the result on the game socket | Box Office's own Discord app (`discord.c`); `dlnkR` on the social socket | Krunker's app and host are not ours |
+| Report Player | REST `POST /players/{name}/report` | the social socket's `rpt` frame, same fields and outcome | `v10_social.c`, kn_brain |
+| Scoreboard / end table | `rankedRank` and `flagIndex` ride in ADD_PLAYERS [46] / [26] | a KrunkNative EXT, `NET_EXT_KN_PLAYER_RANK_FLAG` (0x81B0), right after each PLAYER_INFO | KrunkNative's PLAYER_INFO keeps its size for older clients; `server/src/accounts.c` |
+| Scoreboard / end table | Hide player names (KN setting) | blanks the other rows' flag, rank, clan and icons too | KrunkNative's masking; `hud_ui.c` |
