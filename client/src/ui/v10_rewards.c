@@ -205,9 +205,20 @@ static void kio_guest_token(void *user, const char *token) {
         fprintf(stderr, "[rewards] krunker.io guest profile not sent\n");
 }
 
+// A --render-scenario never reaches the network (as remote_images.c, krunker_lobbies.c). login-2fa (an official
+// session, no account) asked krunker.io for the guest profile; in one full uidiff run its answer came mid-render
+// and that frame had the login form without its 2FA form (form-header 15.2 -> 47.9 %)
+static int scenario_render(void) {
+#ifdef UI_SCENARIO_SUPPORTED
+    return ui_scenario_active();
+#else
+    return 0;
+#endif
+}
+
 // The balance of this device's guest. create: the id is made when there is none (the page's first fetch).
 static void guest_fetch(const int create) {
-    if (G.scenario || active_account()) return;
+    if (G.scenario || active_account() || scenario_render()) return;
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
         krunker_account_frvr_token(kio_guest_token, (void *) (uintptr_t) G.gen);
         return;
