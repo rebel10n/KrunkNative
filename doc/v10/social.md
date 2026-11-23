@@ -19,7 +19,8 @@ The clan window (13) is `client/src/ui/clan_ui.c` (see clans.md). Line numbers `
 | player profile | `_34510` (v10:109702) | `sb_profile` (Stats, Feed, Sales, Badges, Titles, Creations, Match History, Reports) |
 | clan view | `_34484` (v10:103555), Request to Join | `sb_clan`, gapi `/clans/by-name/<tag>`, `/clans/<id>/apply` |
 | view stack | `.view-stack > .view-stack-overlay > .view-wrapper` scaled by `--ui-scale` | the page's one stack (`v10_view_push` / `v10_view_set` / `v10_view_pop`, client/include/v10_ui.h); `menu_scale_base` publishes `--ui-scale/--ui-width/--ui-height` on `<body>` |
-| window 5 Friends tab | `#friendList` rows, Join (`openURL('/?game=..',1)`), Remove Friend (`deleteFollower`) | `v10_social_window_friends_html` |
+| window 5 Friends tab | FRIENDS_LIST_RESPONSE `["gfrnd", rows]` sorted by `st` (deob-10.0.7.js:225186-225194); `#friendList` rows with `sm` or Online / Offline, the premium picture and mark, the verified mark, Join (`openURL('/?game=..',1)`), Remove Friend (`deleteFollower(name, i)`: the row spliced, FOLLOW_PLAYER `(name, 0)`) (:219085-219101, 227041-227047) | `account_ui.c` `friends_html`; kn_brain pushes `gfrnd` (the `chtb` rows) after the sign-in and to both sides when a friendship is made or broken (`social_data.c`); a krunker.io account's comes from its event bus (`v10_social_window_friends_html`) |
+| notifications (windows[29]) | Followers / Clan / Hub / Inbox / Archive with unread counts per tab (`.unreadBtnM`), Read All except on Archive, `["kml", archive, tab]` -> `onData(tab, rows)`, unread rows `mailUnread` with the blue border, the Followers entry (Follow Back hides itself, the name reads it and opens the profile: `clickFollow`), "X used your creator code!" (type 5), "No messages" / "No archive messages"; `readMail(el, id, type)` -> `["rml", id, type]` -> `onReadData(rows, type)`: the text cleaned of `<`, `>`, the first `&` and non-ASCII, a `km_type` 5 text's "Post!" opening the post (deob-10.0.7.js:221216-221354) | `account_ui.c` `gen_mail`; kn_brain echoes the tab and type and serves `km_type` / `km_link` (`mail.mail_type`, `mail.link`, 0401); a giveaway's winner gets Hub mail linking the post |
 | in-game DM lines | `[DM from <name>]: <text>`, `[DM] N new messages from <name>` in `#chatList` | `dm_chat_line` (only in game) |
 
 KrunkNative adds `v10s*` element ids (no style) for focus/scroll restoration and tests.
@@ -153,7 +154,8 @@ back to the author. News: `accounts.news` (HTML strings).
   show v10's fallback picture: their ids are not krunker.io user-asset ids.
 * Post types 5 (unboxed item) and 8 (match result) are rendered by the brain only if such posts exist
   (KrunkNative creates none yet).
-* Join in the conversation header calls `v10_party_join_game` (v10-party); without it, nothing.
+* Join in the conversation header calls `v10_party_join_game` (v10-party): the matchmaker's join, else the id as a
+  pasted code (v10's switchServer always switches).
 * Reports: `rp_text` is sent raw on the gapi path (10.0.3 puts it in a text node, deob-10.0.3.js:126950)
   and the client escapes it; `rp_date` is ISO UTC. The socket's `["grp"]` -> `["rps"]` keeps the
   HTML-escaped text.

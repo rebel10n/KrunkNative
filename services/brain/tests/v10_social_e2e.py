@@ -280,6 +280,14 @@ def main():
                 break
             time.sleep(0.2)
         check(sent and sent[0][0] == "hello from the e2e", "Send reached kn_brain (chat_messages)")
+        # picking the open friend again, or the tab it is on, changes nothing: the draft stays (deob-10.0.7.js:142508-142522,
+        # 142165-142168)
+        A.type("v10sMsgInput", "keep this draft")
+        A.click("v10sFriend%d" % b)
+        check(A.value("v10sMsgInput") == "keep this draft", "the open friend clicked again keeps the draft: %r" % A.value("v10sMsgInput"))
+        A.click("v10sTab1")
+        check(A.has("v10sMsgInput") and A.value("v10sMsgInput") == "keep this draft",
+              "the Friends tab clicked again keeps the conversation and the draft: %r" % A.value("v10sMsgInput"))
         A.shot("hub-friends")
         A.click("v10sTab2")
         A.type("v10sSearchQ", names[1][:6])
@@ -378,7 +386,60 @@ def main():
         A.wait_line("#friendList rect", m, 3.0)
         rect = re.findall(r"#friendList rect [\d.]+ [\d.]+ [\d.]+ ([\d.]+)", A.text()[m:])
         check(rect and float(rect[-1]) > 30, "the Friends tab has friend rows (not the empty text)")
+        # FRIENDS_LIST_RESPONSE rows (gfrnd, deob-10.0.7.js:219085-219101): bob and carol, each with Remove Friend; bob
+        # (premium) has the beenhere mark and his picture's URL
+        fl = A.textof("friendList") or ""
+        check(names[1] in fl and names[2] in fl and fl.count("Remove Friend") == 2 and "Online" in fl,
+              "window 5's friends: bob and carol, Online, Remove Friend each: %r" % fl)
+        check(A.count("#friendList .material-icons") >= 2, "premium friends carry v10's beenhere mark")
+        # Remove Friend (deleteFollower(name, index), :227041-227047): the row goes at once, the follow is dropped
+        A.ui("deleteFollower('%s',1)" % names[2])
+        fl = A.textof("friendList") or ""
+        check(names[2] not in fl and names[1] in fl, "Remove Friend: carol's row goes at once: %r" % fl)
+        gone, end = [], time.time() + 6.0
+        while time.time() < end:
+            gone = q("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?", a, c)
+            if not gone: break
+            time.sleep(0.2)
+        check(not gone, "Remove Friend: FOLLOW_PLAYER (name, 0) dropped the follow")
         A.shot("window5-friends")
+        A.ui("closWind()")
+        # the notification window (windows[29], deob-10.0.7.js:221282-221354): a Followers entry, a Hub post mail
+        # (km_type 5) and an Inbox sale, unread; one read sale (Archive)
+        fid = q("INSERT INTO mail (account_id, sender, subject, body, kr, kind) VALUES (?, 'zedfollows', '', '', 0, 0) RETURNING id", a)[0][0]
+        hid = q("INSERT INTO mail (account_id, sender, subject, body, kr, kind, mail_type, link) VALUES (?, 'Hub', 'Giveaway Won',"
+                " 'You won a KR giveaway! View the Post!', 0, 2, 5, '42') RETURNING id", a)[0][0]
+        iid = q("INSERT INTO mail (account_id, sender, subject, body, kr) VALUES (?, 'Market', 'Item sold', 'Your Neon & Grid sold <b>for</b> 5 KR', 0)"
+                " RETURNING id", a)[0][0]
+        rid = q("INSERT INTO mail (account_id, sender, subject, body, kr, read_at) VALUES (?, 'Market', 'Old sale', 'old', 0, CURRENT_TIMESTAMP)"
+                " RETURNING id", a)[0][0]
+        A.ui("windows.29.switchTab(0,1)")  # (switchTab opens the window; showWindow(30) again would close it)
+        check(A.has("mail_%d" % fid), "showWindow(30): the Followers tab lists the follow")
+        check(A.count("#mail_%d.mailUnread" % fid) == 1 and "zedfollows has followed you!" in (A.textof("mail_%d" % fid) or ""),
+              "the Followers entry: unread, \"zedfollows has followed you!\": %r" % A.textof("mail_%d" % fid))
+        check(A.count(".bigMenTab .unreadBtnM") == 3 and A.count(".readAll") == 1,
+              "the tabs count the unread (Followers, Hub, Inbox) and Read All shows")
+        A.ui("windows.29.switchTab(3)")
+        check(A.has("mail_%d" % iid) and A.count("#mail_%d.mailUnread" % iid) == 1, "Inbox: the sale, unread (mailUnread)")
+        A.click("mail_%d" % iid)
+        time.sleep(1.0)
+        txt = A.textof("mail_%d" % iid) or ""
+        check(re.search(r"Your Neon  ?Grid sold bfor/b 5 KR", txt) is not None and A.count("#mail_%d.mailUnread" % iid) == 0,
+              "readMail: v10's cleaned text (no <, >, the first &), the row read: %r" % txt)
+        check(q("SELECT read_at IS NOT NULL FROM mail WHERE id = ?", iid)[0][0] == 1, "readMail: GET_MAIL marked it read")
+        A.ui("windows.29.switchTab(2)")
+        check(A.has("mail_%d" % hid), "Hub: the giveaway mail")
+        A.click("mail_%d" % hid)
+        time.sleep(1.0)
+        check(A.count("#mail_%d .mailText a" % hid) == 1 and "View the Post" in (A.textof("mail_%d" % hid) or ""),
+              "a km_type 5 message links its Post! (openPost): %r" % A.textof("mail_%d" % hid))
+        A.ui("windows.29.switchTab(1)")
+        time.sleep(1.5)
+        check("No messages" in (A.textof("mailList") or ""), "Clan: \"No messages\": %r" % A.textof("mailList"))
+        A.ui("windows.29.switchTab(4)")
+        check(A.has("mail_%d" % rid) and A.count(".readAll") == 0 and A.count("#mail_%d.mailUnread" % rid) == 0,
+              "Archive: the read mail, no Read All")
+        A.shot("notifications")
         A.ui("closWind()")
         A.click("menuBtnSocial")
         A.ui("openClanView('V10C')")
