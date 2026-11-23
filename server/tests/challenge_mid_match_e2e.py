@@ -380,19 +380,23 @@ def run(brain_port, game_port):
     check("BPP: battlepass_progress = before + gn + cbp", bpp1 == bpp0 + t.get("gn", -1) + t.get("cbp", -1), "%s -> %s %s" % (bpp0, bpp1, t))
     chlr = social.get("chlR", since_end)[-1]
     check("chlR [skins, funds, junk, jnk, kr, ...]: the skin and the KR", chlr[1] == [E2E_SKIN] and chlr[5] == want_kr, str(chlr))
-    # the mid-match chgC's REW.jnk went to matchRewardSummary.junk (deob-10.0.7.js:225219): the Rewards tab's first card is
-    # "<x.xx> Junk" (tabs.rewards.gen :210029-210052), the sum over the challenges completed mid-match
-    want_jnk = sum(float(rew.get(ci, {}).get("jnk", 0) or 0) for ci in got)
-    card = wait_for(lambda: (lambda t: t if t and t.endswith("Junk") else None)(c.textof(".rewItemHolder .rewItemN", 2.0)), 30, 1.0)
-    # (the same card also counts Junk the match's kill pools found, "You found [x] Junk": at least the challenges')
-    card_jnk = float(card.split()[0]) if card and re.fullmatch(r"\d+\.\d\d Junk", card) else -1.0
-    check("the end screen's Rewards tab: the mid-match Junk card (at least %.2f Junk)" % want_jnk,
-          want_jnk >= E2E_JNK and card_jnk >= want_jnk - 0.005, str(card))
     done_jnk = sum(float(rew.get(ci, {}).get("jnk", 0) or 0) for ci in done_rows)
     check("chlR's jnk: the challenges' Junk credited at the round end (%.2f)" % done_jnk, abs(float(chlr[4] or 0) - done_jnk) < 0.005, str(chlr))
     ends = wait_for(lambda: (c.textof("endChals") or "").count("Completed!") >= 3 and c.textof("endChals"), 15)
     check("the end screen shows each one \"Completed!\"", ends and all((names[ci] or "Get 3000 score") in ends for ci in (DAILY, MAP_KILLS, E2E_CI)),
           str(ends))
+    # the mid-match chgC's REW.jnk went to matchRewardSummary.junk (deob-10.0.7.js:225219): the Rewards tab's first card is
+    # "<x.xx> Junk" (tabs.rewards.gen :210029-210052), at least the sum over the challenges completed mid-match (the same
+    # card also counts Junk the match's kill pools found)
+    want_jnk = sum(float(rew.get(ci, {}).get("jnk", 0) or 0) for ci in got)
+    # the tabbed results come once the end screen's opening animation is over: then Rewards (Leaderboard, Performance,
+    # Medals, Rewards)
+    wait_for(lambda: c.textof("#endTabbedView .tabHeader", 1.0), 25, 0.5)
+    c.cmd("clicksel 3 #endTabbedView .tabHeader", 1.0)
+    card = wait_for(lambda: (lambda t: t if t and t.endswith("Junk") else None)(c.textof(".rewItemHolder .rewItemN", 1.0)), 8, 0.3)
+    card_jnk = float(card.split()[0]) if card and re.fullmatch(r"\d+\.\d\d Junk", card) else -1.0
+    check("the end screen's Rewards tab: the mid-match Junk card (at least %.2f Junk)" % want_jnk,
+          want_jnk >= E2E_JNK and card_jnk >= want_jnk - 0.005, str(card))
     c.cmd("shot " + os.path.join(WORK, "2-end.png"), 1.0)
     c.quit()
 
