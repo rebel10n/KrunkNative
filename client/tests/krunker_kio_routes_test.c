@@ -138,6 +138,7 @@ int main(void) {
         {"/api/clans/recruitment?page=1&limit=20&region=EU", "/clans/recruitment?page=1&limit=20&region=EU"},
         {"/api/clans/by-name/dev", "/clans/by-name/dev"},
         {"/api/clans/77/recruitment", "/clans/77/recruitment"},
+        {"/api/clans/my-applications", "/clans/my-applications"}, // v10.0.7 getMyApplications (deob-10.0.7.js:26907)
         {"/api/leaderboards/krunkcup/teams/4/contributors", "/leaderboards/krunkcup/teams/4/contributors"},
         {"/api/lottery/3", "/lottery/3"}, // the lottery's view (v10 lottery.getLottery, v10:26566)
         {"/api/lottery/12?x=1", "/lottery/12?x=1"},
@@ -157,6 +158,27 @@ int main(void) {
         CHECK(got == 0 && gpath[0] == 0, "%s has no gapi route (got '%s')", no_route[i], gpath);
     }
     CHECK(krunker_kio_gapi_path(gpath, sizeof(gpath), NULL) == 0, "a NULL path has no gapi route");
+
+    // 6c. the clan writes a krunker.io account sends to gapi: exactly v10.0.7's (deob-10.0.7.js:26838-26924)
+    const struct {
+        const char *method, *path;
+    } writes[] = {{"PUT", "/clans/9001/motd"},         {"DELETE", "/clans/9001/motd"},        {"PUT", "/clans/9001/loot-config"},
+                  {"POST", "/clans/9001/banner-color"}, {"DELETE", "/clans/9001/logo"},        {"POST", "/clans/9001/recruitment"},
+                  {"DELETE", "/clans/9001/recruitment"}, {"POST", "/clans/4242/apply"}};
+    for (size_t i = 0; i < sizeof(writes) / sizeof(writes[0]); i++)
+        CHECK(krunker_kio_gapi_write(writes[i].method, writes[i].path), "%s %s is a v10.0.7 clan write", writes[i].method, writes[i].path);
+    // not: the multipart logo upload, wrong methods, the transfer (a socket rpc in v10), a query, a non-numeric id, reads
+    const struct {
+        const char *method, *path;
+    } refused[] = {{"POST", "/clans/9001/logo"},         {"POST", "/clans/9001/motd"},          {"GET", "/clans/9001/motd"},
+                   {"DELETE", "/clans/9001/loot-config"}, {"PUT", "/clans/9001/recruitment"},  {"DELETE", "/clans/9001/apply"},
+                   {"POST", "/clans/9001/transfer"},     {"POST", "/clans/9001/apply?x=1"},     {"POST", "/clans/abc/apply"},
+                   {"POST", "/clans//apply"},            {"POST", "/clans/9001/apply/"},        {"POST", "/api/clans/9001/apply"},
+                   {"POST", "/clans/recruitment"},       {"POST", "/social/posts"},             {NULL, "/clans/9001/motd"},
+                   {"PUT", NULL}};
+    for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++)
+        CHECK(!krunker_kio_gapi_write(refused[i].method, refused[i].path), "%s %s is not sent", refused[i].method ? refused[i].method : "(null)",
+              refused[i].path ? refused[i].path : "(null)");
 
     // 7. a mirror moves the data client: the webhooks and the streams follow KRUNKNATIVE_KRUNKER_DATA_API
     env_clear();

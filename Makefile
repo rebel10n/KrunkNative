@@ -808,6 +808,10 @@ kio-store-e2e: build ## The Store as krunker.io's while it is the active backend
 kio-turf-e2e: build ## Turf Wars on an official krunker.io game (turf_ui.c): the Overview, the leaderboards and My Clan read krunker.io's gapi (territorial-wars, by-name for the clan id), never the brain (krunker.io stubs, headless)
 	timeout 400 $(PYTHON) -I server/tests/kio_turf_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-clan-e2e
+kio-clan-e2e: build ## The Clans window and Turf Wars Recruitment on an official krunker.io game (clan_ui.c, turf_ui.c): the MOTD, loot config and recruitment reads and v10.0.7's clan writes (MOTD, loot config, banner colour, logo removal, recruitment post, apply, Take Down) go to krunker.io's gapi with the Bearer, the answers shown as v10 shows them (krunker.io stubs, headless)
+	timeout 600 $(PYTHON) -I server/tests/kio_clan_e2e.py $(DEBUG_DIR)
+
 .PHONY: kio-market-e2e
 kio-market-e2e: build ## The Market, lottery and Studios on an official krunker.io game (v10_market.c, v10_misc_popups.c, v10_studios.c): Browse, Stats, History, Listing Details, the item page's sales and a Black Market buy, a lottery entry and the studio list from krunker.io's gapi (signed in; krunker.io stubs, headless)
 	timeout 400 $(PYTHON) -I server/tests/kio_market_e2e.py $(DEBUG_DIR)
@@ -1279,7 +1283,7 @@ E2E_DEBUG_TARGETS := strike-app-test viewer-diff frame-yield-test offline-dead-t
 	console-settings-test crash-capture-test raw-mouse-test chat-globe-test bhop-setting-test \
 	fps-uncapped-test strike-vsync-test window-icon-test test-net krunker-official-e2e \
 	krunker-account-e2e krunker-challenges-e2e account-unify-e2e kio-spin-battlepass-e2e \
-	kio-battlepass-e2e kio-store-e2e kio-turf-e2e kio-market-e2e ranked-krunker-e2e target-select-e2e \
+	kio-battlepass-e2e kio-store-e2e kio-turf-e2e kio-clan-e2e kio-market-e2e ranked-krunker-e2e target-select-e2e \
 	bots-chat-e2e command-auth-e2e live-signin-e2e votekick-e2e playerlist-ui-e2e row-centre-e2e \
 	billboard-e2e idle-kick-e2e join-spawn-e2e nuke-e2e ruleset-e2e v10-settings-e2e settings-wiring-e2e \
 	pickup-chat-e2e junk-wallet-e2e v10-rewards-e2e reconnect-test mm-token-e2e server-tabs-e2e \

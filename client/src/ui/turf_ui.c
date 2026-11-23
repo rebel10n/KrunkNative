@@ -11,6 +11,12 @@
 // posts by region and language, Apply), How to Play (svelte-1sr7h97); a clan or player name opens
 // the clan view (svelte-c92dbh) or the player view (svelte-7h12t9) in place of the tabs.
 //
+// While krunker.io is the active account backend the reads are krunker.io's gapi (v10_get's route map), and so are the
+// Recruitment board's writes, as v10.0.7 sends them with the account's Bearer: Apply is POST /clans/<id>/apply (no body;
+// the clan joins the applied set, deob-10.0.7.js:26910, :145742-145762), a staff Take Down is DELETE
+// /clans/<id>/recruitment (the post leaves the list, :26903, :145520-145534), and the applied clans are GET
+// /clans/my-applications (:26907, :145543-145550).
+//
 // v10 draws the territories as an inline <svg> of transparent paths (hit areas only: the visible
 // map is the webp). The native engine has no inline SVG, so the same polygons become hit cells
 // (a grid of absolutely positioned boxes, one run per row) with v10's hover / click behaviour.
@@ -19,6 +25,7 @@
 #include <backend_ui.h>
 #include <html_ui.h>
 #include <turf_wars.h>
+#include <v10_social.h> // v10_gapi: the krunker.io account's Recruitment writes
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1102,6 +1109,18 @@ static const char *pair_label(const char *const (*pairs)[2], const size_t n, con
 }
 
 static int g_applied_ids[64], g_applied_count;
+// krunker.io account: the clans applied to here (v10 adds the id to its applied set on success, no re-read) and the posts
+// a staff Take Down removed (v10 filters them out of the list it holds and lowers its total); both kept until the board
+// reloads (a filter or page change, the popup opened again)
+static int g_kio_applied[64], g_kio_applied_count, g_kio_removed[64], g_kio_removed_count;
+
+static int id_in(const int *ids, const int n, const int id) {
+    for (int i = 0; i < n; i++)
+        if (ids[i] == id) return 1;
+    return 0;
+}
+
+static void kio_board_reset(void) { g_kio_applied_count = g_kio_removed_count = 0; }
 
 static void gen_recruit(StrBuf *sb) {
     char path[256], region[16], lang[16];
@@ -1113,14 +1132,19 @@ static void gen_recruit(StrBuf *sb) {
     const V10Req *r = v10_get(path, TTL_MS);
     const AccountInfo *a = active_account();
     const int staff = a && (a->is_dev || a->is_mod), no_clan = a && !a->clan[0];
-    if (no_clan) { // getMyApplications
+    const int kio = account_backend() == ACCOUNT_BACKEND_KRUNKER;
+    if (no_clan) { // getMyApplications (krunker.io: GET /clans/my-applications with the Bearer, no token)
         char t[256], p2[400];
-        v10_url_token(t, sizeof(t));
-        snprintf(p2, sizeof(p2), "/api/clans/my-applications?token=%s", t);
+        if (kio) snprintf(p2, sizeof(p2), "/api/clans/my-applications");
+        else {
+            v10_url_token(t, sizeof(t));
+            snprintf(p2, sizeof(p2), "/api/clans/my-applications?token=%s", t);
+        }
         const V10Req *ar = v10_get(p2, TTL_MS);
         g_applied_count = 0;
         const cJSON *id;
         cJSON_ArrayForEach(id, cJSON_GetObjectItem(data_of(ar), "clan_ids")) if (g_applied_count < 64) g_applied_ids[g_applied_count++] = id->valueint;
+        for (int i = 0; kio && i < g_kio_applied_count && g_applied_count < 64; i++) g_applied_ids[g_applied_count++] = g_kio_applied[i];
     }
     sb_appendf(sb, "<div class=\"recruitment-browse svelte-72bcy3\"><div class=\"filters-section svelte-72bcy3\"><div class=\"filter-group svelte-72bcy3\">"
                    "<label class=\"filter-label svelte-72bcy3\" for=\"region-filter\">Region:</label> <select id=\"region-filter\" class=\"filter-input svelte-72bcy3\" "
@@ -1136,18 +1160,24 @@ static void gen_recruit(StrBuf *sb) {
     sb_append(sb, "</select></div></div> ");
     const cJSON *d = data_of(r);
     const cJSON *posts = cJSON_GetObjectItem(d, "posts");
+    int shown = 0, removed = 0;
+    const cJSON *p;
+    cJSON_ArrayForEach(p, posts) {
+        if (kio && id_in(g_kio_removed, g_kio_removed_count, (int) v10_num(p, "clan_id", 0))) removed++;
+        else shown++;
+    }
     if (r->status == 0 && !d) sb_append(sb, "<div class=\"loading svelte-72bcy3\">Loading recruitment posts...</div>");
     else if (T.rc_error[0] || (r->status != 200 && r->status != 0)) {
         sb_append(sb, "<div class=\"error svelte-72bcy3\">");
         sb_append_esc(sb, T.rc_error[0] ? T.rc_error : "Failed to load recruitment posts");
         sb_append(sb, "</div>");
-    } else if (!cJSON_GetArraySize(posts)) sb_append(sb, "<div class=\"no-data svelte-72bcy3\">No recruitment posts found. Try adjusting filters.</div>");
+    } else if (!shown) sb_append(sb, "<div class=\"no-data svelte-72bcy3\">No recruitment posts found. Try adjusting filters.</div>");
     else {
         sb_append(sb, "<div class=\"posts-grid svelte-72bcy3\">");
-        const cJSON *p;
         cJSON_ArrayForEach(p, posts) {
             const char *tag = v10_str(p, "clan_name");
             const int clan_id = (int) v10_num(p, "clan_id", 0);
+            if (kio && id_in(g_kio_removed, g_kio_removed_count, clan_id)) continue;
             sb_appendf(sb, "<div class=\"post-card svelte-72bcy3\"><div class=\"post-header svelte-72bcy3\"><div class=\"clan-info svelte-72bcy3\"><!----> "
                            "<span class=\"clan-name svelte-72bcy3\" style=\"color: %s;\" onclick=\"knTwClan('%d')\">",
                        clan_color(tag, "#ffffff"), clan_id);
@@ -1233,7 +1263,7 @@ static void gen_recruit(StrBuf *sb) {
             sb_append(sb, "</div></div>");
         }
         sb_append(sb, "</div> ");
-        const int total = (int) v10_num(d, "total", 0);
+        const int total = (int) v10_num(d, "total", 0) - removed;
         if (total > 20) {
             const int pages = (total + 19) / 20;
             sb_appendf(sb, "<div class=\"pagination svelte-72bcy3\"><button class=\"main-button svelte-whnh40 main-button-accept-secondary%s\" type=\"button\"%s onclick=\"knTwRcPage(-1)\">"
@@ -1497,6 +1527,7 @@ static void open_popup(void) {
     T.hover = T.locked = -1;
     T.board = -1;
     v10_forget("/api/territorial-wars/");
+    kio_board_reset();
     char *html = gen_popup();
     v10_popup_show(POPUP_CLASS, html, render);
     free(html);
@@ -1535,6 +1566,21 @@ static void input_value(const char *id, char *out, const size_t n) {
     if (el) html_dom_get_value(el, out, n);
 }
 
+// krunker.io account: applyToClan's answer (deob-10.0.7.js:145742-145762): the clan joins the applied set, or the board
+// shows error.message || error || "Failed to apply"
+static void on_kio_apply(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) data;
+    const int clan = (int) (intptr_t) user;
+    T.rc_applying = 0;
+    if (status >= 200 && status < 500 && !error) {
+        if (!id_in(g_kio_applied, g_kio_applied_count, clan) && g_kio_applied_count < 64) g_kio_applied[g_kio_applied_count++] = clan;
+    } else {
+        const char *e = cJSON_IsString(error) ? error->valuestring : cJSON_GetStringValue(cJSON_GetObjectItem(error, "message"));
+        snprintf(T.rc_error, sizeof(T.rc_error), "%s", e && e[0] ? e : "Failed to apply");
+    }
+    render();
+}
+
 static void on_apply(void *user, const int status, const cJSON *json) {
     (void) user;
     T.rc_applying = 0;
@@ -1549,9 +1595,30 @@ static void on_apply(void *user, const int status, const cJSON *json) {
     render();
 }
 
+// krunker.io account: removeRecruitment's answer (deob-10.0.7.js:27820-27825): the post leaves the board, or the board
+// shows the error: error.message, else "Failed to remove recruitment post" (:27822), else v10's catch fallback "Failed to
+// take down post" (:145530)
+static void on_kio_takedown(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) data;
+    const int clan = (int) (intptr_t) user;
+    if (status >= 200 && status < 500 && !error) {
+        if (g_kio_removed_count < 64) g_kio_removed[g_kio_removed_count++] = clan;
+    } else {
+        const char *e = cJSON_GetStringValue(cJSON_GetObjectItem(error, "message"));
+        snprintf(T.rc_error, sizeof(T.rc_error), "%s", e && e[0] ? e : error ? "Failed to remove recruitment post" : "Failed to take down post");
+    }
+    render();
+}
+
 static void takedown_closed(const int accepted, void *user) {
     const int clan = (int) (intptr_t) user;
     if (!accepted) return;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // v10.0.7: DELETE /clans/<id>/recruitment (gapi, the Bearer)
+        char path[64];
+        snprintf(path, sizeof(path), "/clans/%d/recruitment", clan);
+        if (!v10_gapi("DELETE", path, NULL, on_kio_takedown, (void *) (intptr_t) clan)) on_kio_takedown((void *) (intptr_t) clan, 0, NULL, NULL);
+        return;
+    }
     char t[256], path[400];
     v10_url_token(t, sizeof(t));
     snprintf(path, sizeof(path), "/api/clans/%d/recruitment?token=%s", clan, t);
@@ -1714,12 +1781,23 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         else snprintf(T.rc_lang, sizeof(T.rc_lang), "%s", s);
         T.rc_page = 1;
         T.rc_error[0] = 0;
+        kio_board_reset();
     } else if (!strcmp(name, "knTwRcPage")) {
         T.rc_page += a0;
         if (T.rc_page < 1) T.rc_page = 1;
+        kio_board_reset();
     } else if (!strcmp(name, "knTwRcApply")) {
-        // krunker.io account: applying to a clan is not ported (it changes that account): no-op
-        if (!a || T.rc_applying || account_backend() == ACCOUNT_BACKEND_KRUNKER) return 1;
+        if (!a || T.rc_applying) return 1;
+        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // v10.0.7 applyToClan: POST /clans/<id>/apply, no body (gapi, the Bearer)
+            if (a0 <= 0) return 1;
+            char path[64];
+            snprintf(path, sizeof(path), "/clans/%d/apply", a0);
+            T.rc_applying = a0;
+            T.rc_error[0] = 0;
+            if (!v10_gapi("POST", path, NULL, on_kio_apply, (void *) (intptr_t) a0)) on_kio_apply((void *) (intptr_t) a0, 0, NULL, NULL);
+            else if (is_turf_open()) render();
+            return 1;
+        }
         char t[256], path[400];
         v10_url_token(t, sizeof(t));
         snprintf(path, sizeof(path), "/api/clans/%d/apply?token=%s", a0, t);
@@ -1727,7 +1805,6 @@ int turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         T.rc_error[0] = 0;
         v10_send("POST", path, NULL, on_apply, NULL);
     } else if (!strcmp(name, "knTwRcTakedown")) {
-        if (account_backend() == ACCOUNT_BACKEND_KRUNKER) return 1; // krunker.io account: staff takedown not ported
         char tag[48];
         arg_str(ev, args, argc, 1, tag, sizeof(tag));
         confirm_takedown(a0, tag);

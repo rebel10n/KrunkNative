@@ -49,6 +49,17 @@ size_t krunker_kio_gapi_leaderboard_path(char *out, size_t n, const char *kn_pat
 //   "/api/clans/by-name/<name>"      -> "/clans/by-name/<name>"        (v10:26756, getClanProfileByName)
 //   "/api/clans/<id>/recruitment"    -> "/clans/<id>/recruitment"      (v10:26805, getRecruitment)
 //   "/api/lottery/<id>[?<q>]"        -> "/lottery/<id>[?<q>]"          (v10:26566, lottery.getLottery; not /participate)
+//   "/api/clans/my-applications"     -> "/clans/my-applications"       (deob-10.0.7.js:26907, getMyApplications)
 // Any other path returns 0 (no gapi route: the caller sends nothing and shows the empty state), and so does one
 // that carries a token= (a Box Office session token is never sent to krunker.io). Returns the length.
 size_t krunker_kio_gapi_path(char *out, size_t n, const char *kn_path);
+
+// 1 when "<method> <gapi path>" is one of v10.0.7's clan writes on gapi (deob-10.0.7.js:26838-26924), the only writes a
+// krunker.io account's clan window and Turf Wars send there:
+//   PUT /clans/<id>/motd {message}         DELETE /clans/<id>/motd          (setMotd / deleteMotd)
+//   PUT /clans/<id>/loot-config {config}   POST /clans/<id>/banner-color {paint_item_id}
+//   DELETE /clans/<id>/logo                (removeLogo; uploadLogo is multipart FormData: not here)
+//   POST /clans/<id>/recruitment {post}    DELETE /clans/<id>/recruitment   (createOrUpdateRecruitment / removeRecruitment)
+//   POST /clans/<id>/apply                 (applyToClan, no body)
+// <id> is digits; no query. Anything else is 0 (not sent).
+int krunker_kio_gapi_write(const char *method, const char *path);

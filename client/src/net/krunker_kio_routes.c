@@ -121,6 +121,9 @@ size_t krunker_kio_gapi_path(char *out, const size_t n, const char *kn_path) {
         if (m <= 0 || (size_t) m >= sizeof(path)) return 0;
         return kio_put(out, n, path);
     }
+    // the Turf Wars board's applied clans: v10.0.7 clans.getMyApplications, GET /clans/my-applications (deob-10.0.7.js:26907,
+    // read at :145546 while the account has no clan); the Bearer names the account, so no query
+    if (!strcmp(kn_path, "/api/clans/my-applications")) return kio_put(out, n, "/clans/my-applications");
     static const char recruit_kn[] = "/api/clans/recruitment", recruit_gapi[] = "/clans/recruitment";
     const size_t rkl = sizeof(recruit_kn) - 1;
     if (strncmp(kn_path, recruit_kn, rkl) == 0 && (kn_path[rkl] == 0 || kn_path[rkl] == '?')) {
@@ -154,5 +157,23 @@ size_t krunker_kio_gapi_path(char *out, const size_t n, const char *kn_path) {
             return kio_put(out, n, path);
         }
     }
+    return 0;
+}
+
+// v10.0.7's clan writes on gapi (the clans client, deob-10.0.7.js:26838-26924), each "<method> /clans/<id>/<tail>":
+// setMotd / deleteMotd, updateLootConfig, setBannerColor, removeLogo, createOrUpdateRecruitment / removeRecruitment,
+// applyToClan. uploadLogo (POST /clans/<id>/logo) is not here: v10 sends it as multipart FormData.
+int krunker_kio_gapi_write(const char *method, const char *path) {
+    static const struct {
+        const char *method, *tail;
+    } writes[] = {{"PUT", "/motd"},           {"DELETE", "/motd"},        {"PUT", "/loot-config"}, {"POST", "/banner-color"},
+                  {"DELETE", "/logo"},        {"POST", "/recruitment"},   {"DELETE", "/recruitment"}, {"POST", "/apply"}};
+    static const char clans[] = "/clans/";
+    if (!method || !path || strncmp(path, clans, sizeof(clans) - 1) != 0) return 0;
+    const char *id = path + sizeof(clans) - 1, *tail = id;
+    while (*tail >= '0' && *tail <= '9') tail++;
+    if (tail == id || tail - id > 12) return 0;
+    for (size_t i = 0; i < sizeof(writes) / sizeof(writes[0]); i++)
+        if (!strcmp(method, writes[i].method) && !strcmp(tail, writes[i].tail)) return 1;
     return 0;
 }

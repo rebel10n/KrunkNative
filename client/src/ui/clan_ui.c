@@ -23,10 +23,16 @@
 // While krunker.io is the active account backend (an official krunker.io game) the window is the
 // krunker.io account's clan: "vcln" and the ["cln", 3] read go over the official game socket (the
 // account bridge's held-sender route) and its "cln" answer comes back to clan_ui_frame(); the
-// settings tab's reads are v10's own gapi calls (v10_gapi.c: /clans/<id>/motd, /loot-config,
-// /recruitment). Every write (create, join, leave / delete, kick, roles, funds, requests, Discord,
-// banner, logo, MOTD, recruitment, loot config, ownership transfer) is not ported for that account:
-// its handler does nothing (clan_kio_write), so nothing is sent anywhere.
+// settings tab's reads are v10's own gapi calls (v10_gapi.c: GET /clans/<id>/motd, /loot-config,
+// /recruitment, the id being clanData.clan_id as v10's), and so are its gapi writes, with v10.0.7's
+// method, path and JSON body and the account's Bearer (deob-10.0.7.js:26838-26924): PUT / DELETE
+// /clans/<id>/motd {message}, PUT /clans/<id>/loot-config, POST /clans/<id>/banner-color
+// {paint_item_id}, DELETE /clans/<id>/logo, POST / DELETE /clans/<id>/recruitment; their answers are
+// applied as v10's settings components apply them. Not ported for that account (clan_kio_write: its
+// handler does nothing, so nothing is sent anywhere): the game-socket writes (create, join, leave /
+// delete, kick, roles, funds, requests, Discord: "cln" / "clnR" / "clnRA"; v10's ownership transfer is
+// the socket's clan-transfer-* rpcs, deob-10.0.7.js:220556-220642) and the logo upload, which v10 sends
+// as multipart FormData (deob-10.0.7.js:96104).
 #include <avatar_ui.h>
 #include <backend.h>
 #include <backend_ui.h>
@@ -310,6 +316,16 @@ static void motd_expired(void *user) {
     clan_rerender();
 }
 
+static int kio_clan(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
+
+// A gapi answer that succeeded. krunker.io: v10.0.7's wrapper (deob-10.0.7.js:26152) gives {data, error} for any
+// status in [200, 500) and its callers throw only on error, so a 204 (no body) or a 4xx without an error is a success
+// there. Box Office: the brain's gapi tunnel answers 200.
+static int gapi_ok(const int status, const cJSON *error) {
+    if (kio_clan()) return status >= 200 && status < 500 && !error;
+    return status == 200 && !error;
+}
+
 static void on_motd(void *user, const int status, const cJSON *data, const cJSON *error) {
     const int kind = (int) (intptr_t) user; // 0 load, 1 save, 2 remove
     if (kind == 0) {
@@ -318,7 +334,7 @@ static void on_motd(void *user, const int status, const cJSON *data, const cJSON
     }
     S.motd_loading = 0;
     S.motd_busy = 0;
-    if (status == 200 && !error) {
+    if (gapi_ok(status, error)) {
         cJSON_Delete(S.motd);
         S.motd = data ? cJSON_Duplicate(data, 1) : cJSON_CreateObject();
         snprintf(S.motd_text, sizeof(S.motd_text), "%s", jstr(S.motd, "message"));
@@ -422,19 +438,25 @@ static void on_loot(void *user, const int status, const char *body, const size_t
     clan_rerender();
 }
 
-static int kio_clan(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
-
 static void on_recruit(void *user, int status, const char *body, size_t length);
 
-// krunker.io account: v10's clans.getLootConfig / getRecruitment (gapi, v10:26770-26800) answer,
-// rebuilt as the kn_brain route's body for the same handler (user: 0 loot config, 1 recruitment)
+// krunker.io account: the answer of v10's clans.getLootConfig / getRecruitment (gapi, deob-10.0.7.js:26852, :26894) and of
+// its updateLootConfig / createOrUpdateRecruitment / removeRecruitment (:26855, :26897, :26903), rebuilt as the kn_brain
+// route's body for the same handler. user: 0 loot config load, 1 recruitment load, 2 loot config save, 3 recruitment
+// save, 4 recruitment removal. A success by v10's rule (gapi_ok) is the handler's 200. v10 reads a failed recruitment
+// load as "no post" (its catch sets the post to null, :96880-96891), so an answered failure is the handler's 404 there;
+// no answer at all keeps the section's Retry.
 static void kio_settings_read(void *user, const int status, const cJSON *data, const cJSON *error) {
+    const int kind = (int) (intptr_t) user;
     cJSON *res = cJSON_CreateObject();
     if (data) cJSON_AddItemToObject(res, "data", cJSON_Duplicate(data, 1));
     if (error) cJSON_AddItemToObject(res, "error", cJSON_Duplicate(error, 1));
     char *body = cJSON_PrintUnformatted(res);
-    if ((intptr_t) user == 0) on_loot((void *) 0, status, body, body ? strlen(body) : 0);
-    else on_recruit((void *) 0, status, body, body ? strlen(body) : 0);
+    int st = gapi_ok(status, error) ? 200 : status;
+    if (kind == 1 && st != 200 && status > 0) st = 404;
+    const size_t len = body ? strlen(body) : 0;
+    if (kind == 0 || kind == 2) on_loot((void *) (intptr_t) (kind == 2), st, body, len);
+    else on_recruit((void *) (intptr_t) (kind == 1 ? 0 : kind - 2), st, body, len);
     free(body);
     cJSON_Delete(res);
 }
@@ -1350,7 +1372,7 @@ static void motd_send(const int remove) {
 static void on_banner(void *user, const int status, const cJSON *data, const cJSON *error) {
     const int paint = (int) (intptr_t) user;
     S.banner_busy = 0;
-    if (status == 200 && !error && g_clan) {
+    if (gapi_ok(status, error) && g_clan) {
         const char *v = jstr(data, "clan_banner_color");
         char fb[8];
         if (!v[0]) {
@@ -1406,14 +1428,24 @@ static void save_loot(void) {
         cJSON_Delete(S.loot);
         S.loot = keep;
     }
+    S.loot_err[0] = 0;
+    S.loot_saved = 0;
+    S.loot_failed = 0;
+    if (kio_clan()) { // v10.0.7 updateLootConfig: PUT /clans/<id>/loot-config, the six fields (deob-10.0.7.js:26855, :96654-96666)
+        char path[64];
+        snprintf(path, sizeof(path), "/clans/%d/loot-config", clan_id());
+        S.loot_saving = v10_gapi("PUT", path, cfg, kio_settings_read, (void *) 2) != 0;
+        cJSON_Delete(cfg);
+        if (!S.loot_saving) snprintf(S.loot_err, sizeof(S.loot_err), "Failed to save loot config");
+        else html_timer_add(3000, saved_off, NULL);
+        clan_rerender();
+        return;
+    }
     char *json = cJSON_PrintUnformatted(cfg);
     cJSON_Delete(cfg);
     char token[256], url[600];
     backend_url_encode(token, sizeof(token), account_session_token());
     snprintf(url, sizeof(url), "%s/api/clans/%d/loot-config?token=%s", backend_url(), clan_id(), token);
-    S.loot_err[0] = 0;
-    S.loot_saved = 0;
-    S.loot_failed = 0;
     S.loot_saving = backend_http_request("PUT", url, json ? json : "{}", on_loot, (void *) 1) != 0;
     if (!S.loot_saving) snprintf(S.loot_err, sizeof(S.loot_err), "Failed to save loot config");
     else html_timer_add(3000, saved_off, NULL);
@@ -1435,11 +1467,20 @@ static void recruit_save(void) {
     cJSON_AddNumberToObject(body, "min_kd", atof(S.r_kd));
     if (S.r_region[0]) cJSON_AddStringToObject(body, "region", S.r_region);
     if (S.r_lang[0]) cJSON_AddStringToObject(body, "language", S.r_lang);
+    S.recruit_err[0] = S.recruit_ok[0] = 0;
+    if (kio_clan()) { // v10.0.7 createOrUpdateRecruitment: POST /clans/<id>/recruitment (deob-10.0.7.js:26897, :27834-27845)
+        char path[64];
+        snprintf(path, sizeof(path), "/clans/%d/recruitment", clan_id());
+        S.recruit_saving = v10_gapi("POST", path, body, kio_settings_read, (void *) 3) != 0;
+        cJSON_Delete(body);
+        if (!S.recruit_saving) snprintf(S.recruit_err, sizeof(S.recruit_err), "Failed to save recruitment post");
+        clan_rerender();
+        return;
+    }
     char *json = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     char url[600];
     recruit_url(url, sizeof(url));
-    S.recruit_err[0] = S.recruit_ok[0] = 0;
     S.recruit_saving = backend_http_request("POST", url, json ? json : "{}", on_recruit, (void *) 1) != 0;
     if (!S.recruit_saving) snprintf(S.recruit_err, sizeof(S.recruit_err), "Failed to save recruitment post");
     free(json);
@@ -1448,10 +1489,18 @@ static void recruit_save(void) {
 
 static void recruit_remove(void) {
     ui_loadout_clear_pops();
-    char url[600];
-    recruit_url(url, sizeof(url));
     S.recruit_err[0] = S.recruit_ok[0] = 0;
-    if (!backend_http_request("DELETE", url, NULL, on_recruit, (void *) 2)) snprintf(S.recruit_err, sizeof(S.recruit_err), "Failed to remove recruitment post");
+    int sent;
+    if (kio_clan()) { // v10.0.7 removeRecruitment: DELETE /clans/<id>/recruitment (deob-10.0.7.js:26903, :27873)
+        char path[64];
+        snprintf(path, sizeof(path), "/clans/%d/recruitment", clan_id());
+        sent = v10_gapi("DELETE", path, NULL, kio_settings_read, (void *) 4) != 0;
+    } else {
+        char url[600];
+        recruit_url(url, sizeof(url));
+        sent = backend_http_request("DELETE", url, NULL, on_recruit, (void *) 2) != 0;
+    }
+    if (!sent) snprintf(S.recruit_err, sizeof(S.recruit_err), "Failed to remove recruitment post");
     clan_rerender();
 }
 
@@ -1525,7 +1574,7 @@ static void on_logo(void *user, const int status, const cJSON *data, const cJSON
     (void) user;
     (void) data;
     S.logo_busy = 0;
-    if (status == 200 && !error) {
+    if (gapi_ok(status, error)) {
         S.logo_err[0] = 0;
         send_cln(3, NULL, NULL); // windows[12].sendReq(3)
     } else {
@@ -1576,12 +1625,13 @@ static void transfer_send(const int kind, const int accept) {
 
 // ------------------------------------------------------------------ handler table
 
-// the window's writes and the popups that only lead to one (krunker.io account: not ported)
+// the window's writes that are not ported for the krunker.io account, and the popups that only lead to one: the game
+// socket's (v10's io.send("cln" / "clnR" / "clnRA") and its clan-transfer-* rpcs) and the logo upload (multipart in v10).
+// The settings tab's gapi writes (MOTD, loot config, banner colour, logo removal, recruitment post) are v10's own there.
 static int clan_kio_write(const char *name, const char *m) {
-    static const char *const writes[] = {"sendReq", "updReq", "updRol", "chngFunds", "decAll", "updateDis", "bannerApply",
-                                         "logoPick", "logoRemove", "logoRemoveConfirmed", "motdSave", "motdRemove", "recruitSave",
-                                         "recruitRemove", "recruitRemoveConfirmed", "saveLoot", "transferStart",
-                                         "transferCancel", "transferRespond", "delReq", "kickReq", "mangFunds", "declinePop"};
+    static const char *const writes[] = {"sendReq", "updReq", "updRol", "chngFunds", "decAll", "updateDis", "logoPick",
+                                         "transferStart", "transferCancel", "transferRespond", "delReq", "kickReq", "mangFunds",
+                                         "declinePop"};
     if (!strcmp(name, "delClanConfirmed") || !strcmp(name, "kickClanConfirmed")) return 1;
     for (size_t i = 0; i < sizeof(writes) / sizeof(writes[0]); i++)
         if (!strcmp(m, writes[i])) return 1;
@@ -1593,7 +1643,7 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
     if (!name || (strncmp(name, "windows.12.", 11) && strcmp(name, "delClanConfirmed") && strcmp(name, "kickClanConfirmed"))) return -1;
     const char *m = name + 11;
     if (kio_clan() && clan_kio_write(name, m)) {
-        printf("[clan] %s: not available for the krunker.io account (read-only)\n", name);
+        printf("[clan] %s: not ported for the krunker.io account\n", name);
         return 1;
     }
     if (!strcmp(name, "delClanConfirmed")) { // _70159 + io.send("cln", 4, 1)

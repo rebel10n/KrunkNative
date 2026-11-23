@@ -7,15 +7,18 @@
 // While krunker.io is the active account backend (backend_ui.h: an official krunker.io game), the
 // same calls are v10's own: HTTPS to krunker.io's gapi (krunker_account_api(KRUNKER_SVC_API), v10's
 // _10449 = new _10077(GAPI_URI), v10:27600) with the krunker.io account's fresh access token, the
-// {data, error} answers unwrapped as v10's _10067 does (v10:26094). Only reads go there: GETs of the
-// player / social / clan / Turf Wars groups the Social hub, the profile and the clan views use.
-// Anything else (follow, vote, comment, post, gift, report, clan apply / settings, other groups) is
-// not ported for the krunker.io account and is not sent at all (0: the caller's own failure path);
-// the kn_brain socket is held meanwhile, so nothing reaches the Box Office account either.
+// {data, error} answers unwrapped as v10's _10067 does (v10:26094). The reads go there: GETs of the
+// player / social / clan / Turf Wars groups the Social hub, the profile and the clan views use. The
+// only writes that go there are v10.0.7's clan writes (krunker_kio_gapi_write: the MOTD, loot config,
+// banner colour, logo removal, recruitment post and apply, deob-10.0.7.js:26838-26924), with their
+// JSON body and the account's Bearer. Anything else (follow, vote, comment, post, gift, report, other
+// groups) is not ported for the krunker.io account and is not sent at all (0: the caller's own
+// failure path); the kn_brain socket is held meanwhile, so nothing reaches the Box Office account either.
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_dom.h> // html_timer_add: the retry's backoff
 #include <krunker_account.h>
+#include <krunker_kio_routes.h> // krunker_kio_gapi_write: the clan writes v10.0.7 sends to gapi
 #include <v10_social.h>
 #include <i18n.h>
 #include <stdint.h>
@@ -176,9 +179,9 @@ static void kio_done(void *user, const int status, const cJSON *res) {
 }
 
 static int kio_gapi(const char *method, const char *path, const cJSON *body, const V10GapiFn fn, void *user) {
-    (void) body;
-    if (!kio_readable(method, path)) {
-        printf("[gapi] %s %s is not sent for the krunker.io account (read-only)\n", method ? method : "GET", path);
+    const int write = !kio_readable(method, path);
+    if (write && !krunker_kio_gapi_write(method, path)) {
+        printf("[gapi] %s %s is not sent for the krunker.io account (not ported)\n", method ? method : "GET", path);
         return 0;
     }
     int slot = -1;
@@ -189,7 +192,11 @@ static int kio_gapi(const char *method, const char *path, const cJSON *body, con
     g_kio[slot].id = g_kio_ids;
     g_kio[slot].fn = fn;
     g_kio[slot].user = user;
-    if (!krunker_account_api("GET", KRUNKER_SVC_API, path, NULL, kio_done, (void *) (uintptr_t) g_kio_ids)) {
+    // a write's body as v10 sends it (JSON.stringify; none for apply and the DELETEs); a read has none
+    char *text = write && body ? cJSON_PrintUnformatted(body) : NULL;
+    const int sent = krunker_account_api(write ? method : "GET", KRUNKER_SVC_API, path, text, kio_done, (void *) (uintptr_t) g_kio_ids);
+    free(text);
+    if (!sent) {
         g_kio[slot].id = 0;
         g_kio[slot].fn = NULL;
         return 0;
