@@ -53,13 +53,9 @@
         26
       ],
       "kind": "text",
-      "note": "the first intro line (16px): the render sits 1px lower (sub-pixel line placement after the two-line headline)",
+      "note": "the first intro line (16px). Offset 0 since the 2026-11-23 translate snapping fix (the vertical ink centroid matches Chrome to 0.001 px; the old -1 offset costs 12 %). Residual: glyph x phase, line 1 sits 0.12-0.35 px left of Chrome",
       "fuzz": 12,
-      "max_pct": 3.0,
-      "ref_offset": [
-        0,
-        -1
-      ]
+      "max_pct": 3.0
     },
     {
       "name": "controls",

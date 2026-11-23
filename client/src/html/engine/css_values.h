@@ -201,7 +201,9 @@ int css_calc_uses_pct(uint16_t calc);
 /* Value of a VALUE length against reference_px, math expression or not (px + pct% of reference). */
 static inline float css_len_value(const CssLength *len, float reference_px)
 {
-    return len->calc ? css_calc_eval(len->calc, reference_px) : len->px + len->pct * 0.01f * reference_px;
+    /* Blink's order (ValueForLength: maximum * percent / 100): 65% of 390 is 253.5 exactly, where
+     * 65 * 0.01f * 390 is 253.49998 and rounds to 253 when the box is pixel-snapped */
+    return len->calc ? css_calc_eval(len->calc, reference_px) : len->px + len->pct * reference_px / 100.0f;
 }
 /* Interned nodes in use (tests / debugging). */
 int css_calc_node_count(void);

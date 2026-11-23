@@ -50,7 +50,8 @@ e.g. `game-updating` credit: 124 pixels at fuzz 6, none at 8). The likeliest cau
 version (the desktop's was not recorded). The structural failures of that run were root-caused on
 2026-11-23 (see "Failing-region triage (2026-11-23)" below); after those fixes the devbox, run as four
 shards, gives 763 passed, 88 failed, 91 skipped (HEAD before them: 759 / 92 / 91 in the same run),
-and 787 / 64 / 91 after the translated-window snapping fix.
+and 787 / 64 / 91 after the translated-window snapping fix (791 / 60 / 91 after the percentage and
+transformed-origin fixes of "Failing-region triage, round 3").
 `menu-host-type` was a layout of its own: the Rent a Server card's 15 px margin moved the centred window a
 fractional 31.3 px at the #uiBase scale (fixed 2026-11-23: 14 px, `rent_servers_ui.c`; the scenario also needed the
 sandbox menu its reference shows).
@@ -597,3 +598,59 @@ px lower: the best whole-pixel offset (23) leaves 0.42 px. Comparing with the re
 -22.58 / -22.75 px gives 2.38 / 2.32 % (top-groups) and 1.65 / 1.29 % (region-groups), and the
 v10-markup render passes at offset 0 (0.11 / 0.18 %): what is left is the KN-only strip's height, not
 the engine.
+
+### Failing-region triage, round 3 (2026-11-23)
+
+Baseline: origin/main ccb73fee (menu ad slots, guest chat, Junkyard, market), four shards on the
+devbox's llvmpipe: 787 passed / 64 failed / 91 skipped. After the fixes below: 791 / 60 / 91, no
+region from pass to fail. `main-menu` and `menu-mobile*` were left to their owner.
+
+**Fixed**
+- **`ingame-mobile` btn-kswap** (13.06 -> 0.000 %, portrait 0.000): float precision in percentage
+  resolution. `#mobileKSwap` is `top: 65%` of 390 px; `css_len_value` computed `65 * 0.01f * 390` =
+  253.49998, which the box snap rounds down to 253, where Blink's `ValueForLength` (maximum * percent /
+  100) gives 253.5 exactly and snaps to 254. `css_values.h` now divides by 100 (the old region note had
+  the right observation, an integer top gives 0 %, and the wrong cause). Unit check in
+  `test_css_values.c`.
+- **`ingame-mobile` / `-portrait` btn-shoot** (8.37 / 8.99 -> 0.000 %): `#mobileShoot` is
+  `position: absolute` with `rotate(90deg)` at layout 25.3, 109.2; Chrome paints it from 25, 109. Blink
+  drops the subpixel accumulation at every non-translation transform, whatever the position; `paint.c`
+  rounded the origin only for `position: relative` (Strike's skewed buttons). The rule now covers every
+  non-composited box with a non-translation transform (`test_abs_scaled_origin_rounded`). Side effects,
+  all improvements: `ingame-pause-esc` class-card 3.31 -> 0.63 % (now passes), `main-menu-classbox-skin`
+  class-box-text 7.71 -> 0.00, `main-menu-nowplaying-long` class-card 5.64 -> 2.93, `menu-mobile`
+  loadout 4.31 -> 2.57, Strike class-selection selected-card 6.05 -> 4.96. Largest moves the other way,
+  all still passing: `kn-store-kio-eterno` window 0.74 -> 0.99, `kn-guest-earned-menu` unclaimed
+  0.00 -> 0.32, `seq-hit@100` 1.52 -> 1.73, `kn-tip-spin` cost 0.35 -> 0.46.
+- **`guide` intro-text** (12.04 -> 5.50 %, max 3): its `ref_offset` of -1 made up for the placement
+  that fbb8dc02 fixed; at offset 0 the vertical ink centroid matches Chrome to 0.001 px. What is left
+  is the glyph x phase (the first line sits 0.12-0.35 px left of Chrome's), still failing.
+
+**Environment, not KN**
+- **`hub-*` badges / editor-badge / nav-buttons**: not a real difference in the references, and not
+  the hub's new badge cards in `social_ui.c` (the numbers are identical before and after them: badges
+  1.843 %, editor-badge 5.745 %, nav-buttons 1.52-1.62 % on every hub page). The regions are scaled
+  images (`#editrDB` is `img/editor.png`, the badge row and the nav icons are scaled PNGs) and all pass
+  with 4 points more fuzz (fuzz 12: badges 0.48 %, editor-badge 1.58 %, nav-buttons 0.60 %): llvmpipe's
+  image sampling, the same as the Strike thumbnails.
+- **`settings-mobile-*` preset-select-buttons** (4.76 %, max 4): the "Custom" text of the select sits
+  where Chrome's does (ink centroid dy +0.07, dx -0.16 px); the difference is glyph anti-aliasing
+  across the whole row (Import / Export / Reset too), and it passes at fuzz x1.5.
+- The `timer` (composited `#timerHolder`), `ammo`, `logo`, `customize-customize` content,
+  `game-updating` credit, `popup-survey` and `editor-1920` canvas-add (the 3D canvas behind the add
+  menu) failures all pass at fuzz x1.5: colour drift as described above.
+
+**Still open**
+- **`spin-item*` buttons** (6.3-7.9 %, max 5.5). Two parts. The respin button's Material Icons
+  `refresh` glyph is a different shape in the v10.0.2 capture (searching rotations of KN's glyph finds
+  no match: the icon font's version, not the spin animation). And Chrome draws the buttons' top and
+  bottom borders 2.0 device px thick, where KN draws 4 CSS px x 0.579 = 2.32: the purple box spans
+  601.8-634.0 in Chrome, 601.6-634.0 in KN, though both left borders are 2.31 px and the green info
+  button's top and bottom match. Chrome rasterizes `#uiBase`'s scaled content in a compositor layer,
+  which is the likeliest source; not reproduced in the engine.
+- **`boot-curtain-350` instructions** (0.97 %, max 0.5): a KN-own reference (2026-10-14, desktop).
+  Only the mid-fade frame differs (`boot-curtain`, `-700` and the `click-to-play-grow-*` frames pass at
+  0.00-0.08 %): KN's CLICK TO PLAY is 0.48 px left of the reference and 5 % brighter. With no Chrome
+  capture of that frame there is no evidence for which is right, so the baseline is kept.
+- **`menu-host-type` window** (3.16 %) belongs to the menu work; **`kn-servers-carousel`** is as
+  described in the previous section.

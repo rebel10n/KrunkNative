@@ -1219,6 +1219,55 @@ static void test_translate_keeps_parent_snap(void)
     if (found != 1) dump(&g_dl);
 }
 
+/* Where the first DL_RECT coloured b == blue lands: the PUSH_TRANSFORM stack composed over its rect origin. */
+static int rect_device_origin(int blue, float *ox, float *oy)
+{
+    float st_m[16][6];
+    int n = 0;
+    for (int i = 0; i < g_dl.n; i++) {
+        const DlItem *it = &g_dl.items[i];
+        if (it->op == DL_PUSH_TRANSFORM && n < 16) {
+            const float *p = n ? st_m[n - 1] : NULL;
+            const float m[6] = {it->u.transform.m.a, it->u.transform.m.b, it->u.transform.m.c,
+                                it->u.transform.m.d, it->u.transform.m.e, it->u.transform.m.f};
+            float *o = st_m[n++];
+            if (!p) { memcpy(o, m, sizeof m); continue; }
+            o[0] = p[0] * m[0] + p[2] * m[1]; o[1] = p[1] * m[0] + p[3] * m[1];
+            o[2] = p[0] * m[2] + p[2] * m[3]; o[3] = p[1] * m[2] + p[3] * m[3];
+            o[4] = p[0] * m[4] + p[2] * m[5] + p[4]; o[5] = p[1] * m[4] + p[3] * m[5] + p[5];
+        } else if (it->op == DL_POP_TRANSFORM && n > 0) {
+            n--;
+        } else if (it->op == DL_RECT && it->u.rect.color.b == blue) {
+            const float x = it->u.rect.rect.x, y = it->u.rect.rect.y;
+            *ox = n ? st_m[n - 1][0] * x + st_m[n - 1][2] * y + st_m[n - 1][4] : x;
+            *oy = n ? st_m[n - 1][1] * x + st_m[n - 1][3] * y + st_m[n - 1][5] : y;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void test_abs_scaled_origin_rounded(void)
+{
+    printf("position: absolute + non-translation transform: origin rounded to whole px (#mobileShoot)\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    /* #mobileShoot: absolute at 25.3,109.2 (60x60), scale(0.5) about its centre */
+    Box *b = mk(root, BOX_BLOCK, 25.3f, 109.2f, 60, 60);
+    set_positioned(b, 0);
+    st(b)->transform.count = 1;
+    st(b)->transform.ops[0].kind = CSS_TRANSFORM_SCALE;
+    st(b)->transform.ops[0].sx = st(b)->transform.ops[0].sy = 0.5f;
+    st(b)->background_color = rgba(7, 8, 9, 255);
+    build(root);
+    float x = -1, y = -1;
+    CHECK(rect_device_origin(9, &x, &y));
+    /* Blink drops the subpixel accumulation: painted from (25, 109), so the scaled box starts at 25 + 15, 109 + 15 */
+    CHECK_F(x, 40.0f);
+    CHECK_F(y, 124.0f);
+    if (fabsf(x - 40.0f) > 1e-3f || fabsf(y - 124.0f) > 1e-3f) dump(&g_dl);
+}
+
 static void test_scaled_scroller_text_snap(void)
 {
     printf("scaled body: text baselines rounded in layout space, composited scroller origin snapped\n");
@@ -1778,6 +1827,7 @@ int main(void)
     test_composited_origin_snap();
     test_scaled_scroller_text_snap();
     test_translate_keeps_parent_snap();
+    test_abs_scaled_origin_rounded();
     test_atlas_reset_while_recording();
     test_url_base_and_cutout();
     test_three_dot_ellipsis();

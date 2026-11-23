@@ -241,6 +241,9 @@ static void test_math_expressions(void)
     CHECK(feq(css_len_value(&c.inset[CSS_LEFT], 1920), 961) && feq(css_len_value(&c.inset[CSS_LEFT], 1280), 715.5f));
     CHECK(feq(css_len_value(&c.inset[CSS_LEFT], 4000), 2000));                 /* 50% wins on a wide screen */
     CHECK(apply(&c, NULL, "height", "min(860px, calc(100% - 40px))") && feq(css_len_value(&c.height, 720), 680));
+    /* a plain percentage resolves as Blink's maximum * percent / 100: #mobileKSwap's 65% of 390 is 253.5
+     * exactly (65 * 0.01f * 390 is 253.49998, which a pixel snap rounds down to 253) */
+    CHECK(apply(&c, NULL, "top", "65%") && !c.inset[CSS_TOP].calc && css_len_value(&c.inset[CSS_TOP], 390) == 253.5f);
     /* identical expressions intern to one id (CssComputed hashes byte-wise) */
     CssComputed d = fresh();
     const int nodes = css_calc_node_count();
