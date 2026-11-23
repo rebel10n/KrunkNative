@@ -12,6 +12,8 @@ v10.0.2 shows there (doc/ref/krunker-v10/ingame/, the offline v10 sandbox):
     on the menu (hideChatIfGuestUser, deob-10.0.7.js:215587: Esc takes it away); hidden while the
     game loads (hud_ui.c hud_chat_wanted);
   - #leaderboardHolder always up in game and while spectating (v10's switchLeaderboard);
+  - spectating, the followed bot's flag in #specStatsInner (.specFlag flag-icon flag-icon-<iso>, deob-10.0.7.js:216367)
+    once its flagIndex comes (the input script's `rankflag`, as NET_EXT_KN_PLAYER_RANK_FLAG);
   - the player HUD (health bar, weapon slots, ammo, timer) alive, gone on the death screen;
   - the Tab scoreboard in v10's <thead>/<tbody> table;
   - the bots stop once the kill feed is checked (bot_stop): endGame shows the end screen only to an
@@ -48,6 +50,11 @@ SCRIPT = """
 1500 play
 3500 check @spect spectateUI=1 chatUIHolder=1 leaderboardHolder=1 weapHolder=0 bottomLeftHolder=0
 3500 frame @spect ingame-spectate
+3550 mdown right
+3570 mup right
+3700 rankflag spect 8 12
+3850 attr @specflag class [id=specStatsInner] .specFlag
+3850 attr @specflagid id [id=specStatsInner] .specFlag
 4000 esc
 4800 check @spect-esc menuHolder=1 spectateUI=0 chatUIHolder=0
 5000 call setSpect 0
@@ -181,6 +188,16 @@ def run(attempt):
         bad = {k: have.get(k, "no probe") for k, v in want.items() if have.get(k) != v}
         check(f"{label}: " + " ".join(f"{k}={v}" for k, v in want.items()), not bad, f"got {bad}" if bad else "")
     nodes = got.get("nodes", {})
+    # the followed player's flag (#specStatsInner, deob-10.0.7.js:216359/216367): <span id='f_12' class='specFlag flag-icon
+    # flag-icon-au'> once its flagIndex (12) is in (NET_EXT_KN_PLAYER_RANK_FLAG; `rankflag spect 8 12`)
+    attrs = {}
+    for line in lines:
+        m = re.search(r"\[input_script\] attr t=\d+ @(\S+) n=\d+ \S+?=(.*)", line)
+        if m:
+            attrs[m.group(1)] = m.group(2).strip()
+    check("spectating a bot with flagIndex 12: .specFlag flag-icon flag-icon-au, id f_12",
+          attrs.get("specflag") == "specFlag flag-icon flag-icon-au" and attrs.get("specflagid") == "f_12",
+          "%s / %s" % (attrs.get("specflag"), attrs.get("specflagid")))
     check("kills on bots: rows in #killFeed (under the leaderboard)", nodes.get("feed", 0) >= 1, f"{nodes.get('feed')} .killfeedItem")
     check("Tab scoreboard: v10's <thead> header rows and a <tbody> of players", nodes.get("tab-head") == 1 and nodes.get("tab-rows") == 1,
           f"{nodes.get('tab-head')} thead, {nodes.get('tab-rows')} tbody")

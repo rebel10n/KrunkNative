@@ -94,6 +94,8 @@
 //                                name, banner colour (hex without its '#', which starts a comment; "s3": paint shader 3; "-":
 //                                none), logo version (optional); `wars none` clears it
 //                                (the Turf Wars popup and the map's wars_banner banners, wars_banners.c)
+//   100 rankflag spect 8 12      a NET_EXT_KN_PLAYER_RANK_FLAG (rankedRank 8, flagIndex 12) for a player uid, or `spect` the
+//                                followed one, as the client's EXT handler takes it (its PLAYER_INFO must have come: a bot's does)
 //   100 spinw 0 37.5 2482        a "spinW" (NET_EXT_SPIN_WHEEL_RESPONSE, not ours): spinner uid, randNum, the item won
 //   100 wheelrar 2 0 28 53 13.5 4.46 1 0.04  test only: store wheel 2 draws by rarity with these odds (the compiled-in data
 //                                has only pool wheels among the map wheels 0..2, whose stop throws in v10 before the won
@@ -378,7 +380,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "rows") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
             !strcmp(e->cmd, "waitfor") || !strcmp(e->cmd, "skindef") ||
-            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "wars") || !strcmp(e->cmd, "wheels") || !strcmp(e->cmd, "wheelrar") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "wars") || !strcmp(e->cmd, "rankflag") || !strcmp(e->cmd, "wheels") || !strcmp(e->cmd, "wheelrar") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -1298,6 +1300,17 @@ static void script_run(Client *client, const ScriptEvent *e) {
         s2c_events_on_ext(client, NET_EXT_WARS_CLAN, (const uint8_t *) &w, (uint16_t) sizeof(w));
         fprintf(stderr, "[input_script] wars t=%.0f has=%d id=%d name=%s color=%s logo=%s\n", g_script.time, (int) w.has, w.clan_id,
                 w.clan_name, w.banner_color, w.clan_logo);
+    } else if (!strcmp(e->cmd, "rankflag")) {
+        // rankflag <uid|spect> <rankedRank> <flagIndex>: NET_EXT_KN_PLAYER_RANK_FLAG for a player whose PLAYER_INFO came
+        // (a bot's), as the client's EXT handler takes it; spect: the followed player
+        char who[16] = "";
+        int rank = 0, flag = -1;
+        if (sscanf(e->arg, "%15s %d %d", who, &rank, &flag) == 3) {
+            const NetPlayerRankFlagPacket p = {.uid = !strcmp(who, "spect") ? spectate_target_uid() : atoi(who), .ranked_rank = rank, .flag = flag};
+            player_accounts_on_rank_flag(&p); // what game_events.c does with the packet
+            fprintf(stderr, "[input_script] rankflag t=%.0f uid=%d rank=%d flag=%d shown=%d\n", g_script.time, p.uid, rank, flag,
+                    player_accounts_flag(p.uid));
+        }
     } else if (!strcmp(e->cmd, "spinw")) {
         // spinw <uid> <rand> <skin>: a "spinW" for another player (no account change) through the EXT handler
         const NetSpinWheelPacket w = {.uid = (int32_t) e->v[0], .rand = e->v[1], .skin = (int32_t) e->v[2]};

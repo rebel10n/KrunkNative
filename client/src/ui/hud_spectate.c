@@ -24,6 +24,7 @@
 #include <render_settings.h>
 #include <nav_overlay.h> // KrunkNative: the followed bot's AI state line (nav_overlay_bot_status)
 #include <player_accounts.h> // the followed player's level, clan and featured flag (NET_PACKET_PLAYER_INFO)
+#include "account_flags.h" // account_flag_code: #specStatsInner's .specFlag (flags[flagIndex][1])
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -320,7 +321,8 @@ static void hs_update_stats(const Client *client) {
         // #specSUS (SUSPECT) while the followed player is the K.P.D case's suspect (v10 :209342)
         const int sus = hud_votekick_kpd_sus(client) == target->uid;
         char pname[PLAYER_NAME_SIZE];
-        snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s", target->uid, target->class_index, hp, mhp, sus, hs_name(target, pname, sizeof(pname)));
+        snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%d|%s", target->uid, target->class_index, hp, mhp, sus, player_accounts_flag(target->uid),
+                 hs_name(target, pname, sizeof(pname)));
     } else {
         snprintf(key, sizeof(key), "-");
     }
@@ -344,18 +346,22 @@ static void hs_update_stats(const Client *client) {
     char width[32];
     hs_number(pct, width, sizeof(width));
 
-    // #specStatsInner (deob-10.0.7.js:216367): the class icon, the flag (flagIndex: not in a KrunkNative player's
-    // data, f_-1), the level, the name with its " [clan]" in getClanCol(clan, rgba(255,255,255,0.5)), the featured
-    // check and the health bar. A guest: level 0, no clan, not featured.
+    // #specStatsInner (deob-10.0.7.js:216367): the class icon, the flag (<span id='f_<flagIndex>' class='specFlag'>, with
+    // " flag-icon flag-icon-<flags[i][1]>" when flagIndex > -1: NET_EXT_KN_PLAYER_RANK_FLAG), the level, the name with its
+    // " [clan]" in getClanCol(clan, rgba(255,255,255,0.5)), the featured check and the health bar. A guest: level 0, no
+    // clan, not featured, no flag. KrunkNative's Hide player names takes the flag with the other account extras.
     const NetPlayerInfoPacket *acc = player_accounts_get(target->uid);
     const int account = acc && acc->account_id > 0 && !player_names_extras_hidden(0);
     const int level = account && acc->level > 0 ? acc->level : 0;
     const char *clan = account ? player_names_clan(acc->clan) : NULL;
+    const int flag = player_names_extras_hidden(0) ? -1 : player_accounts_flag(target->uid);
+    const char *flag_code = account_flag_code(flag);
     char html[1536];
     size_t len = (size_t) snprintf(html, sizeof(html),
-        "<img class='spectPIcon' src='textures/classes/icon_%d.png' /><span id='f_-1' class='specFlag'></span>"
+        "<img class='spectPIcon' src='textures/classes/icon_%d.png' /><span id='f_%d' class='specFlag%s%s'></span>"
         "<div style='display:inline-block;width:200px;vertical-align:top'><div class='specLevelBox' id='lvl_%d' "
-        "style='color:white;'>%d</div><span class='specPHead' id='s_%d'>", target->class_index, level, level, target->uid);
+        "style='color:white;'>%d</div><span class='specPHead' id='s_%d'>", target->class_index, flag_code ? flag : -1,
+        flag_code ? " flag-icon flag-icon-" : "", flag_code ? flag_code : "", level, level, target->uid);
     char pname[PLAYER_NAME_SIZE];
     hs_append_escaped(html, sizeof(html), &len, hs_name(target, pname, sizeof(pname)));
     if (clan && clan[0] && len < sizeof(html)) {
