@@ -93,8 +93,8 @@
       ],
       "kind": "text",
       "fuzz": 20,
-      "max_pct": 25.0,
-      "note": "#instructions: CLICK TO PLAY. Reference 536..740 x 284..311, render 539..737 x 285..311: the engine's glyph advances are ~3% narrower, so nearly every ink pixel of this thin line falls outside the fuzz (the ink count is unchanged); a missing / moved / recoloured line is still caught"
+      "max_pct": 8.0,
+      "note": "#instructions: CLICK TO PLAY, in its grow animation (main.css: 0.8 s alternate, 44 px / opacity 0.3 to 36 px / 1). This reference caught it mid-way (about 37.4 px, opacity 0.88: ink 536..740, peak 184 over 17), unlike the other main-menu-* references (settled: 36 px, 207); the scenario's anim_time 0.45 is that phase (4.7 %; at 0.8: 25.9 %, the settled text)"
     },
     {
       "name": "no-connect-button",

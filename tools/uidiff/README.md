@@ -742,3 +742,42 @@ pixel. The two outer edges still 0.21 px off (top, Equip left) are placement, no
 - Moved the other way, still passing: `kn-store-hats-v10` / `-melee-v10` picker 0.00 / 0.61 ->
   0.92 / 1.53 (KN-own references, same buttons), `kn-om-*` om-footer 2.12 -> 2.22,
   `customize-secondary` content 1.67 -> 1.85.
+
+### Main menu and phone menu failures (2026-11-23)
+
+Baseline: origin/main 5f2e9442 with the Skin Manager work, every scenario with a regions file, one
+run on the devbox's llvmpipe: 767 passed / 47 failed / 82 skipped of 896 regions. The menu
+failures were `main-menu` logo and click-to-play, `menu-mobile` header-right and logo,
+`menu-mobile-portrait` logo.
+
+**Fixed**
+- **`main-menu` click-to-play** (25.86 -> 4.70 %, max 25 -> 8): not glyph advances. `#instructions`
+  runs `grow` (0.8 s alternate, 44 px / opacity 0.3 to 36 px / 1). This reference caught it mid-way:
+  ink 536..740 at peak 184 over the 17 background, about 37.4 px at opacity 0.88. Every other
+  `main-menu-*` reference has it settled (36 px, peak 207, ink 540..737), which KN draws to 1 px.
+  `anim_time` 0.45 is that phase, as `spin-item*`'s 0.05 is theirs; action-cards also goes
+  0.79 -> 0.03 % and no other region of the scenario moves.
+
+**Reference disagreement, not changed**
+- **`#mainLogo`** (`main-menu` 6.08, `menu-mobile` 4.65, `menu-mobile-portrait` 5.56 %): the
+  references need different mip sampling for the same image at a similar scale. Sampling an `<img>`
+  trilinearly (the two levels around the exact lod blended, as Skia's linear mipmap mode does)
+  passes all three (1.88 / 1.45 / 2.53 %) and the `hub-*` badges (1.84 -> 1.31 %), but
+  `ingame-pause-esc` logo, the same `#mainLogo`, goes 3.80 -> 12.00 %, `ingame-mobile-portrait` timer
+  fails (4.46 -> 6.64) and seven KN-own references fail (`kn-lb-grid`, `kn-menu-official-*`,
+  `kn-ranked-found`, `kn-turf-*`, `kn-store-kio-eterno`). Over the whole set: 8 regions from fail
+  to pass and 8 from pass to fail, so the floored level (`html_ui.frag` `sample_image`) stays.
+  What made Chrome sample the two captures differently is not established (same capture tool for
+  `menu-mobile` and `ingame-pause-esc`), so there is no rule to port yet.
+- **`menu-mobile` header-right** (1.52 %, max 1): the text sits where Chrome's does (column profile
+  best at shift 0, same rows 9..17). KN puts more coverage on the glyphs' top and bottom rows (row 8:
+  38 vs 17, row 17: 106 vs 60, summed over the region), the vertical anti-aliasing of light hinting
+  at the phone menu's fractional scale. Not changed.
+
+**Death screen crosshair (checked, not ported)**: `ingame-death-self` and four of the seven
+`seq-death` frames show a crosshair, `ingame-death` (killed by a bot) does not. v10.0.7 draws none
+while dead: the overlay's `render` clears the canvas every frame and draws the crosshair only when
+`deathUIHolder` is hidden (`IIiìíìi`, deob-10.0.7.js:162237, 162878; the same test in v10.0.2,
+game.js:159839), and the death handler zeroes its opacity (`toggleGameUI(false)`, :163461). The
+crosshair in those captures is a stale overlay frame (it flickers across the `seq-death` frames), so
+KN keeps hiding it; no region covers the centre.
