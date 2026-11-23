@@ -172,7 +172,7 @@ ported every gap except these (doc/v10/parity-audit-2026-11-20-ui.md, "Round 11"
 | Prize wheels | Purchase More writes the catalogue key into `onclick` with raw quotes, which breaks its own button | the quotes are escaped (`&quot;`) | a v10 bug; `store_ui.c` `spin_error` |
 | KrunkCup | `/krunkcup/wristband` and its claim are defined but never called | `{claimed, eligible, team, item_id}`, a `{team}` claim and 400 `KRUNKCUP_REFUSED` | the shape is KrunkNative's own; `v10_account.c` |
 | KrunkCup | top players' team from Krunker's tournament data | the team the player scored most for | `services/brain/leaderboards.c` |
-| Challenges | official daily BPP values | 50, and 25 for the spray and assist rows (0397) | still no official values: the bundles have `bpp: 0` defaults and kru has no account captures |
+| Challenges | official daily BPP values | 50, and 25 for the spray and assist rows (0397) | still no official values: no capture of a real daily row exists (round 12) |
 | Clans | the owner transfer goes over the socket; loot and recruitment reads too | gapi paths for the transfer, kn_brain HTTP routes for the reads | Box Office's clan API; `clan_ui.c` |
 | Clans | the pending logo is `clans/<id>_pending.png` on user-assets | the file this client sent, shown on that client only; the approved logo is `/api/clans/<id>/logo` | kn_brain keeps no pending picture; `clan_ui.c` |
 | Clans | the clan and Settings loads have no deadline (the socket reconnects) | 15 s: "Couldn't load the clan. Try again." with Retry, and v10's "Failed to fetch" state in Settings | the brain can go away; `clan_ui.c` |
@@ -191,3 +191,35 @@ ported every gap except these (doc/v10/parity-audit-2026-11-20-ui.md, "Round 11"
 | Report Player | REST `POST /players/{name}/report` | the social socket's `rpt` frame, same fields and outcome | `v10_social.c`, kn_brain |
 | Scoreboard / end table | `rankedRank` and `flagIndex` ride in ADD_PLAYERS [46] / [26] | a KrunkNative EXT, `NET_EXT_KN_PLAYER_RANK_FLAG` (0x81B0), right after each PLAYER_INFO | KrunkNative's PLAYER_INFO keeps its size for older clients; `server/src/accounts.c` |
 | Scoreboard / end table | Hide player names (KN setting) | blanks the other rows' flag, rank, clan and icons too | KrunkNative's masking; `hud_ui.c` |
+
+## Round 12: differences kept in the v10.0.7 sweep (2026-11-23)
+
+Round 12 closed round 11's leftovers (the end table's skin reward, item copies' wear, serial and name tag in a match
+and in the Market, a real mid-match challenge end to end, skin makers) and swept the areas no round had covered:
+the map editor, the Mod Manager, the K.P.D. replay viewer, the Twitch / streams panels, the loading screens, the
+captcha and anti-cheat popups and the ad boxes (doc/v10/parity-audit-2026-11-20-ui.md, "Round 12"). It ported every
+gap except these.
+
+| Window | v10.0.7 | KrunkNative (kept) | Why / where |
+|---|---|---|---|
+| Item copies | a player's worn instances ride in the add data (`{i, id, m}`, :24335) and endGame's skin reward in the end data | `NET_EXT_KN_SKIN_META` (0x81D1) with each SKINS and `NET_EXT_KN_END_REWARD` (0x81D0) before the END | older clients' packets keep their size; `server/src/accounts.c`, `shared/src/game.c` |
+| Item copies | a name tag is set by Krunker's own tools; the client has no rename route | `POST /mm/admin/items/:copy/nametag`, operator secret only | no v10 client route to copy; `services/brain/v10_market.c` |
+| Item copies | every slot's instance is known | a slot naming a copy (`"<copyId>#<index>"`) shows that copy's m, a plain index the owner's first copy of it | the ENT carries plain indices for older clients; `accounts_skin_meta_send` |
+| Challenges | official daily BPP values | 50, and 25 for the spray and assist rows (0397) | no repo file or kru capture carries real daily rows; the bundle's `bpp: 0` are running totals, not challenge data (doc/v10/challenges.md §4d) |
+| Challenges | `chgC` and `uchp` on the game socket | the same frames, same order, on the social socket (kn_brain) | Box Office's game server reports to kn_brain, which owns the account |
+| Map editor | no AI assistant | KrunkNative's assistant panel, in the editor's GameFont and panel colours | a KrunkNative feature; `client/src/editor/editor_ai*.c`, `ui/css/editor-ai.css` |
+| Map editor | `alert()` popups | `#chatList` lines | KrunkNative's editor convention; `editor_message` |
+| Map editor | Optimize Faces and Color Merging cannot be undone | one undo step each | KN's history records every object change; `editor_tools.c` |
+| Map editor | an import parse error is the browser's SyntaxError text | KrunkNative's parser's wording after v10's "Failed to import map with error:" | no JS engine; `editor_io.c` |
+| Map editor | `noimg2.png` for a missing preview | `./img/noimg.png` | `noimg2.png` is not in the tree |
+| Map editor | uploads in one request | chunked uploads | kn_brain's upload limits; `editor_net.c` |
+| Map editor | multiplayer rooms on Krunker's editor server | kn_brain's social socket relay; its error texts, the Guest name, the palette, invites through `KN_PUBLIC_ORIGIN` and the camera format are KrunkNative's | Krunker's host is not ours; `services/brain/editor_rooms.c`, `editor_mp.c` |
+| Map editor | the Object Painter's div stays when the switch is off; the entity stage preview | the div follows the switch; small drawing differences in the stage | `editor_panels.c`, `editor_entities.c` |
+| Mods | mods from any URL (Dropbox and others), extracted file by file ("extracting i/N") | the user-asset host only, loaded in one step (only "Success!") | Box Office serves mods itself; `mods_ui.c`, `mod_pack.c` |
+| Mods | the mod view's Use opens a new tab; ClientSession's downloadPack button | Use loads the mod in place; no downloadPack button (official desktop client only) | one window; `mods_ui.c` |
+| Mods | — | `ui_mods.c` and `ui_mod_keys.c` | KrunkNative v3.1.1 mod features, not v10's |
+| Twitch | a drops claim lists the redeemed skins ("Drops Redeemed") | "Drops claimed." | Box Office has no drop campaigns; `account_ui.c` |
+| Streams | Krunker's streams service | kn_brain's own Twitch Helix source; featured, promo, campaigns and event tags from config | `services/brain/streams.c` |
+| Captcha | the page always shows the Security Challenge card | with no page (headless, the console), the challenge is solved in slices with nothing shown; an unsolvable official one still ends with CAPTCHA FAILED (v10.0.3's branch) | `kn_captcha_game.c`, `altcha_modal.c` |
+| Captcha | — | `KRUNKNATIVE_ALTCHA_CLICK=1` clicks the checkbox as the card shows | a test and screenshot switch, like `KRUNKNATIVE_AD_SECONDS` |
+| Ads | `FRVR.ads.show` plays an ad | KrunkNative's placeholder card, with v10's onShow / onComplete timing | Box Office has no ad network; `kn_ad.c` |

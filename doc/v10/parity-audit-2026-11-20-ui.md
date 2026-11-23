@@ -144,3 +144,65 @@ brighter at y 136 and darker at y 138, i.e. about 0.3 px higher, and its labels 
 141-151). Rows 2 and 3 match to the pixel. So Chrome's first line box in `#customizeContainer` (inline-block cards,
 `text-align: center`) starts a fraction of a pixel higher than the later ones, and the text snaps a whole pixel; KN
 lays every line box out alike. Not changed: it is the engine's line-box rounding, not the markup.
+
+## Round 12: round 11's leftovers and the areas no round had covered (2026-11-23)
+
+Round 11's open items, then the map editor (against the editor's own bundles: `editor-10.0.7.js`,
+`index-10.0.7.js`, `editor-config-10.0.7.js`), the Mod Manager, the K.P.D. replay viewer, the Twitch / streams
+panels, the loading screens, the captcha and anti-cheat popups and the ad boxes, compared element by element and
+handler by handler. Every gap is fixed unless its row says otherwise; the differences kept on purpose are in
+`doc/v10/kn-additions.md` ("Round 12").
+
+| Area | Gaps | Main fixes | Left open | Tests |
+| --- | --- | --- | --- | --- |
+| Item copies and the end table | 11 | endGame's skin reward in the end table's reward cell (`.skinReward`, openSales; EXT 0x81D0); a worn copy's wear, serial and name tag to every client (EXT 0x81D1, the slot's named copy first; `skin_meta_of`); name tags on copies (migration 0402) kept through listings and trades; `/items/:id/instances` with the Mints and Wear tabs; the Market's card wear line, listing spans, the copy overlay and the `wears=` filter; a styled copy loses its style when it moves (:195123-195291, :226765-226770, :24335, :109727-109935, :110688-110790, :130983-130991, :136679-136700, :223620-223650) | drawing the name tag on the HUD and the Store's openSales (menu agent) | `market_copies_e2e`, `kill_pools_server_e2e.py`, `player_rank_flag_e2e`, `brain_v10_api_market`, `brain_schema_parity`, `brain_economy`, `brain_live_trade` |
+| Challenges | 3 | a real challenge completed mid-match end to end; the mid-match UPDATE_CHALLENGES_PROGRESS after each event's chgC (`challenge_progress_reported`, :180731-180741, :180925-180934, :225206-225215); a mid-match challenge's Junk into the Rewards tab (:225219) | official daily BPP values (none exist locally) | `challenge_mid_match_e2e`, `brain_progress_sqlite` / `_mysql`, `season_test`, `chal_card_e2e`, `krunker_challenges_e2e.py` |
+| Account | 3 | skin makers (`player_skinmaker`, :115136) and the krunker.io account's `tw_twitchname` / `player_skinmaker` (setData [23] / [42]) reach getSkins; a Twitch link or unlink updates the streamer items at once | none | `v10_customize_e2e.py` |
+| Map editor | 27 | entities and archetypes; Publish Game and Publish Asset as v10 sends them (`uploadM`, `plm`, migration 0403 `map_mobile`); multiplayer co-editing (windows 16 / 17, `#mp-chat`); the inspector, T-key picker and AI Rarity Chances; settings, history, resets, view resolution and object visuals; Tools and Quick GUI as v10 binds them, v10's own quirks included (E10:6610-20982, IDX:6124-15193, CFG:4406-9215) | `publish_ui_e2e`'s Burg template (`assets/maps/burg_new.json` is in no checkout) | `panels_e2e`, `inspector_check`, `objects_e2e`, `windows_check`, `tools_check`, `logic_parity`, `io_e2e`, `entities_e2e`, `mp_e2e`, `publish_e2e`, `asset_upload_test`, `brain_editor_rooms`, `editor_serialize_test` |
+| Mods, replays, streams, Twitch | 18 | the Mod Manager's cards, favourites, header, mod view, `#modLInfo` texts, `?mod=`, Reset Mods, Ctrl+/; the stream thumbnails as images, event tags and the promo without Twitch; v10's Twitch link, unlink and drops popups; a same-map replay seek (:18566-18600, :97248-97966, :108350-108478, :146848-148720, :201934-201954, :209629-209632, :218751-218932, :223416-223459, :225733-226475, :228180-228245, :229274-229551) | the replay viewer's texts and actions (`hud_replay.c`), the Demos list and copyDemoLink (`hud_votekick.c`) and the streams overlay (`v10_menu.c`): menu agent | `mod_pack_test`, `brain_streams`, `brain_streams_e2e`, `brain_v10_api_mods`, `brain_v10_social_e2e`, `brain_hub_creator_e2e`, `demo_test`, `kpd_replay_vote_e2e.py` |
+| Loading, captcha, anti-cheat, ads | 7 | the map card's mode in capitals (:226159); the game socket's challenge on v10's Security Challenge card (ALTCHA 1.0.6, :98801-98984, :119735-119741); a hack-flagged login's BANNED popup and the fart_0 sounds (:216841-216855, :200724-200746); showAd's onShow after the ad (:229900-229912). v10.0.7 rotates no loading tips | Box Office's guest hosting card (`servers_ui.c`): menu agent | `v10_loading_test`, `kn_captcha_test`, `krunker_link_test`, `krunker_host_custom_test`, `brain_captcha_game_e2e`, `krunker_official_e2e` (native runs), `native_auth_e2e`, `captcha_e2e.py`, `loading_screens_e2e` |
+| Tests | 2 | the web e2e tests drive the checkout's own `dist/web` before `KN_WEB_DIST`; `html_anim` counts the ALTCHA spinner | none | `brain_email_web_e2e`, `html_anim_test` |
+
+`uidiff clan-settings` has no reference to re-render: it has no regions file, so `make smoke-ui` only renders it, and
+it renders the Settings tab as round 11 left it.
+
+For the menu agent:
+
+- **Copies** (`skin_meta.h`: `skin_meta_of(uid, skin, &meta)`, `skin_meta_wear(uid, skin)`):
+  - the HUD weapItem's `.weapNametag` `"<name>"` (:176440);
+  - `store_ui.c`'s openSales should call `v10_market_open_item(index, instance)` with an instance built from data-wear-float, data-serial, data-paint, data-paint-shader, data-nametag and data-seed (:223620-223650);
+  - the loadout and item tooltips should put those attributes and the name tag on copy items.
+- **`hud_replay.c`** (deob-10.0.7.js):
+  - "SUSPECT: Player_%d" (:229769);
+  - the voted dot's title "You voted on this demo" (:223259);
+  - "Vote Failed" (:229656), also in place of the client-side sign-in check;
+  - "Open the demo from the list to vote" (:229633);
+  - `myv` from the answer, else -1 (:229643);
+  - "Downloading Demo..." and "Loading Replay..." (:229696, :229725);
+  - openDemoLink's errors: the body's text, "Demo not found", "Demo not found or not authorized" (:229823-229832);
+  - the popup title "KPD Demo Review" and the copy button title 'Copy demo link' (:229829);
+  - `?ct=` only when present, URL-encoded (:27456);
+  - RESOLVE and HACKER? (:229611, :229619), with `kpd_replay_vote_e2e.py:219-220` and the uidiff baselines;
+  - Exit Replay as a reload (:229805);
+  - clearPops only on the first round start.
+- **`hud_votekick.c`:**
+  - copyDemoLink with the page origin and the 1250 ms check icon (:229835-229844);
+  - the guest tag only for a non-banned row (:223203);
+  - the Demos and Reviewers lists from `/kpd/demos?off&q` and `/kpd/reviewers` (:223066-223076);
+  - the group-ban flag on demo rows (:223206).
+- **`v10_menu.c` streams overlay:**
+  - `rest = nfeat ? n - nfeat : 0` (:148357, :148470);
+  - the featured-grid class with no featured stream (:146855);
+  - the promo card inside the grid (:148720);
+  - event tags and `has-event` only on featured cards (:146848-146859);
+  - the thumbnail's children order (:146848);
+  - no `.streams-body` wrapper (:146863);
+  - proxy only `static-cdn.jtvnw.net`.
+- **`servers_ui.c`:**
+  - Box Office guest hosting through the Security Challenge card: `kn_captcha_fetch` + `altcha_modal_show`, then `captcha_e2e.py`'s hosting step clicks `#altcha_checkbox` (:119735-119741);
+  - `:3872` passes `ev->target` when `this` carries no element.
+- **Other files:**
+  - `v10_menu.c`: no premium ad hiding for a hack-flagged login (:216881).
+  - `hud_endscreen_v10.c`: the double-XP button has no `doubleXPButton` class (:210089).
+  - Check that `classPreviewCanvas` hides while a map loads (:228626).
+  - `loading_switch_e2e` still waits for "offline: playing map N", which `offline.c` no longer prints.
