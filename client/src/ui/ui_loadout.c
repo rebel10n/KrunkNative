@@ -288,9 +288,34 @@ static void charm_save(const int slot, const int value) {
     cJSON_Delete(a);
 }
 
+// v10's colour check iìíiïií: /^#([0-9A-F]{3}){1,2}$/i (deob-10.0.7.js:24042-24044)
+int ui_loadout_hex_color_ok(const char *s) {
+    if (!s || s[0] != '#') return 0;
+    const size_t n = strlen(s + 1);
+    if (n != 3 && n != 6) return 0;
+    for (size_t i = 1; i <= n; i++) if (!isxdigit((unsigned char) s[i])) return 0;
+    return 1;
+}
+
+// A premium colour saved as a hex string ("skinColIndex" / "hairCol" / "chatCol"): out gets it ("" none),
+// the result is 0xRRGGBB (#rgb doubled) or -1.
+int ui_loadout_saved_hex(const char *key, char out[8]) {
+    char buf[32] = "";
+    if (out) out[0] = 0;
+    if (html_storage_get(key, buf, sizeof(buf)) < 0 || !ui_loadout_hex_color_ok(buf)) return -1;
+    if (out) snprintf(out, 8, "%s", buf);
+    if (strlen(buf) == 4) {
+        const char full[8] = {'#', buf[1], buf[1], buf[2], buf[2], buf[3], buf[3], 0};
+        return (int) strtol(full + 1, NULL, 16);
+    }
+    return (int) strtol(buf + 1, NULL, 16);
+}
+
+// config.skinColors[skinColIndex].col, else a hex skinColIndex, else the class colour (deob-10.0.7.js:173693)
 int ui_loadout_skin_color(void) {
     const int i = sel(SEL_SKIN_COL);
-    return i >= 0 && i < SKIN_COLOR_COUNT ? (int) strtol(SKIN_COLORS[i], NULL, 16) : -1;
+    if (i >= 0 && i < SKIN_COLOR_COUNT) return (int) strtol(SKIN_COLORS[i], NULL, 16);
+    return ui_loadout_saved_hex("skinColIndex", NULL);
 }
 
 static int random_owned_skin(int weapon, int type);
@@ -307,15 +332,15 @@ static int32_t worn(const int pick, const int resolve_random, const int weapon, 
 }
 
 // skin colour and hat / body / waist / face / dye (enterGame ent[3]/[4]/[14]/[17]/[21], dJ's
-// hatIndex & co). hairCol stays the class colour (-1): Krunker only takes a hex string there, which the
-// picker never sets. PlayerCosmetics.body is the type-2 body item (v7 Body, bodyIndex).
+// hatIndex & co). hairCol is the premium picker's hex string (selectHairColor, deob-10.0.7.js:217487-217494),
+// else the class colour (-1). PlayerCosmetics.body is the type-2 body item (v7 Body, bodyIndex).
 static void look_cosmetics(PlayerCosmetics *out, const int resolve_random) {
     static const struct { int which, type; } SLOTS[5] = {
         {SEL_HAT, 1}, {SEL_BODY, 2}, {SEL_WAIST, 6}, {SEL_FACE, 7}, {SEL_DYE, 5},
     };
     int32_t *slot[5] = {&out->hat, &out->body, &out->waist, &out->face, &out->dye};
     out->skin_color = ui_loadout_skin_color();
-    out->hair_color = -1;
+    out->hair_color = ui_loadout_saved_hex("hairCol", NULL);
     for (int i = 0; i < 5; i++) *slot[i] = worn(sel(SLOTS[i].which), resolve_random, 0, SLOTS[i].type);
 }
 
@@ -1027,7 +1052,6 @@ static const CustSlot CUST_SLOTS[] = {
 };
 #define CUST_SLOT_COUNT ((int) (sizeof(CUST_SLOTS) / sizeof(CUST_SLOTS[0])))
 
-static int slot_used(const int index) { return index >= 0 || index == -2; }
 
 // i18n.t("windows.loadout." + slot key): the slot's name
 static const char *slot_label(const CustSlot *cs) {
@@ -1036,20 +1060,29 @@ static const char *slot_label(const CustSlot *cs) {
     return i18n_tr(key, cs->label);
 }
 
-// Non-premium accounts may not wear hat + head or body + back together (v7 decision 9; the
-// offline sandbox player is exempt like v7's sandbox, a dev account too).
-static int premium_pair_blocked(const int i) {
+// Without premium, hat + head and body + back may not be worn together (deob-10.0.7.js:222484-222516): the
+// slots are walked in order, and a slot whose partner holds an item (a truthy index >= 0, or -2 Random: an
+// index of 0 counts as empty) is drawn as "Premium Required to use Both / or Remove <partner>" and counts as
+// empty from then on (its value becomes -1). Both worn: the first of the pair (hat, body) is the blocked one;
+// only the second worn: the first is blocked from being picked. A guest has no premium either; the sandbox and
+// a dev account are exempt.
+static int pair_used(const int index) { return index > 0 || index == -2; }
+
+static int pair_rule_exempt(void) {
     const AccountInfo *acc = active_account();
-    if (CUST_SLOTS[i].pair < 0 || !acc || acc->premium || acc->is_dev || all_skins_unlocked()) return 0;
-    return slot_used(sel(CUST_SLOTS[CUST_SLOTS[i].pair].which)) && slot_used(sel(CUST_SLOTS[i].which));
+    return (acc && (acc->premium || acc->is_dev)) || all_skins_unlocked();
 }
 
 static void gen_tab_customize(StrBuf *out) {
     int frames_seen[16], frames_n = 0;
+    int vals[CUST_SLOT_COUNT];
+    for (int i = 0; i < CUST_SLOT_COUNT; i++) vals[i] = sel(CUST_SLOTS[i].which);
+    const int exempt = pair_rule_exempt();
     for (int i = 0; i < CUST_SLOT_COUNT; i++) {
         const CustSlot *cs = &CUST_SLOTS[i];
         int pick = sel(cs->which);
-        if (i > CUST_SLOTS[i].pair && premium_pair_blocked(i)) {
+        if (cs->pair >= 0 && !exempt && pair_used(vals[cs->pair])) {
+            vals[i] = -1;
             sb_appendf(out, "<div class='custContainer' onclick='windows[13].premium()' style='width: 22.5%%;height: 174px;'><div class='custItNm blackShad'>%s</div>", slot_label(cs));
             sb_appendf(out, "<div class=\"custPremReq blackShad\">\n\t\t\t\t\t\t<div style=\"color: var(--yellow);font-size: 15px;\">Premium Required to use Both</div>\n\t\t\t\t\t\tor\n\t\t\t\t\t\t<div style=\"color: var(--red);font-size: 15px;\">Remove %s</div>\n\t\t\t\t\t</div></div> ",
                        slot_label(&CUST_SLOTS[cs->pair]));
@@ -1781,6 +1814,16 @@ void ui_loadout_select_skin_color(const int index) {
     menu_rerender_if_open(3);
 }
 
+// selectSkinColor(this.value) from the premium picker: saveVal("skinColIndex", "#rrggbb") (deob-10.0.7.js:217478-217485)
+void ui_loadout_select_skin_color_hex(const char *hex) {
+    if (!ui_loadout_hex_color_ok(hex)) return;
+    sel_load();
+    g_sel[SEL_SKIN_COL].value = -1; // parseInt("#..") is NaN: no swatch is active
+    html_storage_set("skinColIndex", hex);
+    refresh_class_box();
+    menu_rerender_if_open(3);
+}
+
 void ui_loadout_select_stat(const int index) {
     sel_save(SEL_PC_STAT, index);
     refresh_class_box();
@@ -1830,6 +1873,8 @@ static const struct { const char *field; int which; } PRESET_FIELDS[] = {
     {"streakIndex2", SEL_STREAK2}, {"streakIndex3", SEL_STREAK3},
 };
 
+static int preset_color_field(const int which) { return which == SEL_SKIN_COL || which == SEL_HAIR_COL || which == SEL_CHAT_COL; }
+
 // .replace(/[^a-zA-Z0-9 _-]+/gim, "")
 static void preset_name(char *s) {
     char *w = s;
@@ -1858,7 +1903,13 @@ void ui_loadout_action(const int action) {
         cJSON_DeleteItemFromObject(all, selected);
     } else if (action == 1) {
         cJSON *preset = cJSON_CreateObject();
-        for (size_t i = 0; i < sizeof(PRESET_FIELDS) / sizeof(PRESET_FIELDS[0]); i++) cJSON_AddNumberToObject(preset, PRESET_FIELDS[i].field, sel(PRESET_FIELDS[i].which));
+        for (size_t i = 0; i < sizeof(PRESET_FIELDS) / sizeof(PRESET_FIELDS[0]); i++) {
+            char hex[8];
+            if (preset_color_field(PRESET_FIELDS[i].which) && ui_loadout_saved_hex(PRESET_FIELDS[i].field, hex) >= 0)
+                cJSON_AddStringToObject(preset, PRESET_FIELDS[i].field, hex); // a premium hex colour stays a string
+            else cJSON_AddNumberToObject(preset, PRESET_FIELDS[i].field, sel(PRESET_FIELDS[i].which));
+        }
+        cJSON_AddNumberToObject(preset, "titleIndex", v10_customize_title());
         cJSON_AddNumberToObject(preset, "classindex", menu_ui()->client->menu_class_index);
         char skins[1024] = "{}", charms[256] = "[]", saved[512] = "";
         html_storage_get("skins", skins, sizeof(skins));
@@ -1876,6 +1927,16 @@ void ui_loadout_action(const int action) {
             for (size_t i = 0; i < sizeof(PRESET_FIELDS) / sizeof(PRESET_FIELDS[0]); i++) {
                 const cJSON *v = cJSON_GetObjectItem(preset, PRESET_FIELDS[i].field);
                 if (cJSON_IsNumber(v)) sel_save(PRESET_FIELDS[i].which, v->valueint);
+                else if (cJSON_IsString(v) && preset_color_field(PRESET_FIELDS[i].which)) {
+                    g_sel[PRESET_FIELDS[i].which].value = -1;
+                    html_storage_set(PRESET_FIELDS[i].field, v->valuestring);
+                }
+            }
+            const cJSON *title = cJSON_GetObjectItem(preset, "titleIndex");
+            if (cJSON_IsNumber(title)) {
+                char tb[16];
+                snprintf(tb, sizeof(tb), "%d", title->valueint);
+                html_storage_set("titleIndex", tb);
             }
             for (int k = 0; k < 3; k++) sel_save(SEL_STREAK1 + k, streak_valid(k, sel(SEL_STREAK1 + k)));
             // v3.1.1 presets: kcStatIndex / backIndex (the body slot then)

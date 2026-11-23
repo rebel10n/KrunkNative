@@ -146,6 +146,7 @@
 #include <social.h> // SocialAssembly: our outbound voice clip ("vc")
 #include <cJSON.h>
 #include <shared.h>
+#include <net_ext.h> // NetLookPacket (NET_EXT_KN_LOOK)
 #include <stddef.h>
 #include <stdint.h>
 
@@ -315,6 +316,8 @@ typedef struct {
     int8_t streak_slots[3];
     int streak_slots_set;
     int pc_stat;                    // -1 none
+    NetLookPacket look;             // NET_EXT_KN_LOOK: [10] skinColIndex, [17] hairCol, [18] chatCol, [34] titleIndex
+    int look_set;
     int team_pick;                  // toggleTeam's iïíiîiì (default 1)
     // the end screen's match vote: endData.mts as the server wrote each option ("mode,map[,name,id]"),
     // echoed verbatim by "maVote"; the parsed ids are what the client's cards send back

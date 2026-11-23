@@ -209,6 +209,7 @@ typedef enum {
     // 0x81A0 v10.0.7 hit / kill-feed extras an official lobby sends (client/src/net/krunker_link.c, client-local)
     NET_EXT_KN_HIT_SILENT = 0x81A0,   // NetHitSilentPacket, right before a NET_PACKET_HIT: DO_DAMAGE `silent` (no hit sound)
     NET_EXT_KN_KILL_PACKAGE = 0x81A1, // NetKillPackagePacket, right before a NET_PACKET_KILL: killInfo.pkg (stk 1's package)
+    NET_EXT_KN_LOOK = 0x81A2,         // C -> link NetLookPacket, before each ENT to an official lobby: the colours and title
 } NetExtSubtype;
 
 // NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
@@ -367,6 +368,19 @@ typedef struct {
     int32_t victim_uid;
     int32_t package;
 } NetKillPackagePacket;
+#pragma pack(pop)
+
+// NET_EXT_KN_LOOK (C -> krunker_link only, before each ENT like NET_PACKET_PC_STAT): ENTER_GAME's [10] skinColIndex
+// (an index of config.skinColors, or a premium "#rrggbb"), [17] hairCol, [18] chatCol (premium "#rrggbb", else -1) and
+// [34] titleIndex (deob-10.0.7.js:215052). KrunkNative's own server takes the colours from the ENT's 0xRRGGBB fields.
+#pragma pack(push, 1)
+typedef struct {
+    int16_t skin_col_index; // -1: skin_col (when set) or none
+    int16_t title_index;    // -1 none
+    char skin_col[8];       // "#rrggbb" / "#rgb", "" none
+    char hair_col[8];
+    char chat_col[8];
+} NetLookPacket;
 #pragma pack(pop)
 
 // NET_EXT_KN_SWAP_TEAM (C -> S, FRVR's SWAP_TEAM "swpt" [team] from Tap-to-Play's Switch Teams, sent

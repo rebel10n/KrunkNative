@@ -161,7 +161,11 @@ static void other_container(StrBuf *out) {
     sb_append(out, "<div class=\"otherContainer\" style=\"width: 100%;height: 205px;\">");
     sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s", I18N("windows.loadout.color.skin", "Skin Color"));
     const int skin = ui_loadout_saved("skinColIndex");
-    if (premium) sb_append(out, "<input class='skinColorItem' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectSkinColor(this.value)'>");
+    char hex[8];
+    // the picker shows the saved colour when it is a valid hex (deob-10.0.7.js:222528, :222534)
+    if (premium && ui_loadout_saved_hex("skinColIndex", hex) >= 0)
+        sb_appendf(out, "<input class='skinColorItem' value='%s' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectSkinColor(this.value)'>", hex);
+    else if (premium) sb_append(out, "<input class='skinColorItem' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectSkinColor(this.value)'>");
     else if (signed_in) sb_append(out, "<i class='material-icons premiumSkinCol' onclick='windows[13].premium()'>add_circle_outline</i>");
     else sb_append(out, "<div class=\"registerToUnlockSkinColor\"> Register to unlock</div>");
     for (int i = ui_loadout_skin_color_count() - 1; signed_in && i >= 0; i--) // req: account
@@ -169,13 +173,15 @@ static void other_container(StrBuf *out) {
                    skin == i ? " activeSkin" : "", ui_loadout_skin_color_hex(i), i);
     sb_append(out, "</div>");
     sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s", I18N("windows.loadout.color.hair", "Hair Color"));
-    if (premium) sb_append(out, "<input class='skinColorItem' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectHairColor(this.value)'>");
+    if (premium && ui_loadout_saved_hex("hairCol", hex) >= 0)
+        sb_appendf(out, "<input class='skinColorItem' value='%s' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectHairColor(this.value)'>", hex);
+    else if (premium) sb_append(out, "<input class='skinColorItem' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectHairColor(this.value)'>");
     else sb_append(out, "<i class='material-icons premiumSkinCol' onclick='windows[13].premium()'>add_circle_outline</i>");
     sb_append(out, "</div>");
     sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s", I18N("windows.loadout.color.chat", "Chat Name Color"));
     if (premium) {
-        char col[16] = "#ffffff";
-        if (html_storage_get("chatCol", col, sizeof(col)) < 0 || col[0] != '#') snprintf(col, sizeof(col), "#ffffff");
+        char col[8] = "#ffffff";
+        if (ui_loadout_saved_hex("chatCol", col) < 0) snprintf(col, sizeof(col), "#ffffff");
         sb_appendf(out, "<input class='skinColorItem' value='%s' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectChatColor(this.value)'>", col);
     } else {
         sb_append(out, "<i class='material-icons premiumSkinCol' onclick='windows[13].premium()'>add_circle_outline</i>");

@@ -2428,6 +2428,7 @@ void client_enter_game(Client *client) {
         client->spawn_requested = 1; // SPAWN clears it
         combat_send_streak_slots(client); // WP-B: v7 ENT streakIndexes, ahead of the ENT (1.3+ servers)
         client_send_pc_stat(client);      // WP-E: v7 ENT pcStatIndex, ahead of the ENT (1.3+ servers)
+        client_send_look(client);         // official lobbies: ENTER_GAME skinColIndex / hairCol / chatCol / titleIndex
         client_net_send(client, NET_PACKET_ENT, &packet, ent_size);
     } else {
         client->in_game = 0;

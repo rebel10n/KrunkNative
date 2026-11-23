@@ -20,6 +20,7 @@
 #include <html_ui.h>
 #include <limits.h> // INT_MIN: the kill-feed row takes the icon's own icnPad
 #include <ui_logic.h>
+#include <krunker_net.h> // krunker_net_active: NET_EXT_KN_LOOK goes to an official lobby only
 #include <sound_events.h>
 #include <vfx.h>
 #include <projectiles_render.h>
@@ -228,6 +229,26 @@ void client_send_pc_stat(Client *client) {
     if (html_storage_get("pcStatIndex", buf, sizeof(buf)) >= 0 && buf[0]) index = strtol(buf, NULL, 10);
     const NetPcStatPacket packet = {.index = (int8_t) (index >= 0 && index < PLAYER_CARD_STAT_COUNT ? index : -1)};
     client_net_send(client, NET_PACKET_PC_STAT, &packet, sizeof(packet));
+}
+
+// NET_EXT_KN_LOOK: an official lobby's ENTER_GAME also carries skinColIndex, hairCol, chatCol and titleIndex
+// (deob-10.0.7.js:215052): the saved values, a premium colour as its hex string.
+void client_send_look(Client *client) {
+    if (!krunker_net_active()) return;
+    NetLookPacket look;
+    memset(&look, 0, sizeof(look));
+    char buf[16];
+    look.skin_col_index = -1;
+    if (ui_loadout_saved_hex("skinColIndex", look.skin_col) < 0 && html_storage_get("skinColIndex", buf, sizeof(buf)) >= 0 && buf[0]) {
+        const long i = strtol(buf, NULL, 10);
+        if (i >= 0 && i < ui_loadout_skin_color_count()) look.skin_col_index = (int16_t) i;
+    }
+    ui_loadout_saved_hex("hairCol", look.hair_col);
+    ui_loadout_saved_hex("chatCol", look.chat_col);
+    look.title_index = (int16_t) v10_customize_title();
+    uint8_t out[NET_EXT_HEADER_SIZE + sizeof(look)];
+    const uint16_t n = net_ext_pack(out, sizeof(out), NET_EXT_KN_LOOK, &look, sizeof(look));
+    if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, out, n);
 }
 
 // g1(): kill feed for everyone, death card + respawn delay for the victim.

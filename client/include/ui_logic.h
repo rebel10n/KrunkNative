@@ -770,6 +770,9 @@ void ui_loadout_tick(void);                      // the open picker's virtual ca
 int  ui_loadout_secondary(int class_index);     // selected secondary weapon id (secondaryInd, default 2), -1 = class has none
 int  ui_loadout_streak(int slot);                // streakIndex1..3 (data/streaks.js index for slot 0..2), -1 none
 int  ui_loadout_skin_color(void);                // selected skin colour as 0xRRGGBB, -1 = class colour
+void ui_loadout_select_skin_color_hex(const char *hex); // selectSkinColor("#rrggbb") from the premium picker
+int  ui_loadout_hex_color_ok(const char *s);     // v10's /^#([0-9A-F]{3}){1,2}$/i
+int  ui_loadout_saved_hex(const char *key, char out[8]); // a hex string saved under key: 0xRRGGBB (out "#.."), -1 none
 // What a player of `class_index` wears, from the Change Loadout picks: the one source of the ENT
 // (main.c, for_ent 1) and the menu's class preview (class_preview.c, for_ent 0), so the preview
 // shows what the first-person viewmodel and the other players will. The two differ only where

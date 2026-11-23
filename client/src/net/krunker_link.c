@@ -3292,6 +3292,11 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
     const KrunkerValue skins[] = {KRUNKER_V_NUM(OWN(ent.skins.primary)), KRUNKER_V_NUM(OWN(ent.skins.secondary))};
     const KrunkerValue charms[] = {own && ent.cosmetics_v7.charms[0] >= 0 ? KRUNKER_V_NUM(ent.cosmetics_v7.charms[0]) : KRUNKER_V_NIL,
                                    KRUNKER_V_NUM(OWN(ent.cosmetics_v7.charms[1]))};
+    // NET_EXT_KN_LOOK's colours (deob-10.0.7.js:215052 sends the saved values as they are)
+    l->look.skin_col[sizeof(l->look.skin_col) - 1] = l->look.hair_col[sizeof(l->look.hair_col) - 1] = 0;
+    l->look.chat_col[sizeof(l->look.chat_col) - 1] = 0;
+    const KrunkerValue skin_col = !l->look_set ? KRUNKER_V_NUM(-1)
+                                : l->look.skin_col[0] ? KRUNKER_V_STR(l->look.skin_col) : KRUNKER_V_NUM(l->look.skin_col_index);
     const KrunkerValue enter[35] = {
         KRUNKER_V_NUM(ent.class_index),                                   // [0] classIndex
         KRUNKER_V_NUM(own && ent.spray_index > 0 ? ent.spray_index : 2482), // [1] sprayIndex (0x9b2)
@@ -3303,15 +3308,15 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
         KRUNKER_V_NUM(ent.chall_mode ? 1 : 0),                            // [7] challenge mode
         KRUNKER_V_NUM(l->team_pick),                                      // [8] team pick (iïíiîiì, toggleTeam)
         KRUNKER_V_NUM(OWN(ent.skins.melee)),                              // [9] meleeIndex
-        KRUNKER_V_NUM(-1),                                                // [10] skinColIndex
+        skin_col,                                                         // [10] skinColIndex (index or "#rrggbb")
         KRUNKER_V_NUM(ent.lag_comp),                                      // [11] lagComp
         KRUNKER_V_NUM(ent.attach_index >= 0 ? ent.attach_index : 0),      // [12] attachIndex
         KRUNKER_V_NUM(l->pc_stat),                                        // [13] pcStatIndex (PC_STAT, -1 none)
         KRUNKER_V_NUM(OWN(ent.cosmetics.dye)),                            // [14] dyeIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.shoe)),                        // [15] shoeIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics.waist)),                          // [16] waistIndex
-        KRUNKER_V_NUM(-1),                                                // [17] hairCol
-        KRUNKER_V_NUM(-1),                                                // [18] chatCol
+        l->look_set && l->look.hair_col[0] ? KRUNKER_V_STR(l->look.hair_col) : KRUNKER_V_NUM(-1), // [17] hairCol
+        l->look_set && l->look.chat_col[0] ? KRUNKER_V_STR(l->look.chat_col) : KRUNKER_V_NUM(-1), // [18] chatCol
         KRUNKER_V_NUM(ent.anon_mode ? 1 : 0),                             // [19] anonMode
         KRUNKER_V_NUM(OWN(ent.cosmetics.face)),                           // [20] faceIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.pet)),                         // [21] petIndex
@@ -3326,7 +3331,7 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.head)),                        // [31] headIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.player_card)),                 // [32] playerCardIndex
         KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_RANK ? 1 : 0),     // [33] rankBadge
-        KRUNKER_V_NUM(-1),                                                // [34] titleIndex
+        KRUNKER_V_NUM(l->look_set ? l->look.title_index : -1),            // [34] titleIndex
     };
 #undef OWN
     const KrunkerValue args[] = {
@@ -3674,6 +3679,11 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             if (trade >= 0) return trade;
             const int consent = krunker_link_s2c_send(l, subtype, body, body_length); // "chrsp" (krunker_link_s2c.c)
             if (consent >= 0) return consent;
+            if (subtype == NET_EXT_KN_LOOK && body_length >= sizeof(NetLookPacket)) { // kept for the next "en"
+                memcpy(&l->look, body, sizeof(l->look));
+                l->look_set = 1;
+                return 0;
+            }
             if (subtype == NET_EXT_STALKER_TAUNT && body_length >= sizeof(NetStalkerTauntPacket)) { // the stalker's taunt key: ["stlkrt", i] (:260109)
                 const KrunkerValue args[] = {KRUNKER_V_NUM(body[0])};
                 return send_c2s(l, KRUNKER_C2S_STALKER_TAUNT, args, 1);

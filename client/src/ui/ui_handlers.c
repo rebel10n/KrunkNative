@@ -395,7 +395,14 @@ static HtmlElem arg_elem(const HtmlEvent *ev, const HtmlArg *args, const int arg
     return ev ? ev->target : 0;
 }
 H(h_select_item) { UNUSED; ui_loadout_select(html_ui_current_handler(), arg_int(args, argc, 0, -1)); return 1; }
-H(h_select_skin_color) { UNUSED; ui_loadout_select_skin_color(arg_int(args, argc, 0, -1)); return 1; }
+// selectSkinColor(i) from a swatch, selectSkinColor(this.value) ("#rrggbb") from the premium picker (deob-10.0.7.js:217478)
+H(h_select_skin_color) {
+    UNUSED;
+    const char *v = arg_str(ev, args, argc, 0, "");
+    if (v[0] == '#') ui_loadout_select_skin_color_hex(v);
+    else ui_loadout_select_skin_color(arg_int(args, argc, 0, -1));
+    return 1;
+}
 H(h_select_stat) {
     UNUSED;
     const char *v = arg_str(ev, args, argc, 0, "-1");
