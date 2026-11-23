@@ -32,6 +32,8 @@ typedef struct {
     int creator;          // v10 creatorBadge: kn_brain's account info "creator_badge" (players.creator_badge)
     int following, followers;
     int job_rating, job_rating_pos; // K.P.D Helpful Reports: rated calls / tagged ones (data 38 / 39)
+    double trades;        // acc.trades (player_trades, deob-10.0.7.js:115126): kn_brain's account info "trades"
+    double create_ms;     // acc.createDate (player_datenew) as epoch ms; <= 0 unknown
     int mail_unread;
     cJSON *stats;         // acc.stats (object, owned)
     cJSON *data;          // the raw 40-slot data array (owned)

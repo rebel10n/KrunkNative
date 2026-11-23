@@ -191,6 +191,11 @@ static struct {
     // Black Market
     char bm_note[160];
     int bm_note_err, bm_note_seq, bm_buying;
+    cJSON *bm_owned;    // GET /market/black-market: the item indices the account bought there; NULL until read (bm_load)
+    double bm_peak;     // GET /market/black-market/rank: peak_mmr, 0 when null (the rank item's requirement)
+    int bm_loading;     // the tab's two reads still out
+    unsigned bm_gen;    // the load the answers belong to
+    char bm_error[160]; // the items read failed: the tab shows this in place of the grid
     // Catalog
     int cshown;
     // Guide
@@ -1186,6 +1191,7 @@ static void render_notes(void);
 static void views_sync(void);
 static void render(void);
 static void render_content(void);
+static int is_open(void);
 static void render_modal(void);
 
 static void note_expire(void *user) {
@@ -2709,27 +2715,90 @@ static void trade_confirm_html(StrBuf *sb) {
 
 // ------------------------------------------------------------------ Black Market (svelte-dbcods)
 
+// The tab's data, as v10 loads it on mount: Promise.all of market.getBlackMarketItems (GET /market/black-market,
+// the owned item indices) and getBlackMarketRank (GET /market/black-market/rank, data.peak_mmr; an error is null)
+// (deob-10.0.7.js:109167-109178, :137741-137751). Both go through v10_gapi: krunker.io's gapi for a krunker.io
+// account, kn_brain's (services/brain/v10_market.c) otherwise. Until both answer the tab shows "Loading..."; a failed
+// items read shows its message in place of the grid.
+static void bm_items_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    if ((unsigned) (uintptr_t) user != M.bm_gen || M.bm_loading <= 0) return;
+    M.bm_loading--;
+    cJSON_Delete(M.bm_owned);
+    M.bm_owned = NULL;
+    if (status != 200 || error) {
+        // iìíiiìï throws Error(message || "Failed to fetch black market items"); the tab shows the message (:137746-137748)
+        snprintf(M.bm_error, sizeof(M.bm_error), "%s", v10_gapi_error_text(error, "Failed to fetch black market items"));
+    } else {
+        M.bm_owned = cJSON_IsArray(data) ? cJSON_Duplicate(data, 1) : cJSON_CreateArray(); // data || []
+    }
+    if (is_open() && M.tab == TAB_BLACKM) render_content();
+}
+
+static void bm_rank_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    if ((unsigned) (uintptr_t) user != M.bm_gen || M.bm_loading <= 0) return;
+    M.bm_loading--;
+    const cJSON *peak = status == 200 && !error ? cJSON_GetObjectItemCaseSensitive(data, "peak_mmr") : NULL;
+    M.bm_peak = cJSON_IsNumber(peak) ? peak->valuedouble : 0; // error / no data: null, and (peakMMR || 0) in checkReq
+    if (is_open() && M.tab == TAB_BLACKM) render_content();
+}
+
+static void bm_load(void) {
+    M.bm_gen++;
+    M.bm_error[0] = 0;
+    M.bm_peak = 0;
+    M.bm_loading = 2;
+    const void *gen = (const void *) (uintptr_t) M.bm_gen;
+    if (!v10_gapi("GET", "/market/black-market", NULL, bm_items_done, (void *) gen)) {
+        M.bm_loading = 0;
+        snprintf(M.bm_error, sizeof(M.bm_error), "%s", "Failed to load black market data");
+        return;
+    }
+    if (!v10_gapi("GET", "/market/black-market/rank", NULL, bm_rank_done, (void *) gen)) M.bm_loading--;
+}
+
+static int bm_owned(const int skin_index) {
+    if (!M.bm_owned) return account_owned(skin_index) > 0 || inv_count(skin_index) > 0; // a scenario: no reads
+    const cJSON *v;
+    cJSON_ArrayForEach(v, M.bm_owned) if (cJSON_IsNumber(v) && v->valueint == skin_index) return 1;
+    return 0;
+}
+
+static int bm_account_owns(const int skin_index, void *user) {
+    (void) user;
+    return account_owned(skin_index) > 0 || inv_count(skin_index) > 0; // account.skins.some(ind == id)
+}
+
 static void view_blackm(StrBuf *sb) {
     const AccountInfo *a = acc();
     sb_append(sb, "<div class=\"blackmarket-tab svelte-dbcods\"><div class=\"bm-scroll svelte-dbcods\"><div class=\"bm-header-img svelte-dbcods\" style=\"background-image: linear-gradient(rgb(10 10 10 / 37%), #0000003b), url(./img/backgrounds/blackmarket_0.png);\">"
-                  "<div class=\"bm-header-name svelte-dbcods\">Black Market</div> <div class=\"bm-header-desc svelte-dbcods\">Exclusive items earned through mastery and dedication. Meet the requirements to unlock these rare collectibles.</div></div> "
-                  "<div class=\"bm-grid svelte-dbcods\">");
+                  "<div class=\"bm-header-name svelte-dbcods\">Black Market</div> <div class=\"bm-header-desc svelte-dbcods\">Exclusive items earned through mastery and dedication. Meet the requirements to unlock these rare collectibles.</div></div> ");
+    if (M.bm_loading > 0 || M.bm_error[0]) { // in place of the grid (deob-10.0.7.js:133652-133653, :137757-137766)
+        if (M.bm_loading > 0) sb_append(sb, "<div class=\"bm-loading svelte-dbcods\">Loading...</div>");
+        else {
+            sb_append(sb, "<div class=\"bm-error svelte-dbcods\">");
+            sb_append_esc(sb, M.bm_error);
+            sb_append(sb, "</div>");
+        }
+        sb_append(sb, "</div></div>");
+        return;
+    }
+    sb_append(sb, "<div class=\"bm-grid svelte-dbcods\">");
+    // store.checkReq's account: v10's acc fields (deob-10.0.7.js:115085-115130), the rank item's {peakMMR}
+    const EconReqAccount ra = {
+        .create_ms = a ? a->create_ms : 0, .funds = a ? a->funds : 0, .trades = a ? a->trades : 0,
+        .job_rating_pos = a ? a->job_rating_pos : 0, .kills = a ? a->kills : 0, .time_played = a ? a->time_played : 0,
+        .followers = a ? a->followers : 0, .peak_mmr = M.bm_peak, .stats = a ? a->stats : NULL, .owns = bm_account_owns,
+    };
     int n = 0;
     const EconBlackMarketItem *items = econ_black_market(&n);
     for (int k = 0; k < n; k++) {
+        // the tab's items: blackM && !free && !hide (deob-10.0.7.js:137663-137676)
+        if (items[k].hide || items[k].free_) continue;
         const ViewerSkin *s = skin(items[k].skin);
         if (!s) continue;
-        const int owned = account_owned(items[k].skin) > 0 || inv_count(items[k].skin) > 0;
-        int req = 0;
-        if (a) {
-            if (items[k].age_ms > 0) {
-                const cJSON *made = a->data ? cJSON_GetArrayItem(a->data, 30) : NULL;
-                req = cJSON_IsNumber(made) && now_ms() - made->valuedouble >= items[k].age_ms;
-            } else if (items[k].stat) {
-                const cJSON *v = a->stats ? cJSON_GetObjectItemCaseSensitive(a->stats, items[k].stat) : NULL;
-                req = cJSON_IsNumber(v) && v->valuedouble >= items[k].min;
-            }
-        }
+        const int owned = bm_owned(items[k].skin);
+        // !item.req || (!!account && checkReq(...)) (:137681-137686)
+        const int req = items[k].req == ECON_REQ_NONE || (a && econ_black_market_req_met(&items[k], &ra));
         const int can_buy = a && !owned && req && a->funds >= items[k].funds;
         const char *col = rarity_color(s);
         char url[512], price[32];
@@ -3311,6 +3380,7 @@ static void switch_tab(const int t) {
         trades_load();
     } else if (t == TAB_BLACKM && !g_scenario) {
         inventory_load();
+        bm_load(); // the tab's mount: the owned list and the peak rank (deob-10.0.7.js:137741)
     } else if (t == TAB_JUNKYARD && !g_scenario) {
         v10_junkyard_enter();
     }
@@ -4388,7 +4458,10 @@ void v10_market_account_changed(void) {
     else if (M.tab == TAB_MARKET) {
         market_reload_after();
         if (M.mtab == MT_STATS) stats_load();
-    } else if (M.tab == TAB_BLACKM) inventory_load();
+    } else if (M.tab == TAB_BLACKM) {
+        inventory_load();
+        bm_load();
+    }
     render();
 }
 
@@ -4528,6 +4601,8 @@ static void on_social(void *user, const cJSON *frame) {
             account_add_skin(jint(a1, "item", M.sel_skin));
             // the item's title, granted with it: into account.titles (deob-10.0.3.js:152803-152806)
             if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(a1, "title"))) v10_customize_title_granted(jint(a1, "title", -1));
+            // ownedItems = [...ownedItems, item.index] (deob-10.0.7.js:137720)
+            if (M.bm_owned) cJSON_AddItemToArray(M.bm_owned, cJSON_CreateNumber(jint(a1, "item", M.sel_skin)));
             inventory_load();
             bm_note(1, "Item purchased successfully!");
         } else {

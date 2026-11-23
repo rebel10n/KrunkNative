@@ -1,8 +1,10 @@
 // The economy's client half (client/include/economy_client.h, doc/v7/economy.md section 4).
 #include <economy_client.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #ifndef _WIN32
 #include <sys/time.h>
@@ -103,24 +105,54 @@ cJSON *econ_offer_frame(const int receiver_id, const EconTradeItem *mine, const 
     return f;
 }
 
-static const EconBlackMarketItem k_black_market[] = {
-    {1483, 100, "1 Year Account Age", NULL, 0, 31536000000.0},
-    {1484, 100, "2 Year Account Age", NULL, 0, 63072000000.0},
-    {1641, 2000, "No Greenskins!", NULL, 0, 0},
-    {1642, 3000, "Call in 1000 Nukes", "n", 1000, 0},
-    {1659, 10000, "???????", "ggr", 59961, 0},
-    {1672, 10000, "Level 50 Runner", "c9", 2667778, 0},
-    {1734, 10000, "Level 100 Hunter", "c1", 10890000, 0},
-    {1866, 10000, "10000 Thrown Melee Kills", "tmk", 10000, 0},
-};
-
+// the table: economy_black_market_table.c (tools/ui-import/gen_black_market.py)
 const EconBlackMarketItem *econ_black_market(int *count) {
-    if (count) *count = (int) (sizeof(k_black_market) / sizeof(k_black_market[0]));
-    return k_black_market;
+    if (count) *count = g_econ_black_market_count;
+    return g_econ_black_market;
 }
 
 const EconBlackMarketItem *econ_black_market_find(const int skin) {
-    for (size_t i = 0; i < sizeof(k_black_market) / sizeof(k_black_market[0]); i++)
-        if (k_black_market[i].skin == skin) return &k_black_market[i];
+    for (int i = 0; i < g_econ_black_market_count; i++)
+        if (g_econ_black_market[i].skin == skin) return &g_econ_black_market[i];
     return NULL;
+}
+
+// account[reqVar] for the accVar keys v10's table uses (deob-10.0.7.js:115088-115126: kills, funds, timePlayed,
+// followers, jobRatingPos, trades)
+static int acc_var(const EconReqAccount *a, const char *var, double *out) {
+    static const struct { const char *key; size_t off; } k[] = {
+        {"funds", offsetof(EconReqAccount, funds)},           {"trades", offsetof(EconReqAccount, trades)},
+        {"jobRatingPos", offsetof(EconReqAccount, job_rating_pos)}, {"kills", offsetof(EconReqAccount, kills)},
+        {"timePlayed", offsetof(EconReqAccount, time_played)}, {"followers", offsetof(EconReqAccount, followers)},
+    };
+    for (size_t i = 0; var && i < sizeof(k) / sizeof(k[0]); i++) {
+        if (strcmp(var, k[i].key) != 0) continue;
+        *out = *(const double *) ((const char *) a + k[i].off);
+        return 1;
+    }
+    return 0;
+}
+
+// store.checkReq(item, account) (deob-10.0.7.js:103566-103580); the tab passes {peakMMR} for a rank item
+// (:137682-137685), here a->peak_mmr. An item with no req is met without an account (:137682 `!req ||`).
+int econ_black_market_req_met(const EconBlackMarketItem *it, const EconReqAccount *a) {
+    if (!it) return 0;
+    if (it->req == ECON_REQ_NONE) return 1;
+    if (!a) return 0;
+    double v = 0;
+    switch (it->req) {
+        case ECON_REQ_ACC_AGE: return a->create_ms > 0 && epoch_ms() - a->create_ms >= it->amount;
+        case ECON_REQ_STATS: {
+            const cJSON *s = a->stats && it->var ? cJSON_GetObjectItemCaseSensitive(a->stats, it->var) : NULL;
+            return (cJSON_IsNumber(s) ? s->valuedouble : 0) >= it->amount; // (stats[reqVar] || 0) >= reqAmount
+        }
+        case ECON_REQ_ACC_VAR: return acc_var(a, it->var, &v) && v >= it->amount;
+        case ECON_REQ_RANK: return a->peak_mmr >= it->amount;
+        case ECON_REQ_OWN_SKINS:
+            if (!a->owns || it->skin_count <= 0) return 0;
+            for (int i = 0; i < it->skin_count; i++)
+                if (!a->owns(it->skins[i], a->owns_user)) return 0;
+            return 1;
+        default: return 0;
+    }
 }

@@ -1699,6 +1699,12 @@ else ()
     target_include_directories(kio_market_test PRIVATE client/include shared/include)
     target_link_libraries(kio_market_test PRIVATE cJSON m)
     add_test(NAME kio_market_test COMMAND kio_market_test)
+    # black_market_req_test: the Black Market table generated from assets/skins.json and store.checkReq's five kinds
+    # (client/src/ui/economy_client.c, economy_black_market_table.c; deob-10.0.7.js:103566-103580)
+    add_executable(black_market_req_test client/tests/black_market_req_test.c client/src/ui/economy_client.c client/src/ui/economy_black_market_table.c)
+    target_include_directories(black_market_req_test PRIVATE client/include shared/include)
+    target_link_libraries(black_market_req_test PRIVATE cJSON m)
+    add_test(NAME black_market_req_test COMMAND black_market_req_test)
     # shop_counts_test: a display's purchase counts after a purchase (client/src/ui/shop_counts.c; updateDisplayPurchaseCount,
     # deob-10.0.6.js:115979-116030)
     add_executable(shop_counts_test client/tests/shop_counts_test.c client/src/ui/shop_counts.c)

@@ -490,6 +490,10 @@ and the note says which.
   `.craft-grid` (a wrapping flex row, `deob-10.0.7.js:138020-138054`; a fresh offline-sandbox capture shows
   the same DOM), so the line shrinks to its text at the grid's left; `v10_junkyard.c` had put it before the
   grid, where its `text-align: center` centred it.
-- **Not individually root-caused here**: `kn-market-blackm`,
-  `ranked-shop-flying`, `ingame-endscreen-collect-raid`, `kn-ranked-sort`, `kn-servers-official-error`
+- **`kn-market-blackm` `popup`** (fixed 2026-11-22, 20.6 -> 0.00 %): a stale reference. Its reference is
+  KrunkNative's own capture, made from a hardcoded 8-item table; the grid now lists v10.0.7's 36 Black Market
+  items (`blackM`, neither `hide` nor `free`: `deob-10.0.7.js:137663-137676`) from
+  `economy_black_market_table.c`. Puppet Master is hidden in v10.0.7, so the scenario's account owns the
+  1 Year Cape instead, to keep an Owned card in the capture.
+- **Not individually root-caused here**: `ranked-shop-flying`, `ingame-endscreen-collect-raid`, `kn-ranked-sort`, `kn-servers-official-error`
   and `kn-servers-official-mixed`, and the `strike/*` scenarios (the Strike flavour, not v10 parity).

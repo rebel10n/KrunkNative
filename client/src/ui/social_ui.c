@@ -2270,22 +2270,34 @@ static void append_skin_img(StrBuf *sb, const ViewerSkin *s, const char *preview
     }
 }
 
-// store.skins entries with `illicit` (src/data/store.js): the black market, econ_black_market()
-// (economy_client.c, shared with the v10 popup). req: stat key + minimum, or age_ms > 0 = account
-// age, or neither = never ("No Greenskins!").
+// store.skins entries with `illicit` / blackM: the black market, econ_black_market() (economy_client.c, shared with
+// the v10 popup; generated from assets/skins.json), each with its store.checkReq rule.
 typedef EconBlackMarketItem IllicitSkin;
 
 static const IllicitSkin *illicit_skin(const int skin) { return econ_black_market_find(skin); }
 
-// store.checkReq(item, acc): accAge (account created at least age_ms ago) / stats
-static int illicit_req_ok(const IllicitSkin *s, const AccountInfo *acc) {
-    if (s->age_ms > 0) {
-        const double made = acc && acc->data ? parse_time_ms(cJSON_GetArrayItem(acc->data, 30)) : 0; // player_datenew
-        return made > 0 && now_epoch_ms() - made >= s->age_ms;
+// account.skins.some(ind == id): the account's skins (data[10], {ind, cnt})
+static int illicit_owns(const int skin, void *user) {
+    const AccountInfo *acc = user;
+    const cJSON *skins = acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL, *e;
+    cJSON_ArrayForEach(e, skins) {
+        const cJSON *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (cJSON_IsNumber(ind) && ind->valueint == skin) return 1;
     }
-    if (!s->stat) return 0;
-    const cJSON *v = acc && acc->stats ? cJSON_GetObjectItemCaseSensitive(acc->stats, s->stat) : NULL;
-    return cJSON_IsNumber(v) && v->valuedouble >= s->min;
+    return 0;
+}
+
+// store.checkReq(item, acc) (deob-10.0.7.js:103566-103580): econ_black_market_req_met with the account's values.
+// The hub has no peak rank read: a rank item is unmet here (the market's Black Market tab reads it).
+static int illicit_req_ok(const IllicitSkin *s, const AccountInfo *acc) {
+    if (s->req == ECON_REQ_NONE) return 1;
+    if (!acc) return 0;
+    const EconReqAccount ra = {
+        .create_ms = acc->create_ms, .funds = acc->funds, .trades = acc->trades, .job_rating_pos = acc->job_rating_pos,
+        .kills = acc->kills, .time_played = acc->time_played, .followers = acc->followers, .stats = acc->stats, .owns = illicit_owns,
+        .owns_user = (void *) acc,
+    };
+    return econ_black_market_req_met(s, &ra);
 }
 
 static int row_int(const cJSON *r, const char *a, const char *b, const char *c, const int fallback) {
@@ -2608,6 +2620,7 @@ static void hub_render_market(const char *a, const cJSON *t) {
             const IllicitSkin *illicit = econ_black_market(&n_illicit);
             for (int i = 0; i < n_illicit; i++) {
                 const IllicitSkin *il = &illicit[i];
+                if (il->hide || il->free_) continue; // blackM && !free && !hide, as v10's tab (deob-10.0.7.js:137667)
                 const ViewerSkin *pe = hub_skin(il->skin);
                 if (!pe) continue;
                 char prev[256], price[32];

@@ -40,9 +40,39 @@ typedef struct { int i, c, sid; } EconTradeItem;
 cJSON *econ_offer_frame(int receiver_id, const EconTradeItem *mine, int n_mine, const EconTradeItem *theirs, int n_theirs,
                         const char *message, double my_kr, double their_kr, const char *key);
 
-// The Black Market (store.skins entries with `illicit` / blackM): funds, the requirement text and
-// rule. The viewer skin table does not carry them. req: stat key + minimum (acc.stats), or age_ms > 0
-// = account age, or neither = never met ("No Greenskins!"). kn_brain checks the same (store.checkReq).
-typedef struct { int skin, funds; const char *req_t, *stat; double min, age_ms; } EconBlackMarketItem;
+// The Black Market: every store.skins entry with blackM (client/src/ui/economy_black_market_table.c, generated
+// from assets/skins.json by tools/ui-import/gen_black_market.py; the viewer skin table carries none of this):
+// its price, requirement text and store.checkReq rule (deob-10.0.7.js:103566-103580). kn_brain checks the same
+// rule when it sells one (services/brain/db_economy.c run_blackm_buy).
+typedef enum {
+    ECON_REQ_NONE,      // no req: always met
+    ECON_REQ_ACC_AGE,   // now - account.createDate >= amount (ms)
+    ECON_REQ_STATS,     // account.stats[var] >= amount
+    ECON_REQ_ACC_VAR,   // account[var] >= amount (funds, trades, jobRatingPos, kills, timePlayed, followers)
+    ECON_REQ_RANK,      // peakMMR (GET /market/black-market/rank's peak_mmr) >= amount
+    ECON_REQ_OWN_SKINS, // the account owns every one of skins[]
+    ECON_REQ_NEVER,     // "disabled" or a kind checkReq does not know: never met
+} EconReqKind;
+typedef struct {
+    int skin, funds;
+    const char *req_t; // the card's requirement line (reqT)
+    EconReqKind req;
+    const char *var;   // ECON_REQ_STATS / ECON_REQ_ACC_VAR: the key
+    double amount;
+    const int *skins;  // ECON_REQ_OWN_SKINS
+    int skin_count;
+    unsigned char hide, free_; // v10's tab leaves these out (deob-10.0.7.js:137667); the Catalog still names them
+} EconBlackMarketItem;
+extern const EconBlackMarketItem g_econ_black_market[];
+extern const int g_econ_black_market_count;
 const EconBlackMarketItem *econ_black_market(int *count);
 const EconBlackMarketItem *econ_black_market_find(int skin);
+// The account values store.checkReq reads. Each field is what v10's account object holds under that name
+// (deob-10.0.7.js:115085-115130); create_ms <= 0 (unknown) or an unknown var is unmet.
+typedef struct {
+    double create_ms, funds, trades, job_rating_pos, kills, time_played, followers, peak_mmr;
+    const cJSON *stats; // acc.stats
+    int (*owns)(int skin, void *user); // account.skins has the item
+    void *owns_user;
+} EconReqAccount;
+int econ_black_market_req_met(const EconBlackMarketItem *it, const EconReqAccount *a);

@@ -514,9 +514,10 @@ assets-check-v7: ## Drift check of assets/ and the generated store tables agains
 	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
 	node tools/ui-import/test_gen_viewer_store.js
 
-store-import: ## The store table: assets/skins.json from Krunker v10.0.2 (tools/ui-import/v10_skins.js), viewer_store_table.c, store_spins_table.c
+store-import: ## The store table: assets/skins.json from Krunker v10.0.2 (tools/ui-import/v10_skins.js), viewer_store_table.c, store_spins_table.c, economy_black_market_table.c
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --tables --assets assets
 	node tools/ui-import/gen_viewer_store.js
+	$(PYTHON) -I tools/ui-import/gen_black_market.py
 
 .PHONY: live-data-fetch live-data-verify live-data-check
 live-data-fetch: ## Pin Krunker's public gapi data KN serves from its own copies (titles, the Eterno Shop's limited display) into tools/krunker/live_data/ (KN_FETCH_PROXY=)
@@ -533,6 +534,7 @@ store-check: ## Drift check of the v10 store table, its generated C tables and t
 	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
 	node tools/ui-import/test_gen_viewer_store.js
 	node tools/ui-import/v10_store_assets.js
+	$(PYTHON) -I tools/ui-import/gen_black_market.py --check
 
 assets-import-live: ## Add the files the Krunker content set lacks from the live asset hosts (tools/ui-import/live_assets.lock, then live_assets_v10.lock: the v10 items' files; KN_FETCH_PROXY=, never overwrites)
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py install --assets assets --ui ui

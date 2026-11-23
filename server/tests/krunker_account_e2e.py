@@ -125,6 +125,10 @@ GAPI_READS.update({
                           "stackable": True, "wearable": False},
     "/api/market/items/1/sales-statistics": [{"d": MARKET_TODAY, "f": 2000, "t": 4}],
     "/api/items/1/sales": [{"d": MARKET_TODAY, "f": 2000, "t": 4}],
+    # the Black Market tab's mount (market.getBlackMarketItems / getBlackMarketRank, deob-10.0.7.js:109167-109178): the
+    # account bought the 1 Year Cape there; its peak rank (4800) meets Emperor's Blade's 4700
+    "/api/market/black-market": [1483],
+    "/api/market/black-market/rank": {"peak_mmr": 4800},
     "/api/studios/mine": [{"id": 31, "name": KIO_STUDIO, "owner": ACCOUNT_NAME, "role": 1, "member_count": 2}],
     "/api/studios/invites": [],
     "/api/lottery/3": {"lottery": {"id": 3, "title": KIO_LOTTERY, "theme": "neutral", "frequency": 24},

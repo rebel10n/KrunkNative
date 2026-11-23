@@ -13,7 +13,9 @@ The account's other screens that read krunker.io the same way (each was a brain 
   Listing Details    items.getView: GET /items/1/view (v10:26957) for its listings and owners, and
                      market.getItemSalesStatistics: GET /market/items/1/sales-statistics?daysback=30 (v10:26895) for Stats
   the item page      items.getSales: GET /items/1/sales?range=3 (v10:26963) for its Sales chart
-  Black Market       market.purchaseBlackMarketItem: POST /market/black-market/purchase {item_index} (v10:26934), was
+  Black Market       getBlackMarketItems / getBlackMarketRank on the tab's mount: GET /market/black-market (owned) and
+                     /market/black-market/rank (peak_mmr, the rank item) (deob-10.0.7.js:109167-109178);
+                     market.purchaseBlackMarketItem: POST /market/black-market/purchase {item_index} (v10:26934), was
                      refused with "This krunker.io action is not in KrunkNative yet"
   lottery            lottery.getLottery: GET /lottery/3 (v10:26566) and participateInLottery: POST /lottery/3/participate
   Studios            studios.getMyStudios: GET /studios/mine (v10:27371), was never sent (not a krunker.io read)
@@ -118,11 +120,17 @@ def script():
           "21300 call v10mk.back",
           # the Black Market buy (v10mk.side 2, bmbuy, the modal's OK)
           "21800 call v10mk.side 2",
+          # the tab's mount: krunker.io's owned list and peak rank, then the grid
+          "21810 waitfor .bm-grid",
+          "21850 nodes @bm_owned .bm-card.owned",
+          "21860 nodes @bm_rank [id=v10mkBm4531]",
+          "21870 nodes @bm_loading .bm-loading",
           "21900 call v10mk.bmbuy %d" % BM_ITEM,
           "22000 call v10mk.mok",
           "22010 waitfor .bm-notification",
           "22020 grep @mkbm purchased .bm-notification",
           "22030 nodes @mkbm_err .bm-notification.error",
+          "22040 nodes @bm_owned_after .bm-card.owned",
           "22500 call closWind",
           # the lottery: the view, one entry of 100 KR (the stepper's +), then the view again
           "23000 call openLottery 3",
@@ -221,6 +229,15 @@ def checks(text, stub):
           [r[2] for r in sales])
     check("... and draws it (no 'No sales in this window')", nodes(text, "mkcsales_none") == 0 and nodes(text, "mkcsales_chart") == 1,
           (nodes(text, "mkcsales_none"), nodes(text, "mkcsales_chart")))
+    # the Black Market tab: v10's two reads on mount (deob-10.0.7.js:137741-137751)
+    bmi, bmr = stub.find("GET", "/api/market/black-market"), stub.find("GET", "/api/market/black-market/rank")
+    check("the Black Market tab asks krunker.io's /market/black-market and /market/black-market/rank with the Bearer",
+          bearer(bmi) and bearer(bmr), ([r[1] for r in bmi], [r[1] for r in bmr]))
+    check("... shows the item krunker.io lists as bought (the 1 Year Cape) as owned, and only it",
+          nodes(text, "bm_owned") == 1 and nodes(text, "bm_loading") == 0, (nodes(text, "bm_owned"), nodes(text, "bm_loading")))
+    check("... and offers Emperor's Blade (rank 4700) to a peak rank of 4800", nodes(text, "bm_rank") == 1, nodes(text, "bm_rank"))
+    check("... and a bought item joins the owned ones (ownedItems + item.index)", nodes(text, "bm_owned_after") == 2,
+          nodes(text, "bm_owned_after"))
     # the Black Market buy
     bm = stub.find("POST", "/api/market/black-market/purchase")
     check("the Black Market buy POSTs krunker.io's market/black-market/purchase {item_index} with the Bearer",

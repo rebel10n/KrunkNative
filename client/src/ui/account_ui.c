@@ -18,6 +18,7 @@
 #include <player_names.h> // Hide player names (player_names.h)
 #include <backend.h>
 #include <backend_ui.h>
+#include <kio_market.h> // kio_market_time_ms: acc.createDate
 #include <krunker_link.h> // krunker_net_take_drop_instance: the drops the game server gave (account_add_skin)
 #include <kn_captcha.h> // the sign-in's and the registration's captcha (doc/v10/captcha.md)
 #include <alt_store.h> // the encrypted session vault (client/src/alt/)
@@ -321,6 +322,9 @@ static void kio_build(void) {
     a->followers = (int) obj_num("player_followed");
     a->job_rating = (int) obj_num("jobrating");
     a->job_rating_pos = (int) obj_num("jobratingpositive");
+    a->trades = obj_num("player_trades"); // v10 acc.trades (deob-10.0.7.js:115126): the Black Market's accVar
+    const double made = kio_market_time_ms(cJSON_GetObjectItemCaseSensitive(g_kio.obj, "player_datenew"));
+    a->create_ms = made > 0 ? made : -1; // acc.createDate (:115112)
     a->premium = obj_num("player_premium") > 0;
     const char *twofa = obj_str("player_2FA");
     a->has_2fa = (twofa && twofa[0]) || obj_num("player_2FA") > 0;
@@ -927,6 +931,8 @@ static void set_data(const cJSON *h) {
     g_acc.premium = num_at(h, 27) > 0;
     g_acc.job_rating = (int) num_at(h, 38);     // jobRating: the K.P.D calls an officer rated
     g_acc.job_rating_pos = (int) num_at(h, 39); // jobRatingPos: the ones rated tagged
+    const double made = kio_market_time_ms(cJSON_GetArrayItem(h, 30)); // player_datenew (social_ui.c reads the same slot)
+    g_acc.create_ms = made > 0 ? made : -1;
     g_acc.has_2fa = (int) num_at(h, 28);
     const char *alias = str_at(h, 29);
     copy_str(g_acc.alias, sizeof(g_acc.alias), g_acc.premium && alias && alias[0] ? alias : g_acc.name);
@@ -1248,6 +1254,8 @@ static void set_life(const cJSON *info) {
 static void set_badges(const cJSON *info) {
     const cJSON *creator = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "creator_badge") : NULL;
     if (creator) g_acc.creator = cJSON_IsNumber(creator) ? creator->valueint != 0 : cJSON_IsTrue(creator);
+    const cJSON *trades = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "trades") : NULL; // acc.trades (kn_brain)
+    if (cJSON_IsNumber(trades)) g_acc.trades = trades->valuedouble;
     const cJSON *badges = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "badges") : NULL;
     if (!cJSON_IsArray(badges)) return;
     cJSON_Delete(g_acc.badges);
