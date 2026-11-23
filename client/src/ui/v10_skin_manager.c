@@ -17,7 +17,8 @@
 // The editor's preview pane (:124686-124704, :127463-127540): the viewer page in an iframe (#knSmPreview) whose
 // query is the edited skin's game skin as JSON (iíïíîïì, 300 ms after a change), drawn natively by viewer_embed.h; a
 // player card / emoji shows its texture or thumbnail instead. Capture Thumbnail (:124566-124570, :124764-124790) takes
-// that showcase as a 256 px PNG (viewer_embed_capture), uploads it as the thumbnail, sets itemConfig.customThumbnail and
+// that showcase as a 256 px PNG (viewer_embed_capture_png: natively at once, on the web the iframe's previewCaptured
+// answer to capturePreview), uploads it as the thumbnail, sets itemConfig.customThumbnail and
 // saves the skin. The Appearance tab's Model, Textures (diffuse / emissive, Transparency, Pulse), Sounds (shoot / swap
 // / inspect, Loop while inspecting), Dye Colors and Shader Studio sections (:125300-127400) upload through
 // uploadAsset (:124434-124459): a file picked in the platform dialog (ed_pick_file, the hidden <input type=file>'s
@@ -72,6 +73,7 @@
 #define SEARCH_DEBOUNCE_MS 300.0
 #define PREVIEW_DEBOUNCE_MS 300.0 // the preview JSON's setTimeout (:124687)
 #define CAPTURE_SIZE 256          // capturePreview's size (:124567)
+#define CAPTURE_TIMEOUT_MS 5000.0 // Capturing... ends after setTimeout(..., 5000) whatever the iframe does (:124569)
 #define TEST_DELAY_MS 50.0        // testSkinSandbox's setTimeout (:204473)
 #define TEST_WAIT_MS 10000.0      // KrunkNative: how long Test waits for the local player / its new class
 #define CHUNK (512u * 1024u)      // kn_brain's request bodies are 1 MiB at most (mods_ui.c's uploads)
@@ -117,6 +119,7 @@ static struct {
     double preview_due;
     unsigned asset_rev; // the skin files' ?v= (userAssetsUrl's Date.now(), :24298-24300): bumped by each upload
     int capturing, captured; // iÍiíiìî, iÍìîiiï
+    double capture_until;    // the capture's 5 s timeout (0: none pending)
     // the Appearance tab: textureSettings.hasGlow, the model picked this session (iÏíïííi: its extension), the
     // sections' upload errors and the drop zones' own state (a picked file's name, a refused file's message)
     int has_glow;
@@ -2834,6 +2837,20 @@ static void shader_op(const char *op, const HtmlArg *args, const int argc);
 
 // ------------------------------------------------------------------ Capture Thumbnail (:124566-124570, :124764-124790)
 
+// previewCaptured (:124764-124790): with a saved skin, the PNG is uploaded as its thumbnail (R_THUMB then sets
+// customThumbnail and saves); without one Capturing... just ends. Natively it comes from viewer_embed_capture_png at
+// once, on the web from the preview iframe's answer (even after the 5 s timeout, as v10's listener)
+static void captured(unsigned char *png, const size_t n) {
+    if (!SM.depth || !SM.editing || !editing_id() || SM.up.active) {
+        free(png);
+        SM.capturing = 0;
+        if (SM.depth) render();
+        return;
+    }
+    up_start("thumbnail", "thumbnail", "", "thumbnail.png", png, n);
+    render();
+}
+
 static void capture(void) {
     if (!editing_id()) {
         snprintf(SM.error, sizeof(SM.error), "Please save the skin first before capturing a thumbnail");
@@ -2842,16 +2859,13 @@ static void capture(void) {
     if (SM.capturing || SM.up.active) return;
     SM.capturing = 1;
     SM.captured = 0;
-    unsigned char *rgba = viewer_embed_capture(CAPTURE_SIZE);
-    size_t n = 0;
-    unsigned char *png = rgba ? png_encode_rgba(rgba, CAPTURE_SIZE, CAPTURE_SIZE, &n) : NULL;
-    free(rgba);
-    if (!png) { // the iframe's capture never answers (no showcase shown): Capturing... stays in v10; here it ends
-        SM.capturing = 0;
+    SM.error[0] = 0;
+    SM.capture_until = now_ms() + CAPTURE_TIMEOUT_MS;
+    if (!viewer_embed_capture_png(CAPTURE_SIZE, captured)) { // no showcase to ask: v10's iframe never answers and its
+        SM.capturing = 0;                                     // 5 s timeout ends Capturing...; here it ends at once
+        SM.capture_until = 0;
         snprintf(SM.error, sizeof(SM.error), "Failed to upload thumbnail: %s", "the preview is not shown");
-        return;
     }
-    up_start("thumbnail", "thumbnail", "", "thumbnail.png", png, n);
 }
 
 // ------------------------------------------------------------------ Test (testSkinSandbox, :204469-204610)
@@ -3200,6 +3214,14 @@ int v10_skin_manager_key(const int key) {
 
 void v10_skin_manager_tick(void) {
     test_tick();
+    if (SM.capture_until > 0 && now_ms() >= SM.capture_until) { // capturePreview's setTimeout (:124568-124570)
+        SM.capture_until = 0;
+        if (SM.capturing) {
+            SM.capturing = 0;
+            fprintf(stderr, "[skins] capture timed out\n");
+            if (SM.depth) render();
+        }
+    }
     if (SM.depth) preview_tick();
     if (SM.depth && SM.editing && SM.ed.paint_canvas) sg_editor_tick(SM.ed.paint_canvas);
     if (SM.depth && SM.editing && SM.sh.canvas) {

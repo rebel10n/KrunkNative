@@ -50,10 +50,13 @@ void backend_init(const char *cli_url) {
         var url = null;
         var params = null;
         try { params = new URLSearchParams(location.search); } catch (e) {}
-        // same truthiness as main.c web_query_flag: bare ?offline / ?sandbox count
+        // same truthiness as main.c web_query_flag: bare ?offline counts. The offline game has no default account
+        // service, only one named by ?brain=. The sandbox page (?sandbox / ?test) keeps the account, as v10.0.7's sandbox
+        // start does (deob-10.0.7.js:229372-229378 swaps the game socket only) and as the native --sandbox does: its Skin
+        // Manager lists, saves and captures the account's skins
         var off = function (name) { var v = params ? params.get(name) : null; return v !== null && v !== '0' && v !== 'false'; };
-        if (off('offline') || off('sandbox') || off('test')) return 0;
         if (params) url = params.get('brain');
+        if (url === null && off('offline')) return 0;
         if (url === null && typeof Module !== 'undefined' && Module['krunkNativeBrainUrl'] !== undefined) url = Module['krunkNativeBrainUrl'];
         if (url === null && location.protocol.indexOf('http') === 0) url = '\x01' + location.origin;
         return url ? stringToNewUTF8(String(url)) : 0;

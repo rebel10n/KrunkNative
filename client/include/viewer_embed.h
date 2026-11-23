@@ -9,7 +9,8 @@
 //
 // v10.0.7's Skin Manager has the same iframe in its editor (#knSmPreview here, v10_skin_manager.c), with the edited
 // skin itself in the query (showcase=<JSON>, viewer.c state_from_params); its Capture Thumbnail takes the shown
-// showcase as an image (viewer_embed_capture: the viewer page's capturePreview, deob-10.0.7.js:124770-124790).
+// showcase as an image (viewer_embed_capture_png: the page posts capturePreview {size} to the iframe,
+// deob-10.0.7.js:124566-124570, and the iframe answers previewCaptured {dataURL}, :124764-124790).
 #include <client.h>
 
 // Once per frame after html_ui_render(): opens / follows / closes the showcase as such an
@@ -19,6 +20,11 @@ void viewer_embed_fini(void);
 // The showcase on screen drawn again into a size x size RGBA image (top row first, transparent background), as the
 // viewer page's canvas.toDataURL after a render; malloc'd, NULL when none is shown. Native only (NULL on the web).
 unsigned char *viewer_embed_capture(int size);
+// Capture Thumbnail: the shown showcase as a size x size PNG, handed to `done` (which frees it). Natively done runs
+// before this returns. On the web this posts capturePreview to the #knSmPreview iframe, and done runs when its
+// previewCaptured answer arrives, or never (v10's page then gives up after 5 s). 0 when there is no showcase to ask.
+typedef void (*ViewerEmbedCaptured)(unsigned char *png, size_t n);
+int viewer_embed_capture_png(int size, ViewerEmbedCaptured done);
 // The pointer over the page (CSS px; action 0 move, 1 left press, 2 left release): a press on the showcase's box (the
 // iframe the topmost element there) is the showcase's (the Skin Manager's placement tools, else the orbit drag) until
 // its release. 1 when the showcase took it (the page does not see it). Native only (0 on the web).

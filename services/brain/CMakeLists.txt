@@ -721,6 +721,11 @@ if (Python3_FOUND)
     add_test(NAME brain_v10_skin_manager_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_skin_manager_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_skin_manager_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    # its Capture Thumbnail on the web build in headless Chromium: the preview iframe's capturePreview / previewCaptured
+    # (needs KN_WEB_DIST = a `make web` dist dir; else skips 77)
+    add_test(NAME brain_v10_skin_capture_web_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_skin_capture_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_skin_capture_web_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e;web")
     # v10.0.2 Social hub on the v10 page through two headless clients (v10_social.c, social_gapi.c, social_eb.c)
     add_test(NAME brain_v10_social_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_social_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

@@ -37,6 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <png_write.h> // Capture Thumbnail's PNG
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -737,6 +738,8 @@ static float css_scale(void) {
     return vh > 0.0f && fb_h > 0 ? (float) fb_h / vh : 1.0f;
 }
 
+static void frame_listen_install(void);
+
 static void viewer_enter(Client *client, const char *query) {
     memset(&g_viewer, 0, sizeof(g_viewer));
     memset(&g_ui, 0, sizeof(g_ui));
@@ -755,6 +758,7 @@ static void viewer_enter(Client *client, const char *query) {
     if (!vscene_init()) return;
     viewer_import_init(client);
     g_ui.entered = 1;
+    frame_listen_install(); // the Skin Manager's capturePreview, when this page is its #knSmPreview iframe
 
     vscene_update_lights(); // U()
     if (g_viewer.showcase_set) {
@@ -942,6 +946,8 @@ static struct {
     ViewerEmbedListener listener;
 } g_embed;
 
+static ViewerEmbedCaptured g_capture_done; // viewer_embed_capture_png's pending answer (the web's previewCaptured)
+
 #ifdef __EMSCRIPTEN__
 // the web client's window "message" listener (viewer_embed_listen): the preview iframe's answer
 EMSCRIPTEN_KEEPALIVE void kn_viewer_embed_message(const char *type, const char *json) {
@@ -950,12 +956,34 @@ EMSCRIPTEN_KEEPALIVE void kn_viewer_embed_message(const char *type, const char *
     cJSON_Delete(data);
 }
 
+// previewCaptured's PNG, its dataURL decoded as the page's listener does (atob into a File, :124767-124776); malloc'd
+EMSCRIPTEN_KEEPALIVE void kn_viewer_embed_captured(unsigned char *png, const int n) {
+    const ViewerEmbedCaptured done = g_capture_done;
+    g_capture_done = NULL;
+    fprintf(stderr, "[viewer] previewCaptured: %d bytes\n", n);
+    if (done && png && n > 0) done(png, (size_t) n);
+    else free(png);
+}
+
 EM_JS(void, kn_viewer_listen_js, (void), {
     window.addEventListener('message', function (e) {
         var d = e.data;
-        if (!d || (d.type !== 'attachChanged' && d.type !== 'charmChanged')) return;
+        if (!d || (d.type !== 'attachChanged' && d.type !== 'charmChanged' && d.type !== 'previewCaptured')) return;
         var frame = document.getElementById('knSmPreview'); // the Skin Manager's showcase iframe only (:124734-124735)
         if (!frame || e.source !== frame.contentWindow) return;
+        if (d.type === 'previewCaptured') { // {dataURL} (:124764): "data:<type>;base64,<bytes>"
+            if (!d.dataURL) return;
+            var bin;
+            try {
+                bin = atob(String(d.dataURL).split(',')[1] || '');
+            } catch (err) {
+                return;
+            }
+            var p = _malloc(bin.length || 1);
+            for (var i = 0; i < bin.length; i++) HEAPU8[p + i] = bin.charCodeAt(i);
+            _kn_viewer_embed_captured(p, bin.length);
+            return;
+        }
         var t = stringToNewUTF8(d.type);
         var j = stringToNewUTF8(JSON.stringify(d.type === 'attachChanged' ? d.attach : d.charm));
         _kn_viewer_embed_message(t, j);
@@ -971,16 +999,67 @@ EM_JS(void, kn_viewer_post_js, (const char *type, const char *json), {
     m[t === 'attachChanged' ? 'attach' : 'charm'] = JSON.parse(UTF8ToString(json));
     window.parent.postMessage(m, '*');
 });
+
+// the page asks its preview iframe for the capture (capturePreview {size}, :124565-124568); 0 without the iframe
+EM_JS(int, kn_viewer_request_capture_js, (int size), {
+    var frame = document.getElementById('knSmPreview');
+    if (!frame || !frame.contentWindow) return 0;
+    frame.contentWindow.postMessage({type: 'capturePreview', size: size}, '*');
+    return 1;
+});
+
+// this page as the iframe: its capture back to the page as a PNG data URL (previewCaptured {dataURL}, :124764)
+EM_JS(void, kn_viewer_post_capture_js, (const unsigned char *png, int n), {
+    if (!window.parent || window.parent === window) return;
+    var bytes = HEAPU8.subarray(png, png + n);
+    var s = '';
+    for (var i = 0; i < n; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(n, i + 0x8000)));
+    window.parent.postMessage({type: 'previewCaptured', dataURL: 'data:image/png;base64,' + btoa(s)}, '*');
+});
+
+// this page as the iframe: the page's capturePreview. The shown showcase drawn again at size x size with its
+// transparent background (as native viewer_embed_capture); no answer without one, as the page then times out
+EMSCRIPTEN_KEEPALIVE void kn_viewer_capture_preview(const int size) {
+    if (!g_ui.entered || size <= 0 || size > 4096) return;
+    unsigned char *rgba = vscene_capture(size, size, 0);
+    size_t n = 0;
+    unsigned char *png = rgba ? png_encode_rgba(rgba, size, size, &n) : NULL;
+    free(rgba);
+    fprintf(stderr, "[viewer] capturePreview %d: %s\n", size, png ? "previewCaptured" : "no showcase, no answer");
+    if (png) kn_viewer_post_capture_js(png, (int) n);
+    free(png);
+}
+
+EM_JS(void, kn_viewer_frame_listen_js, (void), {
+    window.addEventListener('message', function (e) {
+        var d = e.data;
+        if (!d || d.type !== 'capturePreview' || !window.parent || window.parent === window || e.source !== window.parent) return;
+        _kn_viewer_capture_preview((d.size | 0) || 256);
+    });
+});
 #endif
 
-void viewer_embed_listen(const ViewerEmbedListener listener) {
-    g_embed.listener = listener;
+static void frame_listen_install(void) {
 #ifdef __EMSCRIPTEN__
     static int listening;
-    if (listening || !listener) return;
+    if (listening) return;
+    listening = 1;
+    kn_viewer_frame_listen_js();
+#endif
+}
+
+static void embed_listen_install(void) {
+#ifdef __EMSCRIPTEN__
+    static int listening;
+    if (listening) return;
     listening = 1;
     kn_viewer_listen_js();
 #endif
+}
+
+void viewer_embed_listen(const ViewerEmbedListener listener) {
+    g_embed.listener = listener;
+    if (listener) embed_listen_install();
 }
 
 void viewer_place_changed(const char *type, const cJSON *data) {
@@ -1128,5 +1207,24 @@ unsigned char *viewer_embed_capture(const int size) {
 #else
     if (!g_embed.active || size <= 0) return NULL;
     return vscene_capture(size, size, 0);
+#endif
+}
+
+int viewer_embed_capture_png(const int size, const ViewerEmbedCaptured done) {
+    if (size <= 0 || !done) return 0;
+#ifdef __EMSCRIPTEN__
+    embed_listen_install();
+    if (!kn_viewer_request_capture_js(size)) return 0;
+    g_capture_done = done; // a later capture's answer replaces it: the page takes whichever comes (:124764)
+    return 1;
+#else
+    unsigned char *rgba = viewer_embed_capture(size);
+    size_t n = 0;
+    unsigned char *png = rgba ? png_encode_rgba(rgba, size, size, &n) : NULL;
+    free(rgba);
+    if (!png) return 0;
+    g_capture_done = NULL;
+    done(png, n);
+    return 1;
 #endif
 }

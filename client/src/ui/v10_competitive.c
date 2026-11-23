@@ -24,6 +24,9 @@
 #include <v10_social.h>      // v10_gapi_http: the official account's leaderboards (gapi, v10_gapi.c)
 #include <krunker_kio_routes.h> // the gapi path of a leaderboard (krunker_kio_routes.c)
 #include <ruleset.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -330,11 +333,55 @@ typedef struct {
 static View g_views[VIEW_MAX];
 static int g_view_count;
 
+#ifdef __EMSCRIPTEN__
+// v10's views are Svelte components: an update leaves an iframe that did not change where it is (the Skin Manager's
+// #knSmPreview, deob-10.0.7.js:127463-127540, keeps its viewer page, camera and a pending capturePreview). Here a view
+// is re-rendered as markup, and a replaced iframe loads its page again. Where the browser moves an element without
+// unloading it (Element.moveBefore), each iframe with an id is parked outside #app before the markup is replaced and
+// put back in place of its new copy when that has the same id and src; otherwise it is dropped.
+EM_JS(void, kn_views_park_iframes_js, (void), {
+    var app = document.getElementById('app');
+    window.__knParkedFrames = [];
+    if (!app || typeof document.body.moveBefore !== 'function') return;
+    var frames = app.querySelectorAll('iframe[id]');
+    for (var i = 0; i < frames.length; i++) {
+        try {
+            document.body.moveBefore(frames[i], null);
+            window.__knParkedFrames.push(frames[i]);
+        } catch (e) {}
+    }
+});
+
+EM_JS(void, kn_views_restore_iframes_js, (void), {
+    var parked = window.__knParkedFrames || [];
+    window.__knParkedFrames = [];
+    var app = document.getElementById('app');
+    for (var i = 0; i < parked.length; i++) {
+        var old = parked[i];
+        var fresh = app ? app.querySelector('iframe[id="' + old.id + '"]') : null;
+        if (fresh && fresh.getAttribute('src') === old.getAttribute('src')) {
+            try {
+                fresh.parentNode.moveBefore(old, fresh);
+                fresh.remove();
+                continue;
+            } catch (e) {}
+        }
+        old.remove();
+    }
+});
+#endif
+
 static void views_render(void) {
     const HtmlElem app = html_dom_by_id("app");
     if (!app) return;
+#ifdef __EMSCRIPTEN__
+    kn_views_park_iframes_js();
+#endif
     if (!g_view_count) {
         html_dom_set_html(app, "<div class=\"view-stack svelte-sdh4ve\"><!----></div>");
+#ifdef __EMSCRIPTEN__
+        kn_views_restore_iframes_js(); // drops them
+#endif
         return;
     }
     StrBuf sb = {0};
@@ -352,6 +399,9 @@ static void views_render(void) {
     char *html = sb_finish(&sb);
     set_html_keep_scroll(app, html);
     free(html);
+#ifdef __EMSCRIPTEN__
+    kn_views_restore_iframes_js();
+#endif
 }
 
 void v10_view_push(char *html, V10RenderFn render, V10ViewClose on_close, void *user) {
