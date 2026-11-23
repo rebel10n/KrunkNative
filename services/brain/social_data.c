@@ -729,7 +729,7 @@ static void mail_list_done(SocialSession *s, kn_db_result *res, void *extra) {
  * (0 Followers, 1 Clan, 2 Hub, 3 Inbox; 4 and 5 count as Inbox) and in Archive once read (km_archive).
  * A Followers row (kind 0, written by social_eb.c for a follow not followed back) carries the follower's
  * name as km_link ("X has followed you!", Follow Back). KrunkNative's other mail (gifts, sales, trades) is Inbox mail
- * (kind 3); a giveaway's winner gets Hub mail (kind 2) whose km_type 5 links its "Post!" to the post (km_link, 0401). */
+ * (kind 3); a giveaway's winner gets Hub mail (kind 2) whose km_type 5 links its "Post!" to the post (km_link, 0400). */
 #define MAIL_COLS(html_l, html_r) \
     "SELECT id AS km_id, created_at AS km_datesent, " html_l "sender" html_r " AS km_playerfrom, " html_l "subject" html_r " AS km_subject, " \
     html_l "body" html_r " AS km_text, CASE WHEN read_at IS NULL THEN 0 ELSE 1 END AS km_archive, kr AS km_kr, " \
