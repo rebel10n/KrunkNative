@@ -28,6 +28,8 @@
 #include <math.h>
 #include <string.h>
 
+const StoreSpins *store_ui_spins(void); // store_ui.c: store.spins as the store has it (the brain's /data/spins, else built in)
+
 #define PRIZE_WHEELS_MAX 64          // map_validate's MAP_V7_WHEEL_LIMIT is far below
 #define PRIZE_WHEELS_STEP_S 0.05     // iìiïìíi = Math.round(50) ms (:19243)
 #define PRIZE_WHEELS_STEP_DELTA 150.0f // iìiïìíi * 3
@@ -119,7 +121,7 @@ static vec3 item_world(const PrizeWheel *w, const ViewerSkin *item) {
 static int stop(PrizeWheel *w, Client *client) {
     w->spin_rotation = w->spin_val;
     const ViewerSkin *item = viewer_skin(w->item_id);
-    const StoreSpins *spins = store_spins_builtin();
+    const StoreSpins *spins = store_ui_spins(); // v10's store.spins (:224283)
     const StoreWheel *wheel = w->wheel < spins->wheel_count ? &spins->wheels[w->wheel] : NULL;
     if (!item || !wheel || wheel->pool_count > 0) return 0; // iiÌiiii.rarity / iìÏîìiì.rarities[...] of undefined
     const int rarity = item->rarity;

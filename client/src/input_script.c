@@ -280,6 +280,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+const StoreSpins *store_ui_spins(void); // store_ui.c: store.spins as the store has it (the brain's /data/spins, else built in)
+
 #define SCRIPT_MAX_EVENTS 4096 // a key sweep across a round end is ~1500 lines (console_draw_sweep_e2e.py); the table is static (BSS)
 
 typedef struct {
@@ -1297,7 +1299,7 @@ static void script_run(Client *client, const ScriptEvent *e) {
         fprintf(stderr, "[input_script] spinw t=%.0f uid=%d rand=%g skin=%d\n", g_script.time, w.uid, (double) w.rand, w.skin);
     } else if (!strcmp(e->cmd, "wheelrar")) {
         // wheelrar <wheel> <odds...>: store wheel <wheel>'s pools become rarity odds (test only, see the top)
-        const StoreSpins *spins = store_spins_builtin();
+        const StoreSpins *spins = store_ui_spins();
         char args[256];
         snprintf(args, sizeof(args), "%s", e->arg);
         char *p = args;

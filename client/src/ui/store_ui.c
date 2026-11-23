@@ -78,6 +78,8 @@ static double g_spins_retry;               // glfwGetTime of the next try after 
 static char *g_spins_pending;              // data that came while a spin was in flight
 
 static const StoreSpins *ui_spins(void) { return g_net_spins_set && !kio_store_active() ? &g_net_spins : store_spins_builtin(); }
+// store.spins for the map's prize wheels (prize_wheels.c, prize_wheel_render.c) and input scripts: the same data
+const StoreSpins *store_ui_spins(void) { return ui_spins(); }
 
 // a pool's rarity: its items' (a pool holds one rarity; the first item tells)
 static int pool_rarity(const StorePool *p) {

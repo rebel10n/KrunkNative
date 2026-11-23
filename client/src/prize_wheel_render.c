@@ -35,6 +35,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+const StoreSpins *store_ui_spins(void); // store_ui.c: store.spins as the store has it (the brain's /data/spins, else built in)
+
 #define PRIZE_WHEEL_RENDER_MAX 64     // prize_wheels.c's PRIZE_WHEELS_MAX
 #define PRIZE_WHEEL_ALPHA_TEST 0.1f   // material.alphaTest = 0.1 (:232706)
 #define PRIZE_WHEEL_SHADOW_STEPS 6    // nested strokes per shadow (prize_wheel_shadow_levels)
@@ -214,7 +216,7 @@ static void disc(Canvas2D *c, const double x, const double y, const double r, co
 
 // One updateSpinners paint (:219577-219668)
 static void paint(WheelMesh *wm, const PrizeWheel *w) {
-    const StoreSpins *spins = store_spins_builtin();
+    const StoreSpins *spins = store_ui_spins();
     const StoreWheel *sw = w->wheel < spins->wheel_count ? &spins->wheels[w->wheel] : NULL;
     if (!sw) return;
     if (!wm->canvas) {
