@@ -357,12 +357,12 @@ static void header_update(const AccountInfo *acc) {
     if ((el = by_id("menuJNKCount"))) html_dom_set_text(el, text);
     comma(text, sizeof(text), acc->ranked_points); // _8986(rankedPoints): the krunker.io account's; Box Office's in the Ranked window
     if ((el = by_id("menuRPCount"))) html_dom_set_text(el, text);
-    if ((el = by_id("mailCount"))) {
-        char count[16] = "";
-        if (acc->mail_unread > 99) snprintf(count, sizeof(count), "99+");
-        else if (acc->mail_unread > 0) snprintf(count, sizeof(count), "%d", acc->mail_unread);
+    if ((el = by_id("mailCount"))) { // windows[29].mailCount (deob-10.0.7.js:221231-221235): > 99 reads "99", < 0 is 0
+        char count[16];
+        const int n = acc->mail_unread < 0 ? 0 : acc->mail_unread;
+        snprintf(count, sizeof(count), "%d", n > 99 ? 99 : n);
         html_dom_set_text(el, count);
-        html_dom_set_display(el, acc->mail_unread > 0 ? "block" : "none");
+        html_dom_set_display(el, n ? "inline-block" : "none");
     }
 }
 
@@ -447,6 +447,10 @@ void v10_menu_account_changed(void) {
     // hideSpectateIfGuestUser (v10:208579-208581, after a login v10:209811 and a logout v10:209874):
     // the menu's Spectate switch is for accounts only (main.css hides #spectButtonHolder)
     set_display(by_id("spectButtonHolder"), acc ? "block" : "none");
+    // #newUserGuide (deob-10.0.7.js:148225, markup display:none): a login shows it up to level 20 (:216887), logoutAcc
+    // for the guest (:216910); main.css keeps it hidden (display:none !important) and nothing fills its icon or text
+    if (acc) set_display(by_id("newUserGuide"), acc->level > 20 ? "none" : "block");
+    else if (V.signed_in == 1) set_display(by_id("newUserGuide"), "block");
     // a premium account's login takes the ad slots away (deob-10.0.7.js:216881); a logout leaves them until the next
     // round's init brings them back (menu_ads_apply)
     if (acc && acc->premium) {

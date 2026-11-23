@@ -10,7 +10,8 @@ Headless client_bin runs (one at a time, input scripts clicking the page by elem
 
   1. a signed-in player (saved krunker_username / krunker_token): the header is v10's signed-in
      bar (name, level, KR), the nav shows v10's signed-in items (Turf Wars, Market & Trading,
-     Leaderboards, the small Guide entry), the class preview shows, Host Game shows and the
+     Leaderboards, the small Guide entry), 120 unread mails read "99" on the Inbox badge, #newUserGuide is set to
+     block (level <= 20), the class preview shows, Host Game shows and the
      Connect link is on the match bar after Join (it opens the Connect window);
      Settings opens Game Settings; Find Game opens v10's "Select a Server" chooser and its Public
      tile the server list with both lobbies, and no frame from the click to the list takes over
@@ -175,6 +176,9 @@ SIGNED_IN_SCRIPT = """0 menu
 460 text @title [id=knV10Title]
 470 attr @titlestyle style [id=knV10Title]
 480 nodes @titlerow [id=signedInHeaderBar] .ph-name-row .ph-title
+490 text @mail [id=mailCount]
+490 attr @mailstyle style [id=mailCount]
+490 attr @guide style [id=newUserGuide]
 500 vis @header signedInHeaderBar signedOutHeaderBar knV10Name menuKRCount menuBtnConnect menuBtnHost menuBtnQuickMatch :preview spectButtonHolder chatUIHolder knV10AccountsBtn knV10AccountsSignedIn
 500 vis @nav menuBtnGuide knV10GuideItem menuBtnTurfWars menuBtnMarket menuBtnLeaderboards menuBtnShop menuBtnChall menuBtnSocial menuBtnSideCommunity
 600 clickid knV10Settings
@@ -224,6 +228,7 @@ SIGNED_IN_SCRIPT = """0 menu
 
 GUEST_SCRIPT = """0 menu
 500 vis @guest signedInHeaderBar signedOutHeaderBar spectButtonHolder chatUIHolder
+500 attr @guideguest style [id=newUserGuide]
 600 clickid knV10LoginBtn
 1000 vis @modal knV10Login accEmail accName
 1100 clickid knV10AuthSwitch
@@ -236,7 +241,9 @@ GUEST_SCRIPT = """0 menu
 1700 clickid knV10LoginSubmit
 1730 vis @logging knV10LoggingInBar signedOutHeaderBar signedInHeaderBar
 6000 vis @registered knV10Login signedInHeaderBar signedOutHeaderBar knV10Name spectButtonHolder chatUIHolder
+6000 attr @guidereg style [id=newUserGuide]
 6100 call logoutAcc
+6700 attr @guideout style [id=newUserGuide]
 6800 down ESC
 6820 up ESC
 6900 down ESC
@@ -352,6 +359,10 @@ def signed_in_case(brain_port, games):
         con.execute("INSERT INTO player_titles (account_id, title_id, source, ref) SELECT id, 91, 'blackmarket', 1866 "
                     "FROM accounts WHERE lower(username) = lower(?)", (user,))
         con.commit()
+        # 120 unread mails: the Inbox badge reads "99" (windows[29].mailCount, deob-10.0.7.js:221231-221235)
+        con.executemany("INSERT INTO mail (account_id, subject, body) SELECT id, ?, '' FROM accounts WHERE lower(username) = lower(?)",
+                        [("mail %d" % i, user) for i in range(120)])
+        con.commit()
         titled = con.execute("SELECT count(*) FROM player_titles pt JOIN accounts a ON a.id = pt.account_id "
                              "WHERE lower(a.username) = lower(?)", (user,)).fetchone()[0] == 1
         con.close()
@@ -364,6 +375,13 @@ def signed_in_case(brain_port, games):
               and nodes(text, "titlerow") == 1, title.group(0) if title else "no text line")
         check("1: ... in its rarity colour", style and style.group(1).startswith("color:#"), style.group(0) if style else "no attr line")
     signed_accounts_case(brain_port, user, token)
+    if titled:
+        mail = re.search(r"\[input_script\] text t=\d+ @mail n=(\d+) .* text=(.*)", text)
+        mstyle = attr_of(text, "mailstyle")
+        check("1: 120 unread mails: the Inbox badge reads 99 (> 99 -> \"99\"), shown inline-block",
+              mail and mail.group(2).strip() == "99" and mstyle and "inline-block" in mstyle, "%s / %s" % (mail.group(0) if mail else None, mstyle))
+    check("1: #newUserGuide: a login up to level 20 sets it to block (deob-10.0.7.js:216887)",
+          "block" in (attr_of(text, "guide") or ""), str(attr_of(text, "guide")))
     joins = re.findall(r"\[mm\] joining (\S+) at", text)
     h = vis(text, "header")
     check("1: signed-in header bar (no guest bar)", h.get("signedInHeaderBar") == "1" and h.get("signedOutHeaderBar") == "0", str(h))
@@ -422,6 +440,12 @@ def signed_in_case(brain_port, games):
     check("1: back on the menu with the new game", a.get("menuBtnQuickMatch") == "1", str(a))
 
 
+def attr_of(text, label):
+    """The value of an `attr @label <name> <selector>` line, None without one"""
+    m = re.search(r"\[input_script\] attr t=\d+ @%s n=\d+ \S+?=(.*)" % re.escape(label), text)
+    return m.group(1).strip() if m else None
+
+
 def guest_case(brain_port):
     user = "v10g%d" % (os.getpid() % 100000)
     pw = "pw-v10guest-%d" % os.getpid()
@@ -447,6 +471,11 @@ def guest_case(brain_port):
     o = vis(text, "loggedout")
     check("2: Logout: the guest header again", o.get("signedOutHeaderBar") == "1" and o.get("signedInHeaderBar") == "0", str(o))
     check("2: Logout: the chat goes from the menu (deob-10.0.7.js:216910), no Spectate switch", o.get("chatUIHolder") == "0" and o.get("spectButtonHolder") == "0", str(o))
+    # #newUserGuide: the markup's display:none for a fresh guest, block after a level-1 login and after logoutAcc
+    # (deob-10.0.7.js:148225, :216887, :216910)
+    gg, gr, go = attr_of(text, "guideguest"), attr_of(text, "guidereg"), attr_of(text, "guideout")
+    check("2: #newUserGuide: none for a fresh guest, block after the login (level 1) and after the logout",
+          gg is not None and "none" in gg and gr is not None and "block" in gr and go is not None and "block" in go, "%s / %s / %s" % (gg, gr, go))
     li = vis(text, "loggedin")
     check("2: Login from the modal: signed in again", li.get("knV10Login") == "-" and li.get("signedInHeaderBar") == "1", str(li))
 
