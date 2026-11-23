@@ -403,7 +403,7 @@ enum {
     EN_CHALLENGE = 7, EN_MELEE = 9, EN_SKIN_COLOR = 10, EN_LAG_COMP = 11, EN_ATTACH = 12, EN_DYE = 14,
     EN_SHOE = 15, EN_WAIST = 16, EN_HAIR = 17, EN_ANON = 19, EN_FACE = 20, EN_PET = 21, EN_VERIFIED = 22,
     EN_PREMIUM = 23, EN_CUSTOM_BADGE = 24, EN_WRIST = 25, EN_CHARMS = 29, EN_BACK = 30, EN_HEAD = 31,
-    EN_PLAYER_CARD = 32,
+    EN_PLAYER_CARD = 32, EN_RANK_BADGE = 33,
 };
 #define EN_LENGTH_MIN (EN_SHOE + 1)
 #define ENT_COSMETICS_AT 8
@@ -520,8 +520,9 @@ int v10_encode_enter(const KrunkerValue *en, uint8_t out[V10_ENT_SIZE]) {
         index_of(item_of(charms, 1)), index_of(IT(EN_PLAYER_CARD)), -1, /* badge: the server takes the account's */
     };
     for (int i = 0; i < 9; i++) wr_i32(out, ENT_V9_COSMETICS_AT + 4 * (size_t)i, v7[i]);
+    /* PLAYER_SHOW_BADGE_*: verified 0x01, premium 0x02, rank 0x04 (ent[33], deob-10.0.7.js:215052), custom 0x08 */
     out[ENT_SHOW_BADGES_AT] = (js_truthy(IT(EN_VERIFIED)) ? 0x01 : 0) | (js_truthy(IT(EN_PREMIUM)) ? 0x02 : 0) |
-                              (js_truthy(IT(EN_CUSTOM_BADGE)) ? 0x08 : 0);
+                              (js_truthy(IT(EN_RANK_BADGE)) ? 0x04 : 0) | (js_truthy(IT(EN_CUSTOM_BADGE)) ? 0x08 : 0);
 #undef IT
     return 1;
 }

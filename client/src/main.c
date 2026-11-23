@@ -1415,9 +1415,10 @@ Player *client_find_player(Client *client, const int uid) {
     return NULL;
 }
 
-// ENT ent[22..25]: SETTINGS.tmp.verifiedBadge / premiumBadge / partnerBadge / customBadge (default on)
+// ENT showBadges: SETTINGS.tmp.verifiedBadge / premiumBadge / rankBadge / customBadge (default on;
+// deob-10.0.7.js:215052 sends them as ent[22], [23], [33], [24]), PLAYER_SHOW_BADGE_* bit order
 static uint8_t client_show_badges(void) {
-    static const char *const keys[4] = {"verifiedBadge", "premiumBadge", "partnerBadge", "customBadge"};
+    static const char *const keys[4] = {"verifiedBadge", "premiumBadge", "rankBadge", "customBadge"};
     uint8_t show = 0;
     for (int i = 0; i < 4; i++) {
         if (!ui_setting_is_false(keys[i])) show |= (uint8_t) (1u << i);

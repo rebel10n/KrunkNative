@@ -3277,6 +3277,7 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
     ent.cosmetics = PLAYER_COSMETICS_NONE;
     ent.skins = (PlayerSkins) {-1, -1, -1};
     ent.cosmetics_v7 = (PlayerCosmeticsV7) {-1, -1, -1, -1, -1, {-1, -1}, -1, -1};
+    ent.show_badges = PLAYER_SHOW_BADGES_ALL; // a shorter ENT: every badge shown (the settings' default)
     memcpy(&ent, payload, length < sizeof(ent) ? length : sizeof(ent));
     if (length <= offsetof(NetEntPacket, secondary_index)) ent.secondary_index = -1;
     if (length <= offsetof(NetEntPacket, lag_comp)) ent.lag_comp = 1.0f;
@@ -3313,16 +3314,17 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
         KRUNKER_V_NUM(ent.anon_mode ? 1 : 0),                             // [19] anonMode
         KRUNKER_V_NUM(OWN(ent.cosmetics.face)),                           // [20] faceIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.pet)),                         // [21] petIndex
-        KRUNKER_V_NUM(0),                                                 // [22] verifiedBadge
-        KRUNKER_V_NUM(0),                                                 // [23] premiumBadge
-        KRUNKER_V_NUM(0),                                                 // [24] customBadge
+        // [22..24] tmp.verifiedBadge / premiumBadge / customBadge ? 1 : 0 (deob-10.0.7.js:215052)
+        KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_VERIFIED ? 1 : 0), // [22] verifiedBadge
+        KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_PREMIUM ? 1 : 0),  // [23] premiumBadge
+        KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_CUSTOM ? 1 : 0),   // [24] customBadge
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.wrist)),                       // [25] wristIndex
         KRUNKER_V_NUM(streak[0]), KRUNKER_V_NUM(streak[1]), KRUNKER_V_NUM(streak[2]), // [26..28] streakIndex1..3
         KRUNKER_V_ARRAY(charms, 2),                                       // [29] charms
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.back)),                        // [30] backIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.head)),                        // [31] headIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.player_card)),                 // [32] playerCardIndex
-        KRUNKER_V_NUM(0),                                                 // [33] rankBadge
+        KRUNKER_V_NUM(ent.show_badges & PLAYER_SHOW_BADGE_RANK ? 1 : 0),     // [33] rankBadge
         KRUNKER_V_NUM(-1),                                                // [34] titleIndex
     };
 #undef OWN

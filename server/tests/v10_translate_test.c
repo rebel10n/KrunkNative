@@ -204,6 +204,7 @@ int main(void) {
         en[30] = N(33);                     // BACK
         en[31] = N(34);                     // HEAD
         en[32] = N(35);                     // PLAYER_CARD
+        en[33] = B(0);                      // RANK_BADGE (showRankBadge, deob-10.0.7.js:215052)
         uint8_t ent[V10_ENT_SIZE];
         CHECK(v10_encode_enter(&KRUNKER_V_ARRAY(en, T_EN_LENGTH_V10), ent), "encodeEnter of a v10 array");
         CHECK(V10_ENT_SIZE == 101, "ENT_V9_SIZE is 101");
@@ -234,6 +235,9 @@ int main(void) {
         CHECK(rd(ent, 92) == 35, "ENT v7 player card");
         CHECK(rd(ent, 96) == -1, "ENT v7 badge");
         CHECK(ent[100] == 0x09, "ENT show badges: verified (bit 0) + custom (bit 3)");
+        en[33] = B(1);
+        CHECK(v10_encode_enter(&KRUNKER_V_ARRAY(en, T_EN_LENGTH_V10), ent) && ent[100] == 0x0D, "ENT show badges: + rank (bit 2, en[33])");
+        en[33] = B(0);
 
         // PICKUP (128): NetPickupPacket (26 bytes) -> inat [-1, null, null, uid, weapon|null, true, active, pos|null]
         {

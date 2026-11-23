@@ -1154,12 +1154,15 @@ typedef struct {
 
 #define PLAYER_COSMETICS_V7_NONE ((PlayerCosmeticsV7) {-1, -1, -1, -1, -1, {-1, -1}, -1, -1})
 
-// ENT showBadges (ent[22..25], settings verifiedBadge / premiumBadge / partnerBadge / customBadge):
-// what the player lets others see. Absent (shorter ENTs) = all shown, the settings' default.
+// ENT showBadges: the settings verifiedBadge / premiumBadge / customBadge (v10 ent[22..24]) and rankBadge
+// (v10 ent[33]), deob-10.0.7.js:215052 (defaults on, :213181-213232): what the player lets others see.
+// Absent (shorter ENTs) = all shown, the settings' default. Bit 2 was a "partnerBadge" no v10 build has;
+// it carries rankBadge, which neither v10's own server code (players.js sync: verified / premium /
+// custom only, deob-10.0.7.js:171347, :176753) nor KrunkNative's server reads yet.
 enum {
     PLAYER_SHOW_BADGE_VERIFIED = 1 << 0,
     PLAYER_SHOW_BADGE_PREMIUM = 1 << 1,
-    PLAYER_SHOW_BADGE_PARTNER = 1 << 2,
+    PLAYER_SHOW_BADGE_RANK = 1 << 2,
     PLAYER_SHOW_BADGE_CUSTOM = 1 << 3,
     PLAYER_SHOW_BADGES_ALL = 0x0F,
 };
