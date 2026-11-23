@@ -2257,6 +2257,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
         goto fail;
     }
     anim_init(&g->anim, anim_dirty_cb, g);
+    g->anim.defer_starts = 1; /* animations start at the frame that first paints them (anim_start_pending) */
     if (g->ua) register_keyframes(g, g->ua);
     for (int i = 0; i < g->n_sheets; i++) {
         register_font_faces(g, g->sheets[i]);
@@ -2638,6 +2639,9 @@ void html_ui_backend_render(UI *ui, const int layers)
     engine_flush_layout(g);
     run_after_layout(g);
     engine_flush_layout(g); /* observers may have mutated the page */
+    /* this frame's time starts the animations its styles created, and those a style read created
+     * between frames at the last frame's clock: both show local time 0 now, as in Chrome */
+    anim_start_pending(&g->anim, engine_now_ms());
     sel_autoscroll(g);
 
     const int overlay_open = g->widgets && widgets_popup_owner(g->widgets);

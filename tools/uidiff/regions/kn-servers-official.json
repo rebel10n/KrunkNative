@@ -9,58 +9,58 @@
       "name": "window-header",
       "rect": [
         307,
-        147,
+        163,
         480,
-        30
+        40
       ],
       "ref_offset": [
         0,
-        15
+        18
       ],
       "kind": "text",
-      "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button, which v10 lacks)"
+      "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button, which v10 lacks). KrunkNative's window is 33.6 px taller (the krunk.io / krunker.io tab strip, 732c9bfe), so, centred, it starts 16.8 px higher: the header text lands 18 px above v10's"
     },
     {
       "name": "top-groups",
       "rect": [
         307,
-        227,
+        250,
         665,
-        90
+        95
       ],
       "ref_offset": [
         0,
-        -15
+        -16
       ],
       "kind": "text",
-      "note": "Official Customs and Custom Games: v10's headers (name, Quick Join, N online)"
+      "note": "Official Customs and Custom Games: v10's headers (name, Quick Join, N online). The rect starts below the tab strip (it ends at 240 px; the reference has the window background there): until 2026-11-23 it began at 227 px and compared the strip's bottom with v10's header (15.4 %)"
     },
     {
       "name": "region-groups",
       "rect": [
         307,
-        347,
+        350,
         665,
-        140
+        142
       ],
       "ref_offset": [
         0,
-        -14
+        -16
       ],
       "kind": "text",
-      "note": "the user's case: official region groups New York, Frankfurt, Sydney in krunker.io's order, each the place name, Quick Join, then N online, no badge. The reference sits 14 px higher here: KrunkNative's krunk.io / krunker.io tab bar (732c9bfe) comes before the groups"
+      "note": "the user's case: official region groups New York, Frankfurt, Sydney in krunker.io's order, each the place name, Quick Join, then N online, no badge. The reference sits 16 px higher here: KrunkNative's tab strip comes before the groups, 30 px above the first one as in v10's tabbed windows"
     },
     {
       "name": "footer",
       "rect": [
         307,
-        486,
+        488,
         220,
         36
       ],
       "ref_offset": [
         0,
-        -14
+        -16
       ],
       "kind": "text",
       "note": "61 In Game (krunker.io's totalPlayerCount): the In Game count only. KrunkNative leaves a count it has not read blank (3cec1138: the scenario reads no editor / social count), where the v10 capture shows 0 in Editor, 0 on Social"

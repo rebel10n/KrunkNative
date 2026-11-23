@@ -84,6 +84,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h> // tzset: the references' time zone
 #include <sys/stat.h>
 #include <unistd.h>
 #ifdef _WIN32
@@ -431,6 +432,17 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     }
     g_sc.frames = (int) obj_num(g_sc.root, "frames", 3);
     if (g_sc.frames < 1) g_sc.frames = 1;
+
+    // Local dates (Spin History's date range, Match History's day, the clock) in the references' zone:
+    // the references were captured on a machine in US Eastern time (kn-tip-spin's "Sat Sep 08 2001" is
+    // 1e12 ms = 2001-09-09 01:46:40 UTC there), so a scenario renders the same text on a UTC host.
+#ifdef _WIN32
+    scenario_setenv("TZ", "EST5EDT");
+    _tzset();
+#else
+    scenario_setenv("TZ", "EST5EDT,M3.2.0,M11.1.0");
+    tzset();
+#endif
 
     // optional top-level "flavor" ("base" / "strike"): render that product flavor's page (Krunker
     // Strike: FRVR's ui/strike/index.html, strike_ui.c). Absent = the process flavor. Set before the

@@ -361,6 +361,10 @@ struct AnimSystem {
 
     AnimDirtyFn dirty_fn;
     void *dirty_user;
+
+    /* 1: a new CSS animation is play-pending until anim_start_pending (the
+     * engine's frames); 0 (anim_init): it starts at its anim_update_elem time */
+    uint8_t defer_starts;
 };
 
 void anim_init(AnimSystem *sys, AnimDirtyFn dirty_fn, void *dirty_user);
@@ -377,8 +381,18 @@ const CssComputed *anim_apply(AnimSystem *sys, HtmlElem elem, const CssComputed 
                               CssComputed *out, double now_ms);
 
 /* Advances time: reports every element whose output changed since the last
- * tick through the dirty callback and drops finished transitions. */
+ * tick through the dirty callback and drops finished transitions.  Starts the
+ * play-pending animations first (anim_start_pending). */
 void anim_tick(AnimSystem *sys, double now_ms);
+
+/* With defer_starts, a CSS animation is play-pending from the style change that
+ * creates it until the next frame, whose time becomes its start time (Web
+ * Animations: the ready time is the timeline time of the next animation frame),
+ * so it shows local time 0 in the first frame that paints it, also when a
+ * script's style read created it between frames (at the last frame's clock).
+ * The engine calls this with the frame's time once the frame's styles are
+ * resolved (and anim_tick does first). */
+void anim_start_pending(AnimSystem *sys, double now_ms);
 
 /* 1 when some animation or transition will still change its output. */
 int    anim_has_active(const AnimSystem *sys, double now_ms);

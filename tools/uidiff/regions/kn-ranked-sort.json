@@ -16,7 +16,7 @@
       "kind": "image",
       "fuzz": 6,
       "max_pct": 0.5,
-      "note": "the sort arrow after Score (U+2191, Liberation Serif in Chrome: kn-symbols-serif.ttf)"
+      "note": "the sort arrow after Score (U+2193: score, descending, v10's default; Liberation Serif in Chrome: kn-symbols-serif.ttf)"
     },
     {
       "name": "rs-header",

@@ -1055,5 +1055,5 @@
     }
   },
   "frames": 3,
-  "note": "KrunkNative: the v10 Ranked Match History with a match expanded (svelte-1irqx9a): the sort arrow after Score (U+2191, v10.js 108115), Liberation Serif in Chrome (the bundled kn-symbols-serif.ttf)"
+  "note": "KrunkNative: the v10 Ranked Match History with a match expanded (svelte-1irqx9a): the sort arrow after Score: v10 sorts a loaded match by score, descending (sortColumn score / asc, then toggled once: deob-10.0.7.js:110388-110394, 110414), so U+2193 and the highest score first (deob-10.0.7.js:110432), Liberation Serif in Chrome (the bundled kn-symbols-serif.ttf). Reference re-rendered 2026-11-23: the 2026-10-15 one showed U+2191 and the lowest score first, from before 2eef54563 (v10 default: descending)"
 }

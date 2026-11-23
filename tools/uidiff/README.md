@@ -46,12 +46,15 @@ Sans first made Debian hosts lay Helvetica / Arial text out wider). On the Debia
 LLVM 19.1.7) on 2026-11-22, solid fills and text are pixel-identical to the desktop's own captures
 (`kn-servers-official-mixed`: 2552 differing pixels of 921600 with no fuzz), yet 93 of 942 regions fail:
 83 of them pass with 4 to 8 points more fuzz (small colour differences in blended and scaled images,
-e.g. `game-updating` credit: 124 pixels at fuzz 6, none at 8). The rest are edges of 3D thumbnails and
-character previews (Strike item / class selection, `seq-end-collect-button`) and a few layouts
-(`kn-servers-official` top-groups, `menu-host-type`, `kn-ranked-sort` rs-arrow, `kn-tip-spin` cost,
-`ranked-shop-flying`). The likeliest cause is the llvmpipe version (the desktop's was not recorded).
+e.g. `game-updating` credit: 124 pixels at fuzz 6, none at 8). The likeliest cause is the llvmpipe
+version (the desktop's was not recorded). The structural failures of that run were root-caused on
+2026-11-23 (see "Failing-region triage (2026-11-23)" below); after those fixes the devbox, run as four
+shards, gives 763 passed, 88 failed, 91 skipped (HEAD before them: 759 / 92 / 91 in the same run).
 Compare a run on another machine with this baseline, not with zero failures, before treating a
 colour-only failure as a regression.
+
+Renders are time-zone independent: `ui_scenario_begin` sets `TZ` to US Eastern (`EST5EDT`), the zone
+the references were captured in, so local dates (the tip popup's "Sat Sep 08 2001") match on a UTC host.
 
 ## Pipeline
 
@@ -422,6 +425,8 @@ pixel follows an intended change; pixels that differed for any other reason keep
 |---|---|---|
 | `kn-guest-earned-end`, `kn-guest-earned-menu`, `kn-lb-grid`, `kn-main-menu-connect`, `kn-menu-official-guest`, `kn-menu-official-header`, `kn-ranked-error`, `kn-ranked-found` | 2026-10-25 | `menu_scale_base` now writes #uiBase's CSS width/height exactly as v10's `scaleBase` (`deob-10.0.3.js:241726-241731`) instead of rounding them up to whole CSS px, so right-anchored and centred content moves ~1 CSS px (0.6 device px) onto v10's positions. Only those subpixel shifts changed, checked side by side (`main-menu` action-cards 16.68 -> 0.63 %, logo 8.46 -> 2.14 %, both market popups -> 0.35 %). `kn-v10-menu.css` gives #instructionHolder a 1px transparent right border so its shade still covers the last device pixel, as Chrome's does (`menu_bleed_e2e`). |
 | `kn-om-*` (10), `kn-om-tools-short` | 2026-10-15 (uidiff-red) | 1f32a8bc made the window a flex column and 422e6a02 wraps tile, tool and gun names; krunknative.css `.knOmMain` then lets the whole Tools pane set the row's height (a 3-tile search showed one tool). Only the window's box (x 290-990, y 140-580) is new; the chat behind it keeps the old pixels. Region rects follow the new boxes (`KRUNKNATIVE_SCENARIO_DUMP='#menuWindow'`). `kn-om-weapons` / `kn-om-search` are rendered with engine-replaced-pct (a percentage-width `<img>` adds only its border and padding to min-content, as in Chrome), which narrows the weapon icons. `kn-om-tools-short` is now 1920x600 with UI Scaling off (with scaling on the pane always fits) and has regions. |
+| `kn-ranked-sort` | 2026-11-23 | The baseline (a956c0fc3, 2026-10-15) predates 2eef54563, which made the ranked leaderboard sort descending as v10 does: `sortColumn` starts at score / ascending and is toggled once on open (`deob-10.0.7.js:110388-110394`, 110414), so the header shows U+2193 (110432; v10.0.2 `game.js` 108074 / 108099 / 108115 is the same). Only the arrow and the row order changed. |
+| `kn-servers-official-mixed` | 2026-11-23 | The empty `#kioStatus` line no longer collapses the gap under the tab strip to 22 px (see the 2026-11-23 triage); only the lobby list moved, 8 CSS px down. |
 | `v10-market/browse`, `v10-market/inventory` | 2026-10-15 (uidiff-red) | the `.market-grid` box only: 4260815e (`all: unset` drops the Buy button's UA border) and 1657aa83 (`aspect-ratio: 1` on `.market-card-shell`), bisected. The left strip (the v10 menu column behind the popup, ~0.37 %) stays as it was in all eleven market baselines. |
 
 ### Paint pages (`make uidiff-paint`)
@@ -497,3 +502,67 @@ and the note says which.
   1 Year Cape instead, to keep an Owned card in the capture.
 - **Not individually root-caused here**: `ranked-shop-flying`, `ingame-endscreen-collect-raid`, `kn-ranked-sort`, `kn-servers-official-error`
   and `kn-servers-official-mixed`, and the `strike/*` scenarios (the Strike flavour, not v10 parity).
+  All of them are covered by the 2026-11-23 triage below.
+
+### Failing-region triage (2026-11-23)
+
+The structural (not fuzz-only) failures of the 2026-11-22 devbox run. Before -> after, devbox llvmpipe.
+
+**Fixed**
+- **`kn-servers-official` top-groups** (15.36 -> 2.71 %) and **region-groups** (6.58 -> 2.19 %): two
+  causes. The region was wrong: its rect began at y 227, inside KN's krunk.io / krunker.io tab strip
+  (which ends at 240), and compared the strip's bottom with v10's window header. It now starts at 250
+  (offset -16); window-header and footer were re-fitted the same way. The render was wrong too: the
+  status line under the tab strip (`#kioStatus`, `div.kioSep` with margins 24 / -8) is empty when the
+  lobbies are listed, so its margins collapsed through it with the strip's 30 px and the first group's
+  20 px to 22 px, where v10's tab strips keep 30 px before the first group (`genList`: `bigMenTabs`
+  margin-bottom 30, then `setHed` margin-top 20). The lobby list jumped 8 CSS px between the krunk.io
+  and krunker.io tabs (first group at local y 978.6 vs 986.6). krunknative.css `div.kioSep:empty`
+  now takes no room; `kn-servers-official-mixed` was re-rendered for it, and
+  `kn-servers-official-open` / `kn-servers-carousel` had their offsets re-fitted (the window is 8 CSS px
+  taller, so it is centred 2 device px higher and the list moves 4.8 device px down).
+- **`kn-ranked-sort` rs-arrow** (0.91 -> 0.00 %): a stale KN baseline showing the old ascending sort;
+  re-rendered (table above).
+- **`kn-tip-spin` cost** (2.00 -> 0.00 %): time zone. The reference says "Sat Sep 08 2001" (1e12 ms is
+  2001-09-09 01:46:40 UTC, the evening before in US Eastern, where it was captured); the UTC devbox
+  rendered "Sun Sep 09 2001". `ui_scenario_begin` pins `TZ` to `EST5EDT`.
+- **`ranked-shop-flying` flying-number** (6.17 -> 0.00 %): the reference is a composite (KN's
+  ranked-shop render as the background, Chromium drawing v10.0.7's flying-number layer over it), and
+  its background still read "Region: North America" from before 2eef54563 made Europe the default.
+  Re-composed with `KN_CHROME=chromium node tools/uidiff/capture-v10-menu-idle.js --state flying
+  --capture <dir> --public ~/jails/kru/src/Krunker_v10.0.7/live --bg <ranked-shop render> --x 896.981
+  --y 183.712 --text -500 --t 817`, where `<dir>` holds the live 10.0.7 `index.html` and a
+  `states/main-menu.html` of `<div id="uiBase"></div>`. Check: the same capture over a North America
+  background reproduces the old reference with 0 differing pixels in the region. `tools/kref/cdp.js`
+  falls back to Node's built-in WebSocket when the `ws` module is not installed.
+- **`seq-end-collect-button@500` collect** (13.65 -> 1.73 %, pulse timing still 0.0 ms): CSS
+  animations started one frame early. A style flush between frames (an observer, a timer) created
+  the running animation with the previous frame's clock, so the frame after it was already 16.7 ms
+  in; KN's frame at 483 ms matched the 500 ms reference. As in the Web Animations model, a new
+  animation is now play-pending (`AnimSystem.defer_starts`, set by the engine) and its start time is
+  the time of the next frame that paints it (`anim_start_pending`, called from `html_ui_backend_render` after
+  layout and at the start of `anim_tick`). The other sequences' timings are unchanged (death 0.9,
+  kill 0.2, hit 0.0, end-vic 1.8, end-results 13.4, grow 0.8, curtain 0.0, flip 0.0 ms).
+
+**Passing on the devbox, nothing to fix**: `ingame-endscreen-collect-raid` (3 of 3 runs),
+`kn-servers-official-error` (0.000 %) and `kn-servers-official-mixed` (0.003 % before its re-render).
+
+**Environment, not KN**
+- **Strike `item-selection` / `class-selection`**: the weapon thumbnails are PNG previews
+  (`assets/textures/previews/weapons/*.png`, `image-rendering: pixelated`), not 3D. Regenerating the
+  Chrome reference on the devbox with `static_ref.py` gives the committed reference exactly (items-row
+  0.000 %), while KN's render is 8.3 % off; forcing smooth sampling does not help (8.2 %), and the same
+  code passed at 2.4 % on the desktop (4b03e2be). The difference is KN's GL image sampling on this
+  llvmpipe.
+
+**Still open**
+- **Server browser sub-pixel placement** (`kn-servers-official-open` new-york-header 2.92 -> 5.04 %,
+  other-groups 2.21 -> 3.21 %, both now failing; `kn-servers-carousel` and the open footer / header were
+  failing before): KN's window is 33.6 device px taller than v10's (the tab strip), so its lobby list sits
+  at a different fractional device-px phase and no integer `ref_offset` lines the anti-aliased text up.
+  The 8 CSS px (4.8 device px) gap fix moved the phase: the header moves by exactly 2 px (0.000 % at
+  dy +2 against the old render) but the rows by about 2.6 px (1.39 % at the best integer shift), and
+  the best integer offsets give 3.9 % for new-york-header. Even with v10-identical markup (no tab strip)
+  KN paints the translated `#menuWindow` 0.28 px higher (top edge 175.02 vs Chrome's 175.30) and the
+  rows 0.45 px higher (239.84 vs 240.29), which points at the translate / scroller snapping in
+  `paint.c` (`scroller_layer_snap`, `snap_rect`) and is not fixed here.

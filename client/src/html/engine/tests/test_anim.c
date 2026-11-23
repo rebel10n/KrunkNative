@@ -730,6 +730,31 @@ static int sample(HtmlElem e, const CssComputed *base, CssComputed *out, double 
     return *res != base;
 }
 
+/* defer_starts (the engine): an animation a style change creates between frames
+ * is play-pending, local time 0 until anim_start_pending gives it the next
+ * frame's time as its start (Chrome: currentTime 0 in the first painted frame). */
+static void test_deferred_start(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    base.font_size = 32.0f;
+    base.animations[0] = anim_decl("grow", 0.8f, 0, INFINITY, timing_kind(CSS_TIMING_EASE), CSS_ANIM_DIRECTION_ALTERNATE, CSS_ANIM_FILL_NONE);
+    base.animation_count = 1;
+    HtmlElem e = 12;
+    const double t0 = 9000.0;
+    g_sys.defer_starts = 1;
+    CHECK(anim_update_elem(&g_sys, e, &base, t0) == 1);   /* a style read between frames */
+    CHECK(sample(e, &base, &out, t0 + 17, &r));            /* the next frame, still pending: local 0 */
+    CHECK_NEAR(r->opacity, 0.3, 1e-6);
+    anim_start_pending(&g_sys, t0 + 17);                   /* that frame starts it */
+    CHECK(anim_update_elem(&g_sys, e, &base, t0 + 34) == 1);  /* a restyle keeps the start */
+    CHECK(sample(e, &base, &out, t0 + 17 + 400, &r));
+    CHECK_NEAR(r->opacity, 0.3 + 0.7 * ref_ease(0.5), 1e-4);
+    anim_remove_elem(&g_sys, e);
+    g_sys.defer_starts = 0;
+}
+
 /* zoom: keyframe lengths (unzoomed) scale with the element's zoom; lists of
  * box-shadows interpolate pairwise, padding with transparent shadows. */
 static void test_zoom_and_shadow_lists(void)
@@ -2364,6 +2389,7 @@ int main(int argc, char **argv)
     CHECK(anim_keyframes_find(&g_sys, kn_atom_cstr("sprayAnm")) == NULL);
 
     test_grow();
+    test_deferred_start();
     test_zoom_and_shadow_lists();
     test_scale_bob();
     test_lds_ring();

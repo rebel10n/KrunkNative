@@ -1,6 +1,29 @@
-// Minimal CDP client over `ws` (from KrunkNative/net-bridge/node_modules).
+// Minimal CDP client over `ws` (from KrunkNative/net-bridge/node_modules), or over Node's own
+// WebSocket (Node >= 22) where no `ws` package is installed.
 'use strict';
-const WebSocket = require('/home/user/src/KrunkNative/net-bridge/node_modules/ws');
+const path = require('path');
+
+// Node's built-in WebSocket behind the small part of the `ws` API used here (on open / message / error)
+class NodeWebSocket {
+  constructor(url) {
+    this.sock = new globalThis.WebSocket(url);
+    this.sock.binaryType = 'arraybuffer';
+  }
+  on(event, fn) {
+    this.sock.addEventListener(event, (e) => fn(event === 'message' ? Buffer.from(typeof e.data === 'string' ? e.data : new Uint8Array(e.data)) : e));
+  }
+  send(data) { this.sock.send(data); }
+  close() { this.sock.close(); }
+}
+
+function loadWs() {
+  for (const p of [path.join(__dirname, '..', '..', 'net-bridge', 'node_modules', 'ws'), '/home/user/src/KrunkNative/net-bridge/node_modules/ws', 'ws']) {
+    try { return require(p); } catch (e) { }
+  }
+  if (typeof globalThis.WebSocket === 'function') return NodeWebSocket;
+  throw new Error('cdp.js: no WebSocket: run npm install in net-bridge/, or use Node >= 22');
+}
+const WebSocket = loadWs();
 const http = require('http');
 const fs = require('fs');
 

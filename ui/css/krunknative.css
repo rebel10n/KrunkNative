@@ -856,6 +856,12 @@ html.kn-bare-window #instructions {
   font-size: 18px;
   color: rgba(255, 255, 255, 0.6);
 }
+/* Empty (the lobbies are listed), the line takes no room: its margins would collapse with the
+ * first group's 20px and the tab strip's 30px to 22px (30 - 8), where v10's tab strips keep 30px
+ * before the first group (genList: bigMenTabs margin-bottom 30px, then setHed margin-top 20px). */
+#menuWindow.dark div.kioSep:empty {
+  margin: 0;
+}
 #menuWindow.dark div.kioSepWhy {
   color: rgba(255, 255, 255, 0.6);
 }

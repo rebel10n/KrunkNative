@@ -1555,6 +1555,7 @@ enum { PHASE_BEFORE = 0, PHASE_ACTIVE, PHASE_AFTER, PHASE_NONE = 255 };
 typedef struct AnimRunning {
     const char *name;          /* atom                                        */
     double created_ms;         /* when the name appeared on the element       */
+    uint8_t pending;           /* play-pending: starts at the next frame      */
     float delay_s, duration_s, iterations;
     CssTiming timing;
     uint8_t direction, fill, play_state;
@@ -1719,13 +1720,17 @@ static void elem_destroy(AnimSystem *sys, uint32_t idx)
 /* Animation sampling                                                         */
 /* ------------------------------------------------------------------------- */
 
-static double running_start_ms(const AnimRunning *r) { return r->created_ms + sec_to_ms(r->delay_s); }
+/* A play-pending animation (created since the last frame, see anim_start_pending) samples as if it
+ * started now: local time 0, its delay still ahead. */
+static double running_created_ms(const AnimRunning *r, double now_ms) { return r->pending ? now_ms : r->created_ms; }
+
+static double running_start_ms(const AnimRunning *r, double now_ms) { return running_created_ms(r, now_ms) + sec_to_ms(r->delay_s); }
 
 static double running_local_s(const AnimRunning *r, double now_ms)
 {
     if (r->play_state == CSS_ANIM_PLAY_PAUSED)
         return r->pause_local_s;
-    return (now_ms - running_start_ms(r)) / 1000.0;
+    return (now_ms - running_start_ms(r, now_ms)) / 1000.0;
 }
 
 static double running_active_s(const AnimRunning *r)
@@ -2099,11 +2104,12 @@ void anim_free(AnimSystem *sys)
     memset(sys, 0, sizeof *sys);
 }
 
-static void running_init(AnimRunning *r, const CssAnimation *a, double now_ms)
+static void running_init(const AnimSystem *sys, AnimRunning *r, const CssAnimation *a, double now_ms)
 {
     memset(r, 0, sizeof *r);
     r->name = a->name;
     r->created_ms = now_ms;
+    r->pending = sys->defer_starts; /* anim_start_pending: the next frame's time is its start time */
     r->last_phase = PHASE_NONE;
     r->last_step = -1;
 }
@@ -2115,6 +2121,7 @@ static void running_sync(AnimRunning *r, const CssAnimation *a, double now_ms)
     } else if (a->play_state != CSS_ANIM_PLAY_PAUSED && r->play_state == CSS_ANIM_PLAY_PAUSED) {
         /* resume: shift so local time continues from the paused value */
         r->created_ms = now_ms - r->pause_local_s * 1000.0 - sec_to_ms(a->delay_s);
+        r->pending = 0;
     }
     r->play_state = a->play_state;
     r->delay_s = a->delay_s;
@@ -2153,7 +2160,7 @@ int anim_update_elem(AnimSystem *sys, HtmlElem elem, const CssComputed *base, do
         AnimRunning *slot = &rec->anims[n];
         if (n >= rec->anim_count || slot->name != a->name) {
             if (n < rec->anim_count && running_has_custom(sys, slot)) custom_changed = 1;
-            running_init(slot, a, now_ms);
+            running_init(sys, slot, a, now_ms);
             if (running_has_custom(sys, slot)) custom_changed = 1;
         }
         running_sync(slot, a, now_ms);
@@ -2313,8 +2320,22 @@ const CssComputed *anim_apply(AnimSystem *sys, HtmlElem elem, const CssComputed 
     return changed ? out : base;
 }
 
+void anim_start_pending(AnimSystem *sys, double now_ms)
+{
+    for (uint32_t ei = 0; ei < sys->elem_count; ei++) {
+        AnimElem *rec = sys->elems[ei];
+        for (uint8_t i = 0; i < rec->anim_count; i++) {
+            AnimRunning *r = &rec->anims[i];
+            if (!r->pending) continue;
+            r->pending = 0;
+            r->created_ms = now_ms;
+        }
+    }
+}
+
 void anim_tick(AnimSystem *sys, double now_ms)
 {
+    anim_start_pending(sys, now_ms);
     for (uint32_t ei = 0; ei < sys->elem_count; ei++) {
         AnimElem *rec = sys->elems[ei];
         unsigned flags = 0;
@@ -2374,7 +2395,7 @@ double anim_next_wakeup(const AnimSystem *sys, double now_ms)
             const AnimKeyframeSet *set = anim_keyframes_find(sys, r->name);
             if (!set_animates(set) || r->play_state == CSS_ANIM_PLAY_PAUSED)
                 continue;
-            double start = running_start_ms(r);
+            double start = running_start_ms(r, now_ms);
             if (now_ms < start) {
                 if (start < best) best = start;
                 continue;
@@ -2424,6 +2445,7 @@ void anim_seek(AnimSystem *sys, double now_ms, double current_ms)
                 r->pause_local_s = local;
             else
                 r->created_ms = now_ms - local * 1000.0 - sec_to_ms(r->delay_s);
+            r->pending = 0;
             r->last_phase = PHASE_NONE; /* the next tick reports the element */
             r->last_step = -1;
         }
