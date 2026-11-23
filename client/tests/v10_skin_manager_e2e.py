@@ -280,7 +280,9 @@ def main():
 
         A.ui("knSkins('shader','toggle')")
         check(A.has("knSmShaderApply"), "Shader Studio opens")
-        A.click("knSmShaderApply")
+        m = A.mark()
+        A.ui("knSkins('shader','refresh')")  # the Refresh Preview button sits below the 720 px fold
+        check(A.wait_line("[skin_fx] graph material", m, 20.0), "Refresh Preview: the preview draws the compiled graph (getMat's shaderDef)")
         A.click("knSmSave")
         check(bool(wait_q("SELECT 1 FROM custom_skins WHERE id = ?", (sid,),
                           lambda r: r and (cfg_of(sid).get("customShader") or {}).get("type") == "graph")),
@@ -362,6 +364,7 @@ def main():
         A.click("knSmTest%d" % sid)
         check(A.gone("knSmWindow"), "Test closes the window")
         check(A.wait_line("[skins] test %d type=0 slot=primary" % sid, m, 30.0), "Test puts the skin on the sandbox player's primary")
+        check(A.wait_line("[skin_fx] graph material", m, 20.0), "Test: the player's primary draws the skin's shader graph (customShaderInfo)")
         A.shot("test")
 
         B = Client(None, None, "live", ["--offline"])

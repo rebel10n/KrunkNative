@@ -57,10 +57,36 @@ converts each input to the width its node asks for (broadcast a float, truncate,
   white (post graphs have no texture slots in v10 either). `screenDPR` is 1.
 - `mouse` and `frame` are not exposed: no v10.0.7 node reads them.
 
+## Surface graphs (Shader Studio skins)
+
+v10.0.7's Skin Manager saves a `kind: "surface"` graph as `itemConfig.customShader = {type: "graph", graph,
+applyToAll, parts}`. testSkinSandbox and the preview's shaderStudioUpdate turn it into `customShaderInfo`
+(`{"*" | part: {shaderDef: {type: "graph", graph}, shaderArgs: {params}}}`, :204476-204508), and getMat compiles
+`shaderDef` before `shaders[shaderNum]` (:206493-206514 for an OBJ item, :208000-208016 per glTF part). The material
+(iïììiíí, :95813-95847) is a Lambert material when the output's `lit` is set, else a basic one; `fog` is off; the
+output's `color`, `alpha`, `emissive`, `positionOffset` and `normal` ports and `side` / `blend` / `depthWrite` /
+`transparent` params apply.
+
+- `mod_shader_graph_compile_surface()` emits a vertex and a fragment shader. The vertex stage compiles only
+  `positionOffset` (derivatives read 0 there), and the fragment stage the other ports. Input nodes read the mesh
+  (uv 0, local / world / view position and normal, the camera), `time` / `delta` / `seed`, and the mesh's own
+  texture as the `map` slot (`kn_map`, unit 0). Both stages share one `u_p<i>` uniform per param node.
+- `skin_fx.c` puts a `GraphMaterial` on the mesh: one linked program per graph text, the part's
+  `shaderArgs.params`, the copy's seed when the graph has a `seed` node, and Lambert lighting from the scene's
+  ambient and sun (`basic.frag`'s units). A graph that does not compile leaves the item's own material
+  (v10's catch). It logs `[skin_fx] graph material: ...` when the material goes on.
+- Differences: uv sets above 0 read uv 0; tangents are 0 and `vertexColor` is white; a texture slot other than
+  `map` reads white, and `map` without a texture reads (0, 0, 0, 1); `textureBicubic` samples one mip level
+  (`strength * maxMip`); the Lambert term has the ambient light and the sun only, without the map's point lights.
+
 ## Tests
 
 - `mod_shader_test` (ctest): the validator's refusals, the sample graphs, and every node output translating.
 - `mod_shader_glsl` (ctest, needs glslangValidator): every node output's GLSL is valid ES 3.00 and 4.50 core.
+- `mod_shader_gl` (ctest, `tools/modshader/check_gl.py`, Mesa llvmpipe through surfaceless EGL): every post
+  fragment compiles, and every surface node output's vertex / fragment pair compiles and links, as GLSL ES 3.00
+  and 4.50 core. It skips (77) unless the renderer is llvmpipe.
+- `v10_skin_manager_e2e`: Shader Studio's Refresh Preview and the table's Test both put the graph material on.
 - `tools/modshader/sample_e2e.sh`: grey and invert mods (`client/tests/data/mod_shader/`) on a Sandstorm copy
   whose `modURL` points at them, headless from a pinned camera. Checks: grey frame R=G=B with the plain frame's
   Rec. 709 luminance, invert frame = 255 minus plain.

@@ -61,6 +61,7 @@ void mod_shader_fini(void);
 
 typedef struct {
     char name[33];  // the param node's params.name (the GLSL uniform is "u_p<index>")
+    char node[33];  // the param node's id (a surface graph's two stages share one uniform per node)
     int width;      // 1..4 (a "color" param is a vec3)
     float value[4]; // its value: default, else shaderArgs.params[name], float ones clamped to min / max
 } ModShaderUniform;
@@ -74,15 +75,30 @@ typedef struct {
 
 typedef struct {
     char *fragment; // the fragment shader after its #version line (mod_shader.c prepends the platform's), malloc'd
+    char *vertex;   // a surface graph's vertex shader, likewise (NULL for a post graph)
+    // a surface graph's output settings (the output node's params, deob-10.0.7.js:94205-94228, as the material takes
+    // them, :95840-95845): lit (MeshLambertNodeMaterial, else MeshBasicNodeMaterial), side double, additive blending,
+    // depthWrite, transparent
+    int lit, double_sided, additive, depth_write, transparent;
     ModShaderUniform uniforms[MOD_SHADER_MAX_UNIFORMS];
     int uniform_count;
     ModShaderParam params[MOD_SHADER_MAX_UNIFORMS]; // the graph's param nodes (iìiîííî, deob:95848-95870)
     int param_count;
 } ModShaderProgram;
 
-// The graph validator (deob:94463-94792) for `kind` ("post"); 1 when valid, else 0 with the first error in `err`.
+// The graph validator (deob:94463-94792) for `kind` ("surface", "paint", "post"; NULL any); 1 when valid, else 0 with the first error in `err`.
 int mod_shader_graph_validate(const struct cJSON *graph, const char *kind, char *err, size_t err_size);
 // Validates and translates a post graph with the instance `params` (shaderArgs.params, may be NULL). 1 on success.
 int mod_shader_graph_compile(const struct cJSON *graph, const struct cJSON *params, ModShaderProgram *out, char *err,
                              size_t err_size);
+// A "surface" graph (a skin's customShaderInfo shaderDef, deob-10.0.7.js:95813-95847 and :208005-208016) as a vertex
+// and a fragment shader for a mesh. The shaders' interface (filled by client/src/skin_fx.c):
+//   attributes  location 0 position, 1 uv, 3 normal ((0, 0, 0) without normals: the face normal is derived)
+//   uniforms    transform, camera_world_inverse, camera_projection (the renderer's); kn_map (unit 0) and kn_has_map
+//               (the mesh's own texture: the graph's "map" slot and baseColor), kn_time, kn_delta, kn_seed,
+//               kn_resolution, kn_dpr; for a lit graph kn_ambient (the ambient irradiance) and kn_sun / kn_sun_dir (the
+//               sun's irradiance and its world direction); u_p<i> per param uniform
+//   output      kn_frag_color (rgb, alpha = the alpha port)
+int mod_shader_graph_compile_surface(const struct cJSON *graph, const struct cJSON *params, ModShaderProgram *out, char *err,
+                                     size_t err_size);
 void mod_shader_program_free(ModShaderProgram *program);

@@ -1819,14 +1819,18 @@ else ()
     target_link_libraries(meshopt_test PRIVATE cJSON m)
     add_test(NAME meshopt_test COMMAND meshopt_test ${CMAKE_SOURCE_DIR})
 
-    # mod_shader_test: mod post-pass shader graphs (client/src/mod_shader_graph.c): the validator's refusals and
-    # every node type translating; mod_shader_glsl runs glslangValidator on that GLSL (ES 3.00 and 4.50) when installed
+    # mod_shader_test: mod post-pass and skin surface shader graphs (client/src/mod_shader_graph.c): the validator's
+    # refusals and every node type translating; mod_shader_glsl runs glslangValidator on that GLSL (ES 3.00 and 4.50) when installed
     add_executable(mod_shader_test client/tests/mod_shader_test.c)
     target_include_directories(mod_shader_test PRIVATE client/include)
     target_link_libraries(mod_shader_test PRIVATE cJSON m)
     add_test(NAME mod_shader_test COMMAND mod_shader_test)
     if (NOT WIN32)
         add_test(NAME mod_shader_glsl COMMAND ${CMAKE_SOURCE_DIR}/tools/modshader/check_glsl.sh $<TARGET_FILE:mod_shader_test>)
+        # mod_shader_gl: the same post fragments and the skin surface graphs' vertex / fragment pairs compiled and linked
+        # on Mesa's llvmpipe (EGL surfaceless), GLSL ES 3.00 and 4.50 core; skipped without llvmpipe
+        add_test(NAME mod_shader_gl COMMAND python3 -I ${CMAKE_SOURCE_DIR}/tools/modshader/check_gl.py $<TARGET_FILE:mod_shader_test>)
+        set_tests_properties(mod_shader_gl PROPERTIES SKIP_RETURN_CODE 77)
     endif ()
 
     # mod_pack_test: map resource packs (client/src/mod_pack.c, zip_read.c): the override applies on

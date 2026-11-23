@@ -8,6 +8,7 @@
 #include <cJSON.h>     // customShaderInfo (ViewerSkin.shader_info)
 #include <client.h>    // g_render_lighting: shader 18's Lambert
 #include <ruleset.h>   // light_unit_factor (as basic.c)
+#include <mod_shader.h> // shader graphs: mod_shader_graph_compile_surface
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -743,6 +744,211 @@ static void custom_replace(Mesh *mesh, CustomMaterial *m) {
     mesh->material = (Material *) m;
 }
 
+// ---------------------------------------------------------------- v10.0.7 shader graphs (a shaderDef)
+// A customShaderInfo entry may carry its own shader, {shaderDef: {type: "graph", graph}} (the Skin Manager's Shader
+// Studio skins, testSkinSandbox :204476-204508): getMat takes customShaderInfo["*"].shaderDef before shaders[shaderNum]
+// (deob-10.0.7.js:206493-206514), a model each part's (or every mesh: "*" / applyToAll, :208000-208016). The graph is
+// compiled to a material (iïììiíí, :95813-95847): mod_shader_graph_compile_surface's vertex and fragment shaders, one
+// program per graph text, with the part's shaderArgs.params as its param uniforms, the mesh's own texture as the "map"
+// slot, the copy's seed when the graph has a seed node (iiîíiîî, :95801-95812), and the output node's settings (lit,
+// side, blend, depthWrite, transparent; fog off). A graph that does not compile keeps the item's material (the catch,
+// :206515 / :208013).
+#define SKIN_FX_GRAPH_PROGRAMS 32
+
+typedef struct {
+    char *key; // the graph as compact JSON
+    unsigned int program;
+    int failed;
+} GraphProgram;
+
+static GraphProgram g_graph_programs[SKIN_FX_GRAPH_PROGRAMS];
+static int g_graph_program_next;
+
+typedef struct {
+    Material base;
+    unsigned int texture; // the mesh's map, 0 none
+    int lit, cull_back, additive, depth_write;
+    int seeded;
+    float seed;
+    double last_draw;
+    int uniform_count;
+    ModShaderUniform uniforms[MOD_SHADER_MAX_UNIFORMS];
+    GlUniform handles[MOD_SHADER_MAX_UNIFORMS];
+    char names[MOD_SHADER_MAX_UNIFORMS][8]; // "u_p<i>"
+} GraphMaterial;
+
+static unsigned int fx_graph_link(const char *vertex, const char *fragment) {
+    const char *vert_parts[2] = {k_glsl_header, vertex};
+    const char *frag_parts[2] = {k_glsl_header, fragment};
+    const unsigned int vert = fx_compile_stage(GL_VERTEX_SHADER, vert_parts, 2);
+    const unsigned int frag = vert ? fx_compile_stage(GL_FRAGMENT_SHADER, frag_parts, 2) : 0;
+    unsigned int program = 0;
+    if (vert && frag) {
+        program = glCreateProgram();
+        glAttachShader(program, vert);
+        glAttachShader(program, frag);
+        glLinkProgram(program);
+        int status;
+        glGetProgramiv(program, GL_LINK_STATUS, &status);
+        if (!status) {
+            char error[512];
+            glGetProgramInfoLog(program, sizeof(error), NULL, error);
+            printf("[skin_fx] shader graph link error:\n%s\n", error);
+            glDeleteProgram(program);
+            program = 0;
+        }
+    }
+    if (vert) glDeleteShader(vert);
+    if (frag) glDeleteShader(frag);
+    return program;
+}
+
+// The program of a compiled graph (`key` its JSON), linked once
+static unsigned int fx_graph_program(const char *key, const ModShaderProgram *prog) {
+    for (int i = 0; i < SKIN_FX_GRAPH_PROGRAMS; i++)
+        if (g_graph_programs[i].key && !strcmp(g_graph_programs[i].key, key)) return g_graph_programs[i].failed ? 0 : g_graph_programs[i].program;
+    GraphProgram *slot = &g_graph_programs[g_graph_program_next];
+    g_graph_program_next = (g_graph_program_next + 1) % SKIN_FX_GRAPH_PROGRAMS;
+    // a recycled slot's program may still be on a mesh: it stays alive (a few programs at most), only its key goes
+    free(slot->key);
+    slot->key = strdup(key);
+    slot->program = fx_graph_link(prog->vertex, prog->fragment);
+    slot->failed = !slot->program;
+    if (slot->failed) printf("[skin_fx] shader graph: the program did not link\n");
+    return slot->program;
+}
+
+static GlUniform u_graph_map = GL_UNIFORM_INIT("kn_map");
+static GlUniform u_graph_has_map = GL_UNIFORM_INIT("kn_has_map");
+static GlUniform u_graph_time = GL_UNIFORM_INIT("kn_time");
+static GlUniform u_graph_delta = GL_UNIFORM_INIT("kn_delta");
+static GlUniform u_graph_seed = GL_UNIFORM_INIT("kn_seed");
+static GlUniform u_graph_resolution = GL_UNIFORM_INIT("kn_resolution");
+static GlUniform u_graph_dpr = GL_UNIFORM_INIT("kn_dpr");
+static GlUniform u_graph_ambient = GL_UNIFORM_INIT("kn_ambient");
+static GlUniform u_graph_sun = GL_UNIFORM_INIT("kn_sun");
+static GlUniform u_graph_sun_dir = GL_UNIFORM_INIT("kn_sun_dir");
+
+static void graph_update_uniforms(Material *base) {
+    GraphMaterial *m = (GraphMaterial *) base;
+    const unsigned int program = m->base.program;
+    scene_draw_state(m->cull_back, m->additive, m->depth_write);
+    const double now = gltf_clock(); // the TSL `time`, on the material clock as the custom shaders
+    if (g_shader_clock_start < 0.0) g_shader_clock_start = now;
+    const float delta = m->last_draw > 0.0 && now > m->last_draw ? (float) (now - m->last_draw) : 1.0f / 60.0f;
+    m->last_draw = now;
+    gl_uniform_1f(&u_graph_time, program, (float) (now - g_shader_clock_start));
+    gl_uniform_1f(&u_graph_delta, program, delta);
+    gl_uniform_1f(&u_graph_seed, program, m->seeded ? m->seed : 0.0f);
+    int viewport[4] = {0, 0, 1, 1};
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    gl_uniform_2f(&u_graph_resolution, program, (float) viewport[2], (float) viewport[3]);
+    gl_uniform_1f(&u_graph_dpr, program, 1.0f);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m->texture);
+    g_active_texture = m->texture;
+    gl_uniform_1i(&u_graph_map, program, 0);
+    gl_uniform_1f(&u_graph_has_map, program, m->texture ? 1.0f : 0.0f);
+    if (m->lit) { // basic.frag's Lambert lights (the ambient and the map's sun), in three's legacy units unless correct_lights
+        const float units = ruleset_current()->light_unit_factor;
+        const float scale = g_render_lighting.correct_lights ? 1.0f : 3.14159265358979f;
+        const float a = g_render_lighting.ambient_intensity * units * scale, s = g_render_lighting.light_intensity * units * scale;
+        gl_uniform_3f(&u_graph_ambient, program, g_render_lighting.ambient_color.x * a, g_render_lighting.ambient_color.y * a,
+                      g_render_lighting.ambient_color.z * a);
+        gl_uniform_3f(&u_graph_sun, program, g_render_lighting.light_color.x * s, g_render_lighting.light_color.y * s,
+                      g_render_lighting.light_color.z * s);
+        gl_uniform_3f(&u_graph_sun_dir, program, g_render_lighting.light_direction.x, g_render_lighting.light_direction.y,
+                      g_render_lighting.light_direction.z);
+    }
+    for (int i = 0; i < m->uniform_count; i++) {
+        const ModShaderUniform *u = &m->uniforms[i];
+        GlUniform *h = &m->handles[i];
+        h->name = m->names[i];
+        if (u->width == 1) gl_uniform_1f(h, program, u->value[0]);
+        else if (u->width == 2) gl_uniform_2f(h, program, u->value[0], u->value[1]);
+        else if (u->width == 3) gl_uniform_3f(h, program, u->value[0], u->value[1], u->value[2]);
+        else gl_uniform_4f(h, program, u->value[0], u->value[1], u->value[2], u->value[3]);
+    }
+}
+
+static const MaterialVTable graph_material_vtable = {graph_update_uniforms};
+
+// customShaderInfo entry -> its shaderDef graph, NULL when it has none (iîïîîïí, :95873-95875)
+static const cJSON *graph_def(const cJSON *entry) {
+    const cJSON *def = cJSON_GetObjectItem(entry, "shaderDef");
+    const cJSON *type = cJSON_GetObjectItem(def, "type"), *graph = cJSON_GetObjectItem(def, "graph");
+    if (!cJSON_IsString(type) || strcmp(type->valuestring, "graph") || !cJSON_IsObject(graph)) return NULL;
+    return cJSON_IsArray(cJSON_GetObjectItem(graph, "nodes")) ? graph : NULL;
+}
+
+// iiîíiîî (:95801-95812): a graph with a seed node takes the copy's seed
+static int graph_seeded(const cJSON *graph) {
+    const cJSON *n;
+    cJSON_ArrayForEach(n, cJSON_GetObjectItem(graph, "nodes")) {
+        const cJSON *t = cJSON_GetObjectItem(n, "type");
+        if (cJSON_IsString(t) && !strcmp(t->valuestring, "seed")) return 1;
+    }
+    return 0;
+}
+
+// The graph material for this customShaderInfo entry on a mesh whose map is `texture`, NULL when it does not compile
+static GraphMaterial *graph_material(const cJSON *entry, const unsigned int texture) {
+    const cJSON *graph = graph_def(entry);
+    if (!graph) return NULL;
+    const cJSON *params = cJSON_GetObjectItem(cJSON_GetObjectItem(entry, "shaderArgs"), "params");
+    ModShaderProgram prog;
+    char err[256] = "";
+    if (!mod_shader_graph_compile_surface(graph, params, &prog, err, sizeof(err))) {
+        printf("[skin_fx] shader graph refused: %s\n", err);
+        return NULL;
+    }
+    char *key = cJSON_PrintUnformatted(graph);
+    const unsigned int program = key ? fx_graph_program(key, &prog) : 0;
+    free(key);
+    GraphMaterial *m = program ? calloc(1, sizeof(GraphMaterial)) : NULL;
+    if (m) {
+        m->base.vtable = &graph_material_vtable;
+        m->base.program = program;
+        m->base.transparent = prog.transparent;
+        m->texture = texture;
+        m->lit = prog.lit;
+        m->cull_back = !prog.double_sided;
+        m->additive = prog.additive;
+        m->depth_write = prog.depth_write;
+        m->seeded = graph_seeded(graph);
+        m->uniform_count = prog.uniform_count;
+        memcpy(m->uniforms, prog.uniforms, sizeof(m->uniforms));
+        for (int i = 0; i < m->uniform_count; i++) {
+            snprintf(m->names[i], sizeof(m->names[i]), "u_p%d", i);
+            m->handles[i] = (GlUniform) GL_UNIFORM_INIT(m->names[i]);
+        }
+    }
+    mod_shader_program_free(&prog);
+    return m;
+}
+
+// the mesh's map (its BasicMaterial's texture), 0 when it has none
+static unsigned int mesh_map(const Mesh *mesh) {
+    return mesh && mesh->material && mesh->material->vtable == &basic_material_vtable ? ((const BasicMaterial *) mesh->material)->texture : 0;
+}
+
+// iîIiîîï (:208006-208013): the graph material on the mesh; 1 when it took
+static int graph_replace(Mesh *mesh, const cJSON *entry) {
+    GraphMaterial *m = graph_material(entry, mesh_map(mesh));
+    if (!m) return 0;
+    skin_fx_forget(mesh);
+    material_fini(mesh->material);
+    mesh->material = (Material *) m;
+    printf("[skin_fx] graph material: %d uniforms, lit %d, map %d\n", m->uniform_count, m->lit, m->texture != 0);
+    return 1;
+}
+
+// customShaderInfo["*"] when it carries a graph (an OBJ item's getMat, :206493-206514), else NULL
+static const cJSON *graph_star(const cJSON *info) {
+    const cJSON *star = cJSON_GetObjectItem(info, "*");
+    return graph_def(star) ? star : NULL;
+}
+
 // getMat: shaderNum != null && shaders[shaderNum]: a ShaderToyMaterial instead of the item's own (0-7); a custom shader
 // (8-17) only with the skin's customShaderInfo; a graph shader (18) with or without it (deob-10.0.5.js:204743-204760)
 static void fx_use_shadertoy(Mesh *mesh, const ViewerSkin *skin) {
@@ -778,12 +984,16 @@ static void fx_custom_gltf(GltfInstance *model, const ViewerSkin *skin) {
         const char *part = entry->string;
         const cJSON *num = cJSON_GetObjectItem(entry, "shaderNum");
         const int n = cJSON_IsNumber(num) ? num->valueint : -1;
-        const int all = !strcmp(part, "*") || custom_apply_to_all(n);
+        const cJSON *graph = graph_def(entry); // shaderDef || shaders[shaderNum] (deob-10.0.7.js:207999)
+        const int all = !strcmp(part, "*") || (graph ? cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetObjectItem(entry, "shaderDef"), "applyToAll"))
+                                                     : custom_apply_to_all(n));
         for (size_t i = 0; i < model->mesh_count; i++) {
             Mesh *mesh = model->meshes[i];
             if (!mesh || !mesh->material) continue;
             const int named = !strcmp(gltf_instance_mesh_name(model, i), part);
-            if (n >= SKIN_FX_CUSTOM_FIRST && (all || named)) {
+            if (graph && (all || named)) {
+                graph_replace(mesh, entry); // frustumCulled false: KrunkNative does not cull model meshes by their bounds
+            } else if (!graph && n >= SKIN_FX_CUSTOM_FIRST && (all || named)) {
                 CustomMaterial *m = custom_material(n, entry);
                 if (!m) continue;
                 custom_replace(mesh, m);
@@ -791,6 +1001,14 @@ static void fx_custom_gltf(GltfInstance *model, const ViewerSkin *skin) {
             // matArgs on the named part's material (its own or the custom one above); refreshTextures re-reads the map,
             // which KN's per-instance BasicMaterial already holds
             const cJSON *mat = named ? cJSON_GetObjectItem(entry, "matArgs") : NULL;
+            if (mat && mesh->material->vtable == &graph_material_vtable) { // (:208037-208039) on the graph's material
+                GraphMaterial *g = (GraphMaterial *) mesh->material;
+                const cJSON *gs = cJSON_GetObjectItem(mat, "side"), *gt = cJSON_GetObjectItem(mat, "transparent"), *gd = cJSON_GetObjectItem(mat, "depthWrite");
+                if (cJSON_IsNumber(gs)) g->cull_back = gs->valueint == 0;
+                if (cJSON_IsBool(gt)) g->base.transparent = cJSON_IsTrue(gt);
+                if (cJSON_IsBool(gd)) g->depth_write = cJSON_IsTrue(gd);
+                continue;
+            }
             if (!mat || mesh->material->vtable != &basic_material_vtable) continue;
             BasicMaterial *basic = (BasicMaterial *) mesh->material;
             const cJSON *side = cJSON_GetObjectItem(mat, "side"), *transparent = cJSON_GetObjectItem(mat, "transparent"), *depth = cJSON_GetObjectItem(mat, "depthWrite");
@@ -833,6 +1051,11 @@ float skin_fx_seed_mix(const int seed) {
 }
 
 static void fx_seed_mesh(Mesh *mesh, const float seed) {
+    if (mesh && mesh->material && mesh->material->vtable == &graph_material_vtable) {
+        GraphMaterial *g = (GraphMaterial *) mesh->material;
+        if (g->seeded) g->seed = seed;
+        return;
+    }
     if (!mesh || !mesh->material || mesh->material->vtable != &custom_material_vtable) return;
     CustomMaterial *m = (CustomMaterial *) mesh->material;
     if (m->seeded) m->seed = seed;
@@ -947,6 +1170,16 @@ void skin_fx_apply(Mesh *mesh, const ViewerSkin *skin, const char *texture_key, 
     fx_env(material, skin, texture_key, model_key);
     fx_register(mesh, NULL, material, &mesh->transform, skin, 1);
 
+    // customShaderInfo["*"].shaderDef before shaders[shaderNum] (deob-10.0.7.js:206493-206514)
+    cJSON *info = skin->shader_info ? cJSON_Parse(skin->shader_info) : NULL;
+    const cJSON *star = graph_star(info);
+    const int graphed = star && graph_replace(mesh, star);
+    cJSON_Delete(info);
+    if (graphed) {
+        fx_register(mesh, NULL, NULL, &mesh->transform, skin, 0);
+        return;
+    }
+    if (star) return; // a graph that does not compile: the item's own material (the catch, :206515-206517)
     if (skin->flags2 & VS2_SHADER) {
         skin_fx_forget(mesh); // the BasicMaterial goes away (the rAnim spin stays below; a video's user with it)
         fx_use_shadertoy(mesh, skin);
@@ -987,6 +1220,13 @@ void skin_fx_apply_dye(Mesh *mesh, const ViewerSkin *dye) {
     if (!mesh || !dye || !mesh->material || mesh->material->vtable != &basic_material_vtable) return;
     // the body parts' getMat takes the dye's shaderNum and customShaderInfo (deob-10.0.4.js:173555-173556): a custom
     // shader (the Ghillie Suit's 16) replaces the part's material
+    if (dye->shader_info) { // a body part's getMat takes customShaderInfo["*"].shaderDef first, as an item's (deob-10.0.7.js:206493)
+        cJSON *info = cJSON_Parse(dye->shader_info);
+        const cJSON *star = graph_star(info);
+        const int graphed = star && graph_replace(mesh, star);
+        cJSON_Delete(info);
+        if (graphed) return;
+    }
     if ((dye->flags2 & VS2_SHADER) && dye->shader_num >= SKIN_FX_CUSTOM_FIRST && (dye->shader_info || custom_is_graph(dye->shader_num))) {
         fx_use_shadertoy(mesh, dye);
         if (mesh->material->vtable != &basic_material_vtable) return;

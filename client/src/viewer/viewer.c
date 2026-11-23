@@ -918,7 +918,9 @@ const AppPage *viewer_app_page(void) {
 static struct {
     int active;
     int index;
-    char query[8192]; // the iframe's query: the shown copy's wear / paint / seed with the index (or the skin's JSON)
+    // the iframe's query: the shown copy's wear / paint / seed with the index (or the skin's JSON, with a Shader Studio
+    // graph as customShaderInfo: tens of KB encoded)
+    char query[65536];
 } g_embed;
 
 void viewer_embed_fini(void) {

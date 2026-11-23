@@ -12,6 +12,16 @@
 // Documented differences: viewportSharedTexture samples the pass input (three copies the pass's own target,
 // which holds the frame from two passes ago); viewportDepthTexture / viewportLinearDepth read 1 (a pass target's
 // depth is never written: the far plane).
+//
+// Kind "surface" (a skin's shaderDef, the material iïììiíí builds, deob:95813-95847) compiles to a vertex and a
+// fragment shader for a mesh (mod_shader_graph_compile_surface): the inputs are the mesh's own (deob:94840-94976 with
+// the material ctx of :95814-95826: uv, time, seed, the "map" slot the mesh's texture, baseColor that texture or white),
+// positionOffset becomes the vertex position (three's positionNode replaces positionLocal) and is compiled a second
+// time for the vertex stage, where dFdx / dFdy / fwidth read 0. Differences: uv(index > 0) is uv 0 (KrunkNative meshes
+// carry one uv set), tangents are zero (no tangent attributes, as the node descriptions say for such geometry),
+// vertexColor is white (no colour attribute), the "map" slot of a mesh without a texture reads (0, 0, 0, 1) (WebGL's
+// incomplete-texture black), textureBicubic samples the mip level strength * maxMip directly, and a lit graph is lit as
+// basic.frag lights a Lambert surface: the ambient and the map's sun (no point lights or shadows).
 #include <mod_shader.h>
 #include <cJSON.h>
 #include <math.h>
@@ -67,8 +77,16 @@ static const MsgNodeDef *node_def(const char *type) {
     return NULL;
 }
 
-// the post kind's output ports (iíîíîií.post, deob:94232-94236): one vec4 colour, no params
-static const MsgPort k_post_output = {"color", MSG_T_VEC4, 0, {0}};
+// the output node's ports and params per kind (iíîíîií, deob:94230-94253): a surface graph's colour (vec3), alpha,
+// emissive, positionOffset and normal with the five material settings; a paint graph's vec3 colour; a post graph's vec4
+// colour; neither of the last two takes params
+static int output_port_allowed(const char *kind, const char *port) {
+    if (!kind || !strcmp(kind, "post") || !strcmp(kind, "paint")) return !strcmp(port, "color");
+    return !strcmp(port, "color") || !strcmp(port, "alpha") || !strcmp(port, "emissive") || !strcmp(port, "positionOffset") ||
+           !strcmp(port, "normal");
+}
+
+static int output_param_allowed(const char *kind) { return kind && !strcmp(kind, "surface"); }
 
 // ---------------------------------------------------------------- small helpers
 
@@ -251,7 +269,8 @@ static const char *param_error(const MsgParamDef *p, const cJSON *v, char *tmp, 
 }
 
 // iîïîíîî: a node's params
-static void check_params(const cJSON *node, const char *id, const char *type, const MsgNodeDef *def, char *err, const size_t errn) {
+static void check_params(const cJSON *node, const char *id, const char *type, const MsgNodeDef *def, const char *kind, char *err,
+                         const size_t errn) {
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(node, "params");
     const int is_output = !strcmp(type, "output");
     if (!params) {
@@ -264,7 +283,7 @@ static void check_params(const cJSON *node, const char *id, const char *type, co
     }
     for (const cJSON *p = params->child; p; p = p->next) {
         const MsgParamDef *spec = NULL;
-        if (!is_output) // the post kind's output node takes no params (iíîíîií.post.params, deob:94235)
+        if (!is_output || output_param_allowed(kind)) // the output's are its kind's (iíîíîií[kind].params, deob:94307)
             for (int i = 0; i < def->nparams; i++)
                 if (!strcmp(def->params[i].name, p->string)) spec = &def->params[i];
         if (!spec) {
@@ -316,8 +335,8 @@ static const cJSON *find_node(const cJSON *nodes, const char *id) {
 }
 
 // iiíìïîì: a node's inputs
-static void check_inputs(const cJSON *node, const char *id, const char *type, const MsgNodeDef *def, const cJSON *nodes, char *err,
-                         const size_t errn) {
+static void check_inputs(const cJSON *node, const char *id, const char *type, const MsgNodeDef *def, const cJSON *nodes,
+                         const char *kind, char *err, const size_t errn) {
     const cJSON *inputs = cJSON_GetObjectItemCaseSensitive(node, "inputs");
     if (!inputs) return;
     if (!is_obj(inputs)) {
@@ -326,7 +345,7 @@ static void check_inputs(const cJSON *node, const char *id, const char *type, co
     }
     const int is_output = !strcmp(type, "output");
     for (const cJSON *in = inputs->child; in; in = in->next) {
-        int known = is_output ? !strcmp(in->string, k_post_output.name) : 0;
+        int known = is_output ? output_port_allowed(kind, in->string) : 0; // iíîíîií[kind].inputs (deob:94381)
         for (int i = 0; !is_output && i < def->nin && !known; i++) known = !strcmp(def->in[i].name, in->string);
         if (!known) {
             set_err(err, errn, id, "unknown input port \"%s\" for %s", in->string, type);
@@ -461,7 +480,7 @@ int mod_shader_graph_validate(const cJSON *graph, const char *kind, char *err, c
         if (def->kinds == 1 && strcmp(gkind, "post")) set_err(err, err_size, id, "node type \"%s\" is only allowed in post graphs", type);
         if (!strcmp(type, "param")) param_nodes++;
         if (!strcmp(type, "output")) outputs++;
-        check_params(n, id, type, def, err, err_size);
+        check_params(n, id, type, def, gkind, err, err_size);
     }
     if (param_nodes > MSG_MAX_PARAM_NODES) set_err(err, err_size, NULL, "too many param nodes (max %d)", MSG_MAX_PARAM_NODES);
     for (int i = 0; i < listed; i++) { // duplicate param names
@@ -482,7 +501,9 @@ int mod_shader_graph_validate(const cJSON *graph, const char *kind, char *err, c
     for (int i = 0; i < listed; i++) {
         const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(list[i], "type"));
         const MsgNodeDef *def = node_def(type);
-        if (def) check_inputs(list[i], cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(list[i], "id")), type, def, nodes, err, err_size);
+        if (def)
+            check_inputs(list[i], cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(list[i], "id")), type, def, nodes, gkind, err,
+                         err_size);
     }
     if (outputs != 1) set_err(err, err_size, NULL, "graph must have exactly one output node (found %d)", outputs);
     const char *out = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(graph, "output"));
@@ -693,7 +714,11 @@ typedef struct {
     size_t errn;
     int failed;
     int serial; // the next temporary's number
+    int mode;   // MSG_MODE_*
+    const char *uv; // ctx.uv(): screenUV in a post pass, the mesh's uv otherwise
 } MsgCtx;
+
+enum { MSG_MODE_POST, MSG_MODE_FRAGMENT, MSG_MODE_VERTEX };
 
 static const char *const TN[5] = {"float", "float", "vec2", "vec3", "vec4"};
 
@@ -843,8 +868,33 @@ static const char *param_str(const cJSON *params, const MsgNodeDef *d, const cha
     return NULL;
 }
 
+// a surface graph's inputs (iÍïïîïi, deob:94840-94976, with the material ctx of :95814-95826): locals the stage's
+// main() sets up before the graph (surface_locals below), the same names in both stages
+static const char *surface_input_expr(const char *type) {
+    static const struct { const char *type, *expr; } T[] = {
+        {"uv", "kn_uv"}, {"time", "kn_time"}, {"seed", "kn_seed"}, {"deltaTime", "kn_delta"},
+        {"position", "kn_plocal"}, {"worldPosition", "kn_pworld"}, {"positionView", "kn_pview"},
+        {"positionWorldDirection", "normalize(kn_pworld - kn_cam)"},
+        {"normal", "kn_nworld"}, {"normalLocal", "kn_nlocal"}, {"normalView", "kn_nview"}, {"normalGeometry", "kn_nlocal"},
+        {"tangentLocal", "vec3(0.0)"}, {"tangentView", "vec3(0.0)"}, {"tangentWorld", "vec3(0.0)"}, {"bitangentLocal", "vec3(0.0)"},
+        {"bitangentView", "vec3(0.0)"}, {"bitangentWorld", "vec3(0.0)"}, {"viewDir", "normalize(-kn_pview)"},
+        {"reflectView", "reflect(normalize(kn_pview), kn_nview)"},
+        {"reflectVector", "normalize(transpose(mat3(camera_world_inverse)) * reflect(normalize(kn_pview), kn_nview))"},
+        {"matcapUV", "kn_matcap(normalize(-kn_pview), kn_nview)"}, {"cameraPosition", "kn_cam"}, {"cameraNear", "kn_near"},
+        {"cameraFar", "kn_far"}, {"modelPosition", "transform[3].xyz"}, {"modelScale", "kn_mscale"},
+        {"modelDirection", "normalize(mat3(transform) * vec3(0.0, 0.0, 1.0))"}, {"screenUV", "kn_suv"}, {"screenCoordinate", "kn_scoord"},
+        {"screenSize", "kn_resolution"}, {"screenDPR", "kn_dpr"}, {"resolution", "kn_resolution"}, {"viewportUV", "kn_suv"},
+        {"viewportSize", "kn_resolution"}, {"frontFacing", "kn_front"}, {"vertexIndex", "kn_vindex"}, {"instanceIndex", "0.0"},
+        {"baseColor", "kn_base"}, {"vertexColor", "vec3(1.0)"},
+    };
+    for (size_t i = 0; i < sizeof(T) / sizeof(T[0]); i++)
+        if (!strcmp(T[i].type, type)) return T[i].expr;
+    return NULL;
+}
+
 // the post pass's mesh / screen inputs (iÍïïîïi, deob:94840-94976, with the post ctx of deob:205886-205898)
-static const char *input_node_expr(const char *type, const cJSON *params) {
+static const char *input_node_expr(const MsgCtx *c, const char *type, const cJSON *params) {
+    if (c->mode != MSG_MODE_POST) return surface_input_expr(type);
     static const struct { const char *type, *expr; } T[] = {
         {"time", "kn_time"}, {"seed", "0.0"}, {"deltaTime", "kn_delta"},
         {"position", "vec3(kn_ndc, 0.0)"}, {"worldPosition", "vec3(kn_ndc, 0.0)"}, {"positionView", "vec3(kn_ndc, 0.0)"},
@@ -871,7 +921,14 @@ static const char *input_node_expr(const char *type, const cJSON *params) {
 
 // a param node's uniform (deob:95037-95105): its default (a colour, a clamped float, an array), else the instance
 // value shaderArgs.params[name] when it fits the type
-static int param_uniform(MsgCtx *c, const cJSON *params, MsgVal *out) {
+static int param_uniform(MsgCtx *c, const int ni, const cJSON *params, MsgVal *out) {
+    const char *node_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(c->node[ni], "id"));
+    for (int i = 0; node_id && i < c->prog->uniform_count; i++) // the other stage's (a surface graph)
+        if (!strcmp(c->prog->uniforms[i].node, node_id)) {
+            snprintf(out->expr, sizeof(out->expr), "u_p%d", i);
+            out->width = c->prog->uniforms[i].width;
+            return 1;
+        }
     if (c->prog->uniform_count >= MOD_SHADER_MAX_UNIFORMS) return 0;
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(params, "name"));
     const char *ptype = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(params, "type"));
@@ -881,6 +938,7 @@ static int param_uniform(MsgCtx *c, const cJSON *params, MsgVal *out) {
     ModShaderUniform *u = &c->prog->uniforms[c->prog->uniform_count];
     memset(u, 0, sizeof(*u));
     snprintf(u->name, sizeof(u->name), "%s", name ? name : "param");
+    snprintf(u->node, sizeof(u->node), "%s", node_id ? node_id : "");
     u->width = w;
     const cJSON *lo = cJSON_GetObjectItemCaseSensitive(params, "min"), *hi = cJSON_GetObjectItemCaseSensitive(params, "max");
     const cJSON *d = cJSON_GetObjectItemCaseSensitive(params, "default");
@@ -932,7 +990,7 @@ static int compile_node(MsgCtx *c, const int ni) {
     const char *t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(node, "type"));
     const MsgNodeDef *d = c->def[ni];
     const cJSON *params = cJSON_GetObjectItemCaseSensitive(node, "params");
-    const char *ie = input_node_expr(t, params);
+    const char *ie = input_node_expr(c, t, params);
     char a[256], b[256];
 
     if (ie) {
@@ -967,13 +1025,34 @@ static int compile_node(MsgCtx *c, const int ni) {
                       : !strcmp(k, "HALF_PI") ? "1.5707963267948966" : "1e-6";
         OUT1(1, "%s", v);
     } else if (!strcmp(t, "param")) {
-        if (!param_uniform(c, params, &s->out[0])) return 0;
+        if (!param_uniform(c, ni, params, &s->out[0])) return 0;
         s->names[0] = "out";
         s->nout = 1;
     } else if (!strcmp(t, "texture") || !strcmp(t, "textureBicubic") || !strcmp(t, "triplanarTexture")) {
-        // no texture slots in a post pass: white (iîíííîî null -> vec4(1, 1, 1, 1))
+        // no texture slots in a post pass: white (iîíííîî null -> vec4(1, 1, 1, 1)); a surface graph's ctx.textures holds
+        // only "map", the mesh's texture (deob:95819-95821, :95083-95110)
         MsgVal v;
-        emit_var(c, &v, 4, "vec4(1.0)");
+        const char *slot = param_str(params, d, "slot");
+        if (c->mode == MSG_MODE_POST || (slot && strcmp(slot, "map"))) {
+            emit_var(c, &v, 4, "vec4(1.0)");
+        } else if (!strcmp(t, "texture")) {
+            char lv[256];
+            const int has_level = input(c, ni, "level", 1, lv, sizeof(lv));
+            if (!input(c, ni, "uv", 2, a, sizeof(a))) snprintf(a, sizeof(a), "%s", c->uv);
+            if (has_level) emit_var(c, &v, 4, "kn_map_lod(%s, %s)", a, lv);
+            else emit_var(c, &v, 4, "kn_map_at(%s)", a);
+        } else if (!strcmp(t, "textureBicubic")) { // three's textureBicubic: the level strength * maxMipLevel
+            char st[256];
+            if (!input(c, ni, "uv", 2, a, sizeof(a))) snprintf(a, sizeof(a), "%s", c->uv);
+            if (!input(c, ni, "strength", 1, st, sizeof(st))) snprintf(st, sizeof(st), "0.5");
+            emit_var(c, &v, 4, "kn_map_lod(%s, (%s) * kn_map_max_mip())", a, st);
+        } else { // three's triplanarTexture (positionLocal / normalLocal by default, deob:95106-95110)
+            char sc[256], po[256], no[256];
+            if (!input(c, ni, "scale", 1, sc, sizeof(sc))) snprintf(sc, sizeof(sc), "1.0");
+            if (!input(c, ni, "position", 3, po, sizeof(po))) snprintf(po, sizeof(po), "kn_plocal");
+            if (!input(c, ni, "normal", 3, no, sizeof(no))) snprintf(no, sizeof(no), "kn_nlocal");
+            emit_var(c, &v, 4, "kn_triplanar(%s, %s, %s)", po, no, sc);
+        }
         const char *names[3] = {"rgb", "a", "rgba"};
         MsgVal vals[3];
         snprintf(vals[0].expr, sizeof(vals[0].expr), "%.32s.xyz", v.expr);
@@ -983,7 +1062,9 @@ static int compile_node(MsgCtx *c, const int ni) {
         vals[2] = v;
         set_outs(s, 3, names, vals);
     } else if (!strcmp(t, "textureSize")) {
-        OUT1(2, "vec2(1.0)");
+        const char *slot = param_str(params, d, "slot");
+        if (c->mode == MSG_MODE_POST || (slot && strcmp(slot, "map"))) OUT1(2, "vec2(1.0)");
+        else OUT1(2, "vec2(textureSize(kn_map, 0))");
     } else if (!strcmp(t, "sceneColor") || !strcmp(t, "viewportSharedTexture")) {
         if (!input(c, ni, "uv", 2, a, sizeof(a))) snprintf(a, sizeof(a), "kn_suv");
         OUT1(4, "kn_scene(%s)", a);
@@ -1228,7 +1309,7 @@ static int compile_node(MsgCtx *c, const int ni) {
     } else if (!strcmp(t, "rampLR") || !strcmp(t, "rampTB") || !strcmp(t, "splitLR") || !strcmp(t, "splitTB")) {
         const int w = maxi(in_width(c, ni, "a"), in_width(c, ni, "b"));
         char uv[256];
-        if (!input(c, ni, "uv", 2, uv, sizeof(uv))) snprintf(uv, sizeof(uv), "kn_suv"); // iÌíîîíí: ctx.uv()
+        if (!input(c, ni, "uv", 2, uv, sizeof(uv))) snprintf(uv, sizeof(uv), "%s", c->uv); // iÌíîîíí: ctx.uv()
         if (!input(c, ni, "a", w, a, sizeof(a)) || !input(c, ni, "b", w, b, sizeof(b))) return 0;
         const char axis = t[strlen(t) - 2] == 'L' ? 'x' : 'y';
         if (t[0] == 'r') OUT1(w, "mix(%s, %s, clamp((%s).%c, 0.0, 1.0))", a, b, uv, axis);
@@ -1275,13 +1356,13 @@ static int compile_node(MsgCtx *c, const int ni) {
         OUT1(2, "kn_rotate2((%s) - (%s), %s) + (%s)", uv, ce, an, ce);
     } else if (!strcmp(t, "spherizeUV")) {
         char uv[256];
-        if (!input(c, ni, "uv", 2, uv, sizeof(uv))) snprintf(uv, sizeof(uv), "kn_suv");
+        if (!input(c, ni, "uv", 2, uv, sizeof(uv))) snprintf(uv, sizeof(uv), "%s", c->uv);
         IN("strength", 1, sg);
         IN("center", 2, ce);
         OUT1(2, "kn_spherize(%s, %s, %s)", uv, sg, ce);
     } else if (!strcmp(t, "spritesheetUV")) {
         char uv[256];
-        if (!input(c, ni, "uv", 2, uv, sizeof(uv))) snprintf(uv, sizeof(uv), "kn_suv");
+        if (!input(c, ni, "uv", 2, uv, sizeof(uv))) snprintf(uv, sizeof(uv), "%s", c->uv);
         IN("count", 2, ct);
         IN("frame", 1, fr);
         OUT1(2, "kn_spritesheet(%s, %s, %s)", ct, uv, fr);
@@ -1291,7 +1372,7 @@ static int compile_node(MsgCtx *c, const int ni) {
         OUT1(2, "kn_equirect_uv(%s)", dir);
     } else if (!strcmp(t, "equirectDirection")) {
         char uv[256];
-        if (!input(c, ni, "uv", 2, uv, sizeof(uv))) snprintf(uv, sizeof(uv), "kn_suv");
+        if (!input(c, ni, "uv", 2, uv, sizeof(uv))) snprintf(uv, sizeof(uv), "%s", c->uv);
         OUT1(3, "kn_equirect_dir(%s)", uv);
     } else if (!strcmp(t, "polar")) {
         IN("uv", 2, uv);
@@ -1354,37 +1435,49 @@ static int compile_node(MsgCtx *c, const int ni) {
     return !c->body.oom;
 }
 
-int mod_shader_graph_compile(const cJSON *graph, const cJSON *params, ModShaderProgram *out, char *err, const size_t err_size) {
-    if (!out) return 0;
-    memset(out, 0, sizeof(*out));
-    if (!mod_shader_graph_validate(graph, "post", err, err_size)) return 0;
+static int ctx_init(MsgCtx *c, const cJSON *graph, const cJSON *params, ModShaderProgram *out, char *err, const size_t err_size,
+                    const int mode) {
     const cJSON *nodes = cJSON_GetObjectItemCaseSensitive(graph, "nodes");
-    MsgCtx c = {0};
-    c.nodes = nodes;
-    c.count = cJSON_GetArraySize(nodes);
-    c.node = calloc((size_t) c.count, sizeof(*c.node));
-    c.def = calloc((size_t) c.count, sizeof(*c.def));
-    c.st = calloc((size_t) c.count, sizeof(*c.st));
-    c.instance = params;
-    c.prog = out;
-    c.err = err;
-    c.errn = err_size;
-    if (!c.node || !c.def || !c.st) {
-        free(c.node);
-        free(c.def);
-        free(c.st);
+    memset(c, 0, sizeof(*c));
+    c->nodes = nodes;
+    c->count = cJSON_GetArraySize(nodes);
+    c->node = calloc((size_t) c->count, sizeof(*c->node));
+    c->def = calloc((size_t) c->count, sizeof(*c->def));
+    c->st = calloc((size_t) c->count, sizeof(*c->st));
+    c->instance = params;
+    c->prog = out;
+    c->err = err;
+    c->errn = err_size;
+    c->mode = mode;
+    c->uv = mode == MSG_MODE_POST ? "kn_suv" : "kn_uv";
+    if (!c->node || !c->def || !c->st) {
         set_err(err, err_size, NULL, "out of memory");
         return 0;
     }
     int i = 0;
     for (const cJSON *n = nodes->child; n; n = n->next, i++) {
-        c.node[i] = n;
-        c.def[i] = node_def(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(n, "type")));
+        c->node[i] = n;
+        c->def[i] = node_def(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(n, "type")));
     }
-    // the graph's param list (iìiîííî): the Settings rows
-    for (int k = 0; k < c.count && out->param_count < MOD_SHADER_MAX_UNIFORMS; k++) {
-        if (strcmp(c.def[k]->type, "param")) continue;
-        const cJSON *p = cJSON_GetObjectItemCaseSensitive(c.node[k], "params");
+    return 1;
+}
+
+static void ctx_free(MsgCtx *c) {
+    free(c->body.data);
+    free(c->node);
+    free(c->def);
+    free(c->st);
+    c->body.data = NULL;
+    c->node = NULL;
+    c->def = NULL;
+    c->st = NULL;
+}
+
+// the graph's param list (iìiîííî, deob:95848-95870): the Settings rows
+static void graph_params(const MsgCtx *c, ModShaderProgram *out) {
+    for (int k = 0; k < c->count && out->param_count < MOD_SHADER_MAX_UNIFORMS; k++) {
+        if (strcmp(c->def[k]->type, "param")) continue;
+        const cJSON *p = cJSON_GetObjectItemCaseSensitive(c->node[k], "params");
         const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(p, "name"));
         if (!name) continue;
         ModShaderParam *mp = &out->params[out->param_count++];
@@ -1400,6 +1493,18 @@ int mod_shader_graph_compile(const cJSON *graph, const cJSON *params, ModShaderP
         mp->has_max = cJSON_IsNumber(hi);
         mp->max = mp->has_max ? hi->valuedouble : 0.0;
     }
+}
+
+int mod_shader_graph_compile(const cJSON *graph, const cJSON *params, ModShaderProgram *out, char *err, const size_t err_size) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    if (!mod_shader_graph_validate(graph, "post", err, err_size)) return 0;
+    MsgCtx c;
+    if (!ctx_init(&c, graph, params, out, err, err_size, MSG_MODE_POST)) {
+        ctx_free(&c);
+        return 0;
+    }
+    graph_params(&c, out);
     const char *out_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(graph, "output"));
     const int oi = node_index(&c, out_id);
     char color[256] = "vec4(0.0, 0.0, 0.0, 1.0)"; // (deob:95527-95531) no colour input: black
@@ -1431,12 +1536,201 @@ int mod_shader_graph_compile(const cJSON *graph, const cJSON *params, ModShaderP
             ok = 0;
         } else out->fragment = src.data;
     }
-    free(c.body.data);
-    free(c.node);
-    free(c.def);
-    free(c.st);
+    ctx_free(&c);
     if (!ok) {
         set_err(err, err_size, NULL, "the graph did not compile");
+        mod_shader_program_free(out);
+    }
+    return ok;
+}
+
+// ---------------------------------------------------------------- kind "surface": a mesh's material
+
+// The uniforms both stages declare (mod_shader.h's interface)
+static const char k_surface_uniforms[] =
+    "uniform mat4 transform;\n"
+    "uniform mat4 camera_world_inverse;\n"
+    "uniform mat4 camera_projection;\n"
+    "uniform sampler2D kn_map;\n"
+    "uniform float kn_has_map;\n"
+    "uniform float kn_time;\n"
+    "uniform float kn_delta;\n"
+    "uniform float kn_seed;\n"
+    "uniform vec2 kn_resolution;\n"
+    "uniform float kn_dpr;\n";
+
+// The map slot (deob:95083-95100, the material's "map" texture node), matcapUV (three's: the view direction's frame
+// around the view normal, scaled by 0.495) and triplanarTexture (three's: the |normal| weights over the yz / zx / xy
+// projections of the scaled position). KN_TEX(uv) / KN_TEX_LOD(uv, lod) are the stage's sampling.
+static const char k_surface_lib[] =
+    "vec4 kn_map_at(vec2 uv) { return kn_has_map > 0.5 ? KN_TEX(uv) : vec4(0.0, 0.0, 0.0, 1.0); }\n"
+    "vec4 kn_map_lod(vec2 uv, float lod) { return kn_has_map > 0.5 ? textureLod(kn_map, uv, lod) : vec4(0.0, 0.0, 0.0, 1.0); }\n"
+    "float kn_map_max_mip() { vec2 s = vec2(textureSize(kn_map, 0)); return floor(log2(max(max(s.x, s.y), 1.0))); }\n"
+    "vec2 kn_matcap(vec3 vdir, vec3 n) {\n"
+    "  vec3 x = normalize(vec3(vdir.z, 0.0, -vdir.x)); vec3 y = cross(vdir, x);\n"
+    "  return vec2(dot(x, n), dot(y, n)) * 0.495 + 0.5;\n"
+    "}\n"
+    "vec4 kn_triplanar(vec3 p, vec3 n, float s) {\n"
+    "  vec3 bf = normalize(abs(n)); bf /= dot(bf, vec3(1.0));\n"
+    "  vec3 q = p * s;\n"
+    "  return kn_map_at(q.yz) * bf.x + kn_map_at(q.zx) * bf.y + kn_map_at(q.xy) * bf.z;\n"
+    "}\n";
+
+// The locals the graph's input nodes read (surface_input_expr), per stage
+static const char k_surface_vertex_locals[] =
+    "  vec2 kn_uv = v_tex_coord;\n"
+    "  vec3 kn_plocal = v_pos;\n"
+    "  vec3 kn_pworld = (transform * vec4(v_pos, 1.0)).xyz;\n"
+    "  vec3 kn_pview = (camera_world_inverse * vec4(kn_pworld, 1.0)).xyz;\n"
+    "  vec3 kn_mscale = vec3(length(transform[0].xyz), length(transform[1].xyz), length(transform[2].xyz));\n"
+    "  vec3 kn_nlocal = dot(v_normal, v_normal) > 0.0 ? normalize(v_normal) : vec3(0.0, 0.0, 1.0);\n"
+    "  vec3 kn_nview = normalize(transpose(inverse(mat3(camera_world_inverse * transform))) * kn_nlocal);\n"
+    "  vec3 kn_nworld = normalize(transpose(mat3(camera_world_inverse)) * kn_nview);\n"
+    "  vec3 kn_cam = inverse(camera_world_inverse)[3].xyz;\n"
+    "  float kn_near = camera_projection[3][2] / (camera_projection[2][2] - 1.0);\n"
+    "  float kn_far = camera_projection[3][2] / (camera_projection[2][2] + 1.0);\n"
+    "  vec4 kn_clip0 = camera_projection * vec4(kn_pview, 1.0);\n"
+    "  vec2 kn_suv = vec2(kn_clip0.x / kn_clip0.w * 0.5 + 0.5, 0.5 - kn_clip0.y / kn_clip0.w * 0.5);\n"
+    "  vec2 kn_scoord = kn_suv * kn_resolution;\n"
+    "  float kn_front = 1.0;\n"
+    "  float kn_vindex = float(gl_VertexID);\n"
+    "  vec3 kn_base = kn_has_map > 0.5 ? textureLod(kn_map, kn_uv, 0.0).rgb : vec3(1.0);\n";
+
+static const char k_surface_fragment_locals[] =
+    "  vec2 kn_uv = vUv;\n"
+    "  vec3 kn_plocal = vLocal;\n"
+    "  vec3 kn_pworld = vWorld;\n"
+    "  vec3 kn_pview = vView;\n"
+    "  vec3 kn_mscale = vScale;\n"
+    "  vec3 kn_nlocal = dot(vNormal, vNormal) > 0.0 ? normalize(vNormal) : normalize(cross(dFdx(vLocal), dFdy(vLocal)));\n"
+    "  vec3 kn_nview = dot(vNormalView, vNormalView) > 0.0 ? normalize(vNormalView) : normalize(cross(dFdx(vView), dFdy(vView)));\n"
+    "  vec3 kn_nworld = normalize(transpose(mat3(camera_world_inverse)) * kn_nview);\n"
+    "  vec3 kn_cam = inverse(camera_world_inverse)[3].xyz;\n"
+    "  float kn_near = camera_projection[3][2] / (camera_projection[2][2] - 1.0);\n"
+    "  float kn_far = camera_projection[3][2] / (camera_projection[2][2] + 1.0);\n"
+    "  vec2 kn_scoord = vec2(gl_FragCoord.x, kn_resolution.y - gl_FragCoord.y);\n"
+    "  vec2 kn_suv = kn_scoord / kn_resolution;\n"
+    "  float kn_front = gl_FrontFacing ? 1.0 : 0.0;\n"
+    "  float kn_vindex = 0.0;\n"
+    "  vec3 kn_base = kn_has_map > 0.5 ? texture(kn_map, kn_uv).rgb : vec3(1.0);\n";
+
+static int output_bool(const cJSON *params, const char *name, const int def) {
+    const cJSON *v = is_obj(params) ? cJSON_GetObjectItemCaseSensitive(params, name) : NULL;
+    return cJSON_IsBool(v) ? cJSON_IsTrue(v) : def;
+}
+
+static const char *output_enum(const cJSON *params, const char *name, const char *def) {
+    const char *v = is_obj(params) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(params, name)) : NULL;
+    return v ? v : def;
+}
+
+static void declare_uniforms(Buf *src, const ModShaderProgram *out) {
+    buf_puts(src, k_surface_uniforms);
+    for (int u = 0; u < out->uniform_count; u++) buf_printf(src, "uniform %s u_p%d;\n", TN[out->uniforms[u].width], u);
+}
+
+int mod_shader_graph_compile_surface(const cJSON *graph, const cJSON *params, ModShaderProgram *out, char *err, const size_t err_size) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    if (!mod_shader_graph_validate(graph, "surface", err, err_size)) return 0;
+    const char *out_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(graph, "output"));
+    const cJSON *on = find_node(cJSON_GetObjectItemCaseSensitive(graph, "nodes"), out_id);
+    // the settings (deob:95575-95585): the output node's params over the defaults, as the material takes them (:95840-95845)
+    const cJSON *op = cJSON_GetObjectItemCaseSensitive(on, "params");
+    out->lit = output_bool(op, "lit", 0);
+    out->double_sided = strcmp(output_enum(op, "side", "double"), "front") != 0;
+    out->additive = !strcmp(output_enum(op, "blend", "normal"), "additive");
+    out->depth_write = output_bool(op, "depthWrite", 1);
+    out->transparent = output_bool(op, "transparent", 1);
+
+    // the vertex stage: positionOffset only (positionNode, :95839)
+    MsgCtx v = {0}, f = {0};
+    int ok = ctx_init(&v, graph, params, out, err, err_size, MSG_MODE_VERTEX);
+    const int vo = ok ? node_index(&v, out_id) : -1;
+    ok = ok && vo >= 0 && compile_node(&v, vo);
+    char position[256] = "kn_plocal";
+    MsgVal val;
+    if (ok && connected(&v, vo, "positionOffset", &val)) convert(position, sizeof(position), &val, 3);
+    ok = ok && !v.failed && !v.body.oom;
+
+    // the fragment stage: colour, alpha, emissive, normal (:95830-95836)
+    ok = ok && ctx_init(&f, graph, params, out, err, err_size, MSG_MODE_FRAGMENT);
+    const int fo = ok ? node_index(&f, out_id) : -1;
+    ok = ok && fo >= 0 && compile_node(&f, fo);
+    char color[256] = "vec3(0.0)", alpha[256] = "1.0", emissive[256] = "", normal[256] = "";
+    if (ok && connected(&f, fo, "color", &val)) convert(color, sizeof(color), &val, 3);
+    if (ok && connected(&f, fo, "alpha", &val)) convert(alpha, sizeof(alpha), &val, 1);
+    if (ok && connected(&f, fo, "emissive", &val)) convert(emissive, sizeof(emissive), &val, 3);
+    if (ok && connected(&f, fo, "normal", &val)) convert(normal, sizeof(normal), &val, 3);
+    ok = ok && !f.failed && !f.body.oom;
+    if (ok) graph_params(&f, out);
+
+    if (ok) {
+        Buf vs = {0};
+        buf_puts(&vs, "layout (location = 0) in vec3 v_pos;\nlayout (location = 1) in vec2 v_tex_coord;\nlayout (location = 3) in vec3 v_normal;\n");
+        buf_puts(&vs, "out vec2 vUv;\nout vec3 vLocal;\nout vec3 vNormal;\nout vec3 vView;\nout vec3 vWorld;\nout vec3 vScale;\nout vec3 vNormalView;\n");
+        declare_uniforms(&vs, out);
+        // no derivatives in a vertex stage: 0 (the library's kn_aastep included)
+        buf_puts(&vs, "#define dFdx(x) ((x) * 0.0)\n#define dFdy(x) ((x) * 0.0)\n#define fwidth(x) ((x) * 0.0)\n");
+        buf_puts(&vs, "#define KN_TEX(uv) textureLod(kn_map, uv, 0.0)\n");
+        buf_puts(&vs, k_lib_common);
+        if (v.noise) buf_puts(&vs, k_lib_noise);
+        buf_puts(&vs, k_surface_lib);
+        buf_puts(&vs, "void main() {\n");
+        buf_puts(&vs, k_surface_vertex_locals);
+        if (v.body.data) buf_puts(&vs, v.body.data);
+        buf_printf(&vs, "  vec3 kn_position = %s;\n", position);
+        buf_puts(&vs, "  vec4 world = transform * vec4(kn_position, 1.0);\n"
+                      "  vec4 view = camera_world_inverse * world;\n"
+                      "  vUv = v_tex_coord;\n"
+                      "  vLocal = kn_position;\n"
+                      "  vNormal = v_normal;\n"
+                      "  vWorld = world.xyz;\n"
+                      "  vView = view.xyz;\n"
+                      "  vScale = kn_mscale;\n"
+                      "  vNormalView = dot(v_normal, v_normal) > 0.0 ? transpose(inverse(mat3(camera_world_inverse * transform))) * v_normal : vec3(0.0);\n"
+                      "  gl_Position = camera_projection * view;\n"
+                      "}\n");
+
+        Buf fs = {0};
+        buf_puts(&fs, "in vec2 vUv;\nin vec3 vLocal;\nin vec3 vNormal;\nin vec3 vView;\nin vec3 vWorld;\nin vec3 vScale;\nin vec3 vNormalView;\n");
+        declare_uniforms(&fs, out);
+        if (out->lit) buf_puts(&fs, "uniform vec3 kn_ambient;\nuniform vec3 kn_sun;\nuniform vec3 kn_sun_dir;\n");
+        buf_puts(&fs, "out vec4 kn_frag_color;\n#define KN_TEX(uv) texture(kn_map, uv)\n");
+        buf_puts(&fs, k_lib_common);
+        if (f.noise) buf_puts(&fs, k_lib_noise);
+        buf_puts(&fs, k_surface_lib);
+        buf_puts(&fs, "void main() {\n");
+        buf_puts(&fs, k_surface_fragment_locals);
+        if (f.body.data) buf_puts(&fs, f.body.data);
+        buf_printf(&fs, "  vec3 kn_color = %s;\n  float kn_alpha = %s;\n", color, alpha);
+        if (out->lit) {
+            // MeshLambertNodeMaterial: colorNode, emissiveNode, normalNode = transformNormalByViewMatrix(normal) (:95836-95840);
+            // without a normal port the view normal, turned to the viewer on a back face (three's faceDirection)
+            if (normal[0]) buf_printf(&fs, "  vec3 kn_n = normalize(mat3(camera_world_inverse) * (%s));\n", normal);
+            else buf_puts(&fs, "  vec3 kn_n = gl_FrontFacing ? kn_nview : -kn_nview;\n");
+            buf_puts(&fs, "  vec3 kn_l = normalize(mat3(camera_world_inverse) * kn_sun_dir);\n"
+                          "  vec3 kn_rgb = (kn_ambient + kn_sun * clamp(dot(kn_n, kn_l), 0.0, 1.0)) * kn_color / KN_PI;\n");
+            if (emissive[0]) buf_printf(&fs, "  kn_rgb += %s;\n", emissive);
+        } else {
+            // MeshBasicNodeMaterial: colorNode vec4(color (+ emissive), 1) (:95837-95838)
+            buf_puts(&fs, "  vec3 kn_rgb = kn_color;\n");
+            if (emissive[0]) buf_printf(&fs, "  kn_rgb += %s;\n", emissive);
+        }
+        buf_puts(&fs, "  kn_frag_color = vec4(kn_rgb, kn_alpha);\n}\n");
+        if (vs.oom || fs.oom) {
+            free(vs.data);
+            free(fs.data);
+            ok = 0;
+        } else {
+            out->vertex = vs.data;
+            out->fragment = fs.data;
+        }
+    }
+    ctx_free(&v);
+    ctx_free(&f);
+    if (!ok) {
+        if (!(err && err[0])) set_err(err, err_size, NULL, "the graph did not compile");
         mod_shader_program_free(out);
     }
     return ok;
@@ -1445,5 +1739,7 @@ int mod_shader_graph_compile(const cJSON *graph, const cJSON *params, ModShaderP
 void mod_shader_program_free(ModShaderProgram *program) {
     if (!program) return;
     free(program->fragment);
+    free(program->vertex);
     program->fragment = NULL;
+    program->vertex = NULL;
 }

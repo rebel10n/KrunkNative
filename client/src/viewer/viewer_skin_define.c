@@ -21,6 +21,7 @@ typedef struct {
     char tex[32];          // a numeric tex as text
     char custom_id[32];    // a numeric _id as text
     char *paint_targets;   // paintTargets joined by ","
+    char *shader_info;     // customShaderInfo as compact JSON
 } Definition;
 
 #define DEFINITIONS_MAX 256
@@ -178,6 +179,13 @@ static void fill(ViewerSkin *s, Definition *d, const cJSON *j) {
             s->paint_targets = d->paint_targets;
         }
     }
+    // customShaderInfo (getMat / the per-part apply, skin_fx.c): a Shader Studio skin's {part | "*": {shaderDef, shaderArgs}}
+    // from testSkinSandbox (deob-10.0.7.js:204476-204508), or a store skin's {shaderNum, shaderArgs, matArgs}
+    const cJSON *info = get(j, "customShaderInfo");
+    if (cJSON_IsObject(info)) {
+        d->shader_info = cJSON_PrintUnformatted(info);
+        s->shader_info = d->shader_info;
+    }
     s->title = (int) num(get(j, "title"), 0);
     s->set = str(get(j, "set"));
     if (s->set) s->set_min = (int) num(get(j, "setMin"), 0);
@@ -236,11 +244,14 @@ int viewer_skin_define(const int index, const cJSON *skin) {
     if (!json) return 0;
     cJSON *old_json = d->json;
     char *old_targets = d->paint_targets;
+    char *old_info = d->shader_info;
     d->json = json;
     d->paint_targets = NULL;
+    d->shader_info = NULL;
     fill(slot, d, json);
     define_dye(index, json);
     cJSON_Delete(old_json); // the old strings went with the old definition
     free(old_targets);
+    cJSON_free(old_info);
     return 1;
 }
