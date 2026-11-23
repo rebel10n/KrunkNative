@@ -1126,13 +1126,17 @@ static void kr_sale_timer(const double now, char *out, const size_t n) { // v10:
     snprintf(out, n, "%02lld:%02lld:%02lld", h, m, sec);
 }
 
+const StoreSpins *store_ui_spins(void); // store_ui.c: store.spins as the store has it (the brain's /data/spins, else built in)
+
+// The menu's Store item cycles "<wheel> spin available" over store.spins' live wheels (deob-10.0.7.js:149187): the
+// spins the store window uses, the brain's /data/spins when it answered, else the built-in table.
 static void store_item_update(void) {
     HtmlElem title = by_id("menuBtnShop");
     if (!title) return;
     const double now = menu_now_ms();
     char messages[8][64];
     int count = 0;
-    const StoreSpins *spins = store_spins_builtin();
+    const StoreSpins *spins = store_ui_spins();
     for (int i = 0; spins && i < spins->wheel_count && count < 8; i++) {
         const StoreWheel *w = &spins->wheels[i];
         if ((w->start_ms || w->end_ms) && !w->hide && !w->locked && wheel_live(w, now))
