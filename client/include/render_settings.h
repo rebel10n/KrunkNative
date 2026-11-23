@@ -131,7 +131,7 @@ typedef struct {
     int stream_mode, anon_mode;
     float weapon_bob, weapon_lean, weapon_rot; // weaponBob, weaponLean, weaponRot (viewmodel)
     float weapon_off_x, weapon_off_y, weapon_off_z, weapon_ads_off_y;
-    int left_hand, aim_anim, show_hands, round_arms;
+    int left_hand, aim_anim, show_hands, round_arms; // round_arms: first-person arms of cylinders (player_mesh.c, next model)
     float weap_swap_y;       // weapSwapY (1, -2..2): the swap dip's depth (v10.js:170917 swapTime / swapTime * weapSwapY)
     float weap_reload_y;     // weapReloadY (1, 0..1): how far the weapon lowers while reloading (v10.js:170919)
     int wall_lean;           // wallLean (off): roll the camera on a wall slide / jump (v10.js:221617, camera_feel.c)

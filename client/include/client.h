@@ -532,6 +532,8 @@ typedef struct {
     float scale;
 } ColorCubeSegment;
 ColorCube *generate_color_cube_at(float width, float height, float length, const ColorCubeSegment *segments, size_t segment_count, float top);
+// genColorCube with `cyl` (roundArms): each segment a 12-sided cylinder instead of a box
+ColorCube *generate_color_cylinder(float width, float height, float length, const ColorCubeSegment *segments, size_t segment_count);
 void color_cube_fini(ColorCube *cube); // its meshes (and their skin effects), the cube
 vec4 krunker_get_color(int hex); // geos.js getColor(colr): the colour with its HSL saturation x1.5 (player_mesh.c)
 
@@ -1232,6 +1234,10 @@ unsigned int geometry_wire_ebo(Geometry*);
 void geometry_free_wire(Geometry*);
 
 Geometry *create_cube_geo();
+// roundArms: geos.js generateCylinder(w, h, w) as genColorCube's `cyl` builds it (deob-10.0.7.js:150603-150626,
+// :206671): CylinderGeometry(1, 1, 1, 12) translated up 0.5, here radius 0.5 so it fills the unit cube's
+// x, z in [-0.5, 0.5], y in [0, 1] (cached, never freed, like the cube)
+Geometry *create_cylinder_geo(void);
 Geometry *create_plane_geo();
 Geometry *create_ramp_geo();
 Geometry *create_hose_geo(float radius, float length, int sides); // KrunkNative Piss: render.js genHose (cached)

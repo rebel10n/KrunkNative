@@ -59,7 +59,19 @@ ColorCube *generate_color_cube(const float width, const float height, const floa
     return generate_color_cube_at(width, height, length, segments, segment_count, 0.5f);
 }
 
+static ColorCube *color_segments(float width, float height, float length, const ColorCubeSegment *segments, size_t segment_count,
+                                 float top, int cylinder);
+
 ColorCube *generate_color_cube_at(const float width, const float height, const float length, const ColorCubeSegment *segments, const size_t segment_count, const float top) {
+    return color_segments(width, height, length, segments, segment_count, top, 0);
+}
+
+ColorCube *generate_color_cylinder(const float width, const float height, const float length, const ColorCubeSegment *segments, const size_t segment_count) {
+    return color_segments(width, height, length, segments, segment_count, 0.5f, 1);
+}
+
+static ColorCube *color_segments(const float width, const float height, const float length, const ColorCubeSegment *segments,
+                                 const size_t segment_count, const float top, const int cylinder) {
     ColorCube *color_cube = calloc(1, sizeof(ColorCube));
     if (!color_cube) return NULL;
 
@@ -81,7 +93,7 @@ ColorCube *generate_color_cube_at(const float width, const float height, const f
         const ColorCubeSegment *segment = &segments[i];
         if (segment->height <= 0.0f) continue; // a skipped segment (noHair / noBody / legLen)
 
-        Geometry *geo = create_cube_geo();
+        Geometry *geo = cylinder ? create_cylinder_geo() : create_cube_geo();
         BasicMaterial *material = basic_material_init();
         rt_materials_hint_part(material, RT_PART_BODY); // rt.h material classes (body / head / leg cubes)
 
@@ -129,6 +141,9 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
     const float shoulder_z = weapon->offset.z - shoulder_fwd;
 
     const float arm_scale = game_constants.arm_scale * (third_person ? 1.0f : 0.68f);
+    // roundArms (restart): genColorCube's `cyl`, which only the `us` (first person) path reads (deob-10.0.7.js:206671,
+    // genArm :206838-206867): the forearm and the extension become cylinders
+    const int round = !third_person && client_render_settings()->round_arms;
     const float arm_length = MIN(game_constants.upper_arm_length + game_constants.lower_arm_length - 0.01f, sqrtf(
         powf(((weapon->offset.x * left_handed_mlt - hold.x) * (is_left && weapon->akimbo ? -1.0f : 1.0f) - x), 2.0f) +
         powf((weapon->offset.y + hold.y - y), 2.0f) +
@@ -173,7 +188,7 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
         material->color = krunker_get_color(shirt_color);
         rt_materials_hint_part(material, RT_PART_ARMS); // rt.h material classes
 
-        arm->extender = mesh_init(create_cube_geo(), (Material *) material);
+        arm->extender = mesh_init(round ? create_cylinder_geo() : create_cube_geo(), (Material *) material);
         arm->extender->transform.parent = &arm->anchor;
 
         arm->extender->transform.scale.x = arm->extender->transform.scale.z = arm_scale;
@@ -193,7 +208,9 @@ PlayerArmMesh *generate_arm(const float x, const float y, const Weapon *weapon, 
         {skin_color, 0.2f, 1.0f},
     };
 
-    arm->lower = generate_color_cube(arm_scale, game_constants.lower_arm_length, arm_scale, lower_segments, sizeof(lower_segments) / sizeof(lower_segments[0]));
+    const size_t lower_count = sizeof(lower_segments) / sizeof(lower_segments[0]);
+    arm->lower = round ? generate_color_cylinder(arm_scale, game_constants.lower_arm_length, arm_scale, lower_segments, lower_count)
+                       : generate_color_cube(arm_scale, game_constants.lower_arm_length, arm_scale, lower_segments, lower_count);
     arm->lower->transform.parent = &arm->anchor;
 
     arm->lower->transform.rotation.x = (float) -M_PI * 0.5f - arm_angles[0];

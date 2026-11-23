@@ -742,6 +742,66 @@ Geometry *create_cube_geo() {
     return geometry;
 }
 
+static Geometry *g_cylinder_geometry;
+
+Geometry *create_cylinder_geo(void) {
+    if (g_cylinder_geometry) return g_cylinder_geometry;
+    enum { SIDES = 12 };
+    // torso (heightSegments 1) then the top and bottom caps, three.js CylinderGeometry's layout
+    vertex v[(SIDES + 1) * 2 + 2 * (SIDES + SIDES + 1)];
+    unsigned int idx[SIDES * 6 + 2 * SIDES * 3];
+    int n = 0, k = 0;
+    const float radius = 0.5f;
+    for (int y = 0; y <= 1; y++) {
+        for (int x = 0; x <= SIDES; x++) {
+            const float u = (float) x / (float) SIDES, theta = u * 2.0f * (float) M_PI;
+            v[n++] = (vertex) {{radius * sinf(theta), 1.0f - (float) y, radius * cosf(theta)}, {u, 1.0f - (float) y}};
+        }
+    }
+    for (int x = 0; x < SIDES; x++) {
+        const unsigned int a = (unsigned int) x, b = (unsigned int) (SIDES + 1 + x), c = b + 1, d = a + 1;
+        idx[k++] = a; idx[k++] = b; idx[k++] = d;
+        idx[k++] = b; idx[k++] = c; idx[k++] = d;
+    }
+    for (int cap = 0; cap < 2; cap++) {
+        const int top = cap == 0;
+        const float y = top ? 1.0f : 0.0f, sign = top ? 1.0f : -1.0f;
+        const int center_start = n;
+        for (int x = 1; x <= SIDES; x++) v[n++] = (vertex) {{0.0f, y, 0.0f}, {0.5f, 0.5f}};
+        const int center_end = n;
+        for (int x = 0; x <= SIDES; x++) {
+            const float theta = (float) x / (float) SIDES * 2.0f * (float) M_PI;
+            v[n++] = (vertex) {{radius * sinf(theta), y, radius * cosf(theta)}, {cosf(theta) * 0.5f + 0.5f, sinf(theta) * 0.5f * sign + 0.5f}};
+        }
+        for (int x = 0; x < SIDES; x++) {
+            const unsigned int c = (unsigned int) (center_start + x), i = (unsigned int) (center_end + x);
+            if (top) { idx[k++] = i; idx[k++] = i + 1; idx[k++] = c; }
+            else { idx[k++] = i + 1; idx[k++] = i; idx[k++] = c; }
+        }
+    }
+
+    Geometry *geometry = calloc(1, sizeof(Geometry));
+    if (!geometry) return NULL;
+    unsigned int vbo;
+    glGenVertexArrays(1, &geometry->vao);
+    glGenBuffers(1, &geometry->ebo);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(geometry->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (long) n * (long) sizeof(vertex), v, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long) k * (long) sizeof(unsigned int), idx, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    geometry->index_count = k;
+    geometry_set_bounds(geometry, v, (size_t) n);
+    geometry_set_triangles(geometry, (const float *) v, n, 5, idx, k);
+    g_cylinder_geometry = geometry;
+    return geometry;
+}
+
 // KrunkNative Piss: render.js genHose (the e1624e4 branch) - a CylinderGeometry(radius, radius,
 // length, sides) along z (rotation.x = PI / 2) with a SphereGeometry(radius, sides, max(8, sides / 2))
 // at each end; the Piss's weapon mesh (player_hose_mesh). One cached geometry per size, never freed
