@@ -40,6 +40,7 @@
 #include <ranked.h>     // the profile's rank chip (ranked_rank_name / color / icon)
 #include <match_history.h> // the profile's Match History tab: v10's MatchHistory component (svelte-1irqx9a)
 #include <ui_tooltip.h> // the Badges tab's tooltip
+#include <cpu_canvas.h> // the Sales tab's line chart (v10's Chart.js canvas)
 #include "../viewer/viewer_store.h" // the Creations tab's Skins: the store table and its rarities
 #include <ctype.h>
 #include <math.h>
@@ -2022,6 +2023,189 @@ static void stat_card(StrBuf *sb, const char *label, const char *value, const in
 // fraction kept (1234.5 -> 1,234.5; Junk 12.34)
 static void fmt_num(char *out, const size_t n, const double v) { fmt_js_num(out, n, v); }
 
+// ------------------------------------------------------------------ the Sales tab's chart
+
+// v10's chart component (iíìiîïi, deob-10.0.7.js:109206-109340): a Chart.js 2 line chart on a canvas the size of its
+// box (.profile-detail-sales-canvas, 100% x 200px: 109363-109369), one dataset {label 'KR', backgroundColor
+// #85bb6555, borderColor #85bb65, fill, lineTension 0}, no legend or title, layout padding top 10, no points, the
+// GameFont at 10px; x ticks #666 padding 10, autoSkip, no rotation; y ticks #444 padding 6, beginAtZero, whole
+// numbers only, comma thousands; the tooltip (mode index, intersect false) the day's label over "N KR" at 20px on
+// rgba(0,0,0,0.6). The canvas is drawn on the CPU (cpu_canvas.c) and its text is DOM over it, like the minimap's.
+#define SALES_MAX_DAYS 120
+static struct {
+    int n;                                  // points of the series on screen (0: no chart)
+    double v[SALES_MAX_DAYS];
+    char lab[SALES_MAX_DAYS][16];
+    int w, h;                               // the canvas box painted (CSS px)
+    float x[SALES_MAX_DAYS], y[SALES_MAX_DAYS]; // the points (canvas px), for the tooltip
+    float top, bottom, left, right;         // Chart.js's chartArea
+    CpuCanvas cc;
+} g_sales;
+
+// Chart.js 2.9 helpers.niceNum(range) (round undefined: the <= branch)
+static double chart_nice(const double range) {
+    const double e = floor(log10(range)), f = range / pow(10, e);
+    return (f <= 1.0 ? 1.0 : f <= 2.0 ? 2.0 : f <= 5.0 ? 5.0 : 10.0) * pow(10, e);
+}
+
+// the GameFont's advance at `px` (Chart.js measures with the canvas; the DOM lays out the real text)
+static float chart_text_w(const char *s, const float px) { return (float) strlen(s) * px * 0.9f; }
+
+static void chart_line(CpuCanvas *c, const float x0, const float y0, const float x1, const float y1, const float lw, const CcColor col) {
+    const float dx = x1 - x0, dy = y1 - y0, len = sqrtf(dx * dx + dy * dy);
+    if (len <= 0.0f) return;
+    const float nx = -dy / len * lw * 0.5f, ny = dx / len * lw * 0.5f;
+    const float q[8] = {x0 + nx, y0 + ny, x1 + nx, y1 + ny, x1 - nx, y1 - ny, x0 - nx, y0 - ny};
+    cc_fill_poly(c, q, 4, col);
+}
+
+// paints the chart into #v10sSalesCanvas and its ticks / hover columns into #v10sSalesAxes, at the box's size (CSS px)
+static void sales_chart_paint(void) {
+    const HtmlElem cv = html_dom_by_id("v10sSalesCanvas"), axes = html_dom_by_id("v10sSalesAxes");
+    HtmlRect r;
+    if (!g_sales.n || !cv || !axes || !html_dom_get_rect(cv, &r)) return;
+    // the parent's clientWidth / clientHeight (CSS px, before the page's scale): the canvas size v10 sets (109363-109369)
+    const int W = (int) html_dom_offset_width(cv), H = (int) html_dom_offset_height(cv), n = g_sales.n;
+    if (W < 4 || H < 4) return;
+    if (!cc_resize(&g_sales.cc, W, H)) return;
+    g_sales.w = W;
+    g_sales.h = H;
+    CpuCanvas *c = &g_sales.cc;
+    // the y scale (linear, beginAtZero; generateTicks with maxTicks min(11, ceil(height / lineHeight 12)))
+    double max = 0;
+    for (int i = 0; i < n; i++) max = fmax(max, g_sales.v[i]);
+    if (max <= 0) max = 1; // min === max: max + 1
+    const float top = 10.0f + 6.0f; // layout padding + half the top label
+    const float bottom = (float) H - (10.0f + 12.0f + 10.0f); // the x axis: tick mark, label line, padding
+    int max_ticks = (int) ceilf((bottom - top) / 12.0f);
+    if (max_ticks > 11) max_ticks = 11;
+    if (max_ticks < 2) max_ticks = 2;
+    double spacing = chart_nice(max / (max_ticks - 1));
+    if (ceil(max / spacing) > max_ticks - 1) spacing = chart_nice(ceil(max / spacing) * spacing / (max_ticks - 1));
+    const double nice_max = ceil(max / spacing) * spacing;
+    const int nsp = (int) llround(nice_max / spacing);
+    // the y axis' width: tick mark 10 + padding 6 + the widest whole-number label
+    float yw = 0;
+    char t[48];
+    for (int j = 0; j <= nsp; j++) {
+        const double tv = j * spacing;
+        if (fmod(tv, 1.0) != 0.0) continue;
+        commas(t, sizeof(t), tv);
+        yw = fmaxf(yw, chart_text_w(t, 10.0f));
+    }
+    const float left = fmaxf(yw + 16.0f, chart_text_w(g_sales.lab[0], 10.0f) * 0.5f);
+    const float right = (float) W - chart_text_w(g_sales.lab[n - 1], 10.0f) * 0.5f;
+    g_sales.top = top;
+    g_sales.bottom = bottom;
+    g_sales.left = left;
+    g_sales.right = right;
+    for (int i = 0; i < n; i++) {
+        g_sales.x[i] = n > 1 ? left + (right - left) * (float) i / (float) (n - 1) : (left + right) * 0.5f;
+        g_sales.y[i] = bottom - (float) (g_sales.v[i] / nice_max) * (bottom - top);
+    }
+    // the x ticks Chart.js keeps (autoSkip: every ceil((n - 1) / (length / (widest + 3) + 1))-th from the first)
+    float widest = 0;
+    for (int i = 0; i < n; i++) widest = fmaxf(widest, chart_text_w(g_sales.lab[i], 10.0f));
+    const double limit = (right - left) / (widest + 3.0f) + 1.0;
+    const int skip = (int) ceil(fmax((n - 1) / limit, 1.0));
+
+    cc_reset_transform(c);
+    cc_fill_all(c, cc_hex("#2b2b2b")); // the panel under the (transparent) canvas
+    const CcColor grid = cc_rgba(0, 0, 0, 0.1f), zero = cc_rgba(0, 0, 0, 0.25f);
+    for (int j = 0; j <= nsp; j++) { // horizontal grid lines with their tick marks; the zero line darker
+        if (fmod(j * spacing, 1.0) != 0.0) continue;
+        const float y = floorf(bottom - (bottom - top) * (float) j / (float) nsp) + 0.5f;
+        cc_fill_rect(c, left - 10.0f, y - 0.5f, right - left + 10.0f, 1.0f, j == 0 ? zero : grid);
+    }
+    for (int i = 0; i < n; i += skip) { // vertical grid lines at the kept x ticks, tick marks below the axis
+        const float x = floorf(g_sales.x[i]) + 0.5f;
+        cc_fill_rect(c, x - 0.5f, top, 1.0f, bottom - top + 10.0f, grid);
+    }
+    // the fill (to the zero line) and the line (borderWidth 3, lineTension 0)
+    float *poly = malloc(sizeof(float) * 2 * (size_t) (n + 2));
+    if (poly) {
+        for (int i = 0; i < n; i++) {
+            poly[2 * i] = g_sales.x[i];
+            poly[2 * i + 1] = g_sales.y[i];
+        }
+        poly[2 * n] = g_sales.x[n - 1];
+        poly[2 * n + 1] = bottom;
+        poly[2 * n + 2] = g_sales.x[0];
+        poly[2 * n + 3] = bottom;
+        cc_fill_poly(c, poly, n + 2, cc_rgba(0x85, 0xbb, 0x65, (float) 0x55 / 255.0f));
+        free(poly);
+    }
+    const CcColor line = cc_hex("#85bb65");
+    for (int i = 0; i + 1 < n; i++) chart_line(c, g_sales.x[i], g_sales.y[i], g_sales.x[i + 1], g_sales.y[i + 1], 3.0f, line);
+    for (int i = 1; i + 1 < n; i++) cc_fill_circle(c, g_sales.x[i], g_sales.y[i], 1.5f, line); // the joins
+    html_dom_canvas_put(cv, c->px, W, H);
+
+    // the ticks' text and the tooltip's hover columns (mode index: the nearest day of the pointer's x)
+    StrBuf sb = {0};
+    for (int j = 0; j <= nsp; j++) {
+        const double tv = j * spacing;
+        if (fmod(tv, 1.0) != 0.0) continue; // the callback's null: no label
+        commas(t, sizeof(t), tv);
+        const float y = bottom - (bottom - top) * (float) j / (float) nsp;
+        sb_appendf(&sb, "<span style=\"position:absolute;right:%.0fpx;top:%.0fpx;font-family:GameFont;font-size:10px;line-height:12px;color:#444;white-space:nowrap;pointer-events:none\">%s</span>",
+                   (float) W - (left - 16.0f), y - 6.0f, t);
+    }
+    for (int i = 0; i < n; i += skip)
+        sb_appendf(&sb, "<span style=\"position:absolute;left:%.0fpx;top:%.0fpx;transform:translateX(-50%%);font-family:GameFont;font-size:10px;line-height:12px;color:#666;white-space:nowrap;pointer-events:none\">%s</span>",
+                   g_sales.x[i], bottom + 20.0f, g_sales.lab[i]);
+    for (int i = 0; i < n; i++) {
+        const float x0 = i ? (g_sales.x[i - 1] + g_sales.x[i]) * 0.5f : 0.0f, x1 = i + 1 < n ? (g_sales.x[i] + g_sales.x[i + 1]) * 0.5f : (float) W;
+        sb_appendf(&sb, "<div style=\"position:absolute;left:%.0fpx;top:0;width:%.0fpx;height:100%%\" onmouseenter=\"v10s('stip',%d)\"></div>", x0, x1 - x0 + 1.0f, i);
+    }
+    sb_append(&sb, "<div id=\"v10sSalesTip\" style=\"display:none;position:absolute;pointer-events:none;background:rgba(0,0,0,0.6);border-radius:6px;padding:19px 12px;"
+                   "font-family:GameFont;font-size:20px;line-height:20px;white-space:nowrap;z-index:1\"></div>");
+    char *html = sb_finish(&sb);
+    html_dom_set_html(axes, html);
+    free(html);
+}
+
+// the tooltip of day i (Chart.js 2.9 determineAlignment / getBackgroundPoint with caretSize 9, caretPadding 12)
+static void sales_chart_tip(const int i) {
+    const HtmlElem tip = html_dom_by_id("v10sSalesTip");
+    if (!tip) return;
+    if (i < 0 || i >= g_sales.n) {
+        html_dom_set_display(tip, "none");
+        return;
+    }
+    char kr[48], html[256];
+    fmt_num(kr, sizeof(kr), g_sales.v[i]);
+    snprintf(html, sizeof(html), "<div style=\"color:#fff;margin-bottom:18px\">%s</div><div style=\"color:rgba(255,255,255,0.8)\">%s KR</div>", g_sales.lab[i], kr);
+    html_dom_set_html(tip, html);
+    const float x = g_sales.x[i], y = g_sales.y[i], W = (float) g_sales.w, H = (float) g_sales.h;
+    const float tw = fmaxf(chart_text_w(g_sales.lab[i], 20.0f), chart_text_w(kr, 20.0f) + chart_text_w(" KR", 20.0f)) + 24.0f;
+    const float th = 19.0f * 2 + 20.0f + 18.0f + 20.0f, pad = 9.0f + 12.0f;
+    const char *ya = y < th ? "top" : y > H - th ? "bottom" : "center", *xa = "center";
+    const float mid = (g_sales.left + g_sales.right) * 0.5f;
+    const int center_y = !strcmp(ya, "center");
+    const int lf = center_y ? x <= mid : x <= tw * 0.5f, rf = center_y ? x > mid : x >= W - tw * 0.5f;
+    if (lf) {
+        xa = "left";
+        if (x + tw + pad > W) xa = "center", ya = y <= (g_sales.top + g_sales.bottom) * 0.5f ? "top" : "bottom";
+    } else if (rf) {
+        xa = "right";
+        if (x - tw - pad < 0) xa = "center", ya = y <= (g_sales.top + g_sales.bottom) * 0.5f ? "top" : "bottom";
+    }
+    float bx = x, by = y;
+    if (!strcmp(xa, "right")) bx -= tw;
+    else if (!strcmp(xa, "center")) bx -= tw * 0.5f;
+    if (!strcmp(ya, "top")) by += pad;
+    else if (!strcmp(ya, "bottom")) by -= th + pad;
+    else by -= th * 0.5f;
+    if (!strcmp(ya, "center")) bx += !strcmp(xa, "left") ? pad : !strcmp(xa, "right") ? -pad : 0.0f;
+    else bx += !strcmp(xa, "left") ? -(6.0f + 12.0f) /* radiusAndPadding: cornerRadius + caretPadding */ : !strcmp(xa, "right") ? 6.0f + 12.0f : 0.0f;
+    char v[32];
+    snprintf(v, sizeof(v), "%.0fpx", fmaxf(0.0f, bx));
+    html_dom_set_style(tip, "left", v);
+    snprintf(v, sizeof(v), "%.0fpx", by);
+    html_dom_set_style(tip, "top", v);
+    html_dom_set_display(tip, "block");
+}
+
 static void fixed_trim(char *out, const size_t n, const double v, const int dp) {
     snprintf(out, n, "%.*f", dp, v); // parseFloat(x.toFixed(dp))
     if (strchr(out, '.')) {
@@ -2427,8 +2611,8 @@ static void sb_profile_right(StrBuf *sb, View *v) {
         // the chart's series (deob-10.0.7.js:112196-112226): a point per local day of the window, today last, the
         // day's "f" or 0, labelled "DD Mon YY" (iîíîíiì, :23925); the header's total is the window's sum
         const int ndays = range_days[v->sales_range >= 0 && v->sales_range < 7 ? v->sales_range : 3];
-        double series[120], total = 0, max = 1;
-        char labels[120][16];
+        double series[SALES_MAX_DAYS], total = 0;
+        char labels[SALES_MAX_DAYS][16];
         struct tm today;
         local_tm(date_now_ms(), &today);
         const long long day0 = days_from_civil(today.tm_year + 1900, today.tm_mon + 1, today.tm_mday) - ndays + 1;
@@ -2442,7 +2626,6 @@ static void sb_profile_right(StrBuf *sb, View *v) {
             series[i] = 0;
             cJSON_ArrayForEach(e, v->sales) if (!strcmp(jstr(e, "d"), key)) { series[i] = jnum(e, "f"); }
             total += series[i];
-            max = fmax(max, series[i]);
         }
         char t[32];
         fmt_num(t, sizeof(t), total);
@@ -2459,15 +2642,15 @@ static void sb_profile_right(StrBuf *sb, View *v) {
             sb_append(sb, "</div>");
         } else if (cJSON_GetArraySize(v->sales) == 0) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No sales in this window.</div>");
         else {
-            // a bar per day of the window (v10 draws the series as a line chart on a canvas, _36123): the label and
-            // the day's KR on hover
-            sb_append(sb, "<div style=\"display:flex;align-items:flex-end;height:160px;gap:2px\">");
+            // the line chart (iíìiîïi {labels, data, label: 'KR'}, deob-10.0.7.js:112883-112891): its canvas fills the
+            // box; sales_chart_paint draws it once the box is laid out (render_views)
+            g_sales.n = ndays;
             for (int i = 0; i < ndays; i++) {
-                char kr[32];
-                fmt_num(kr, sizeof(kr), series[i]);
-                sb_appendf(sb, "<div title=\"%s: %s KR\" style=\"flex:1;background:#fbc02d;height:%.0f%%\"></div>", labels[i], kr, series[i] / max * 100.0);
+                g_sales.v[i] = series[i];
+                snprintf(g_sales.lab[i], sizeof(g_sales.lab[i]), "%s", labels[i]);
             }
-            sb_append(sb, "</div>");
+            sb_append(sb, "<div style=\"width: 100%; height: 100%;\"><canvas id=\"v10sSalesCanvas\" style=\"width:100%;height:100%;display:block\"></canvas></div>"
+                          "<div id=\"v10sSalesAxes\" style=\"position:absolute;left:0;top:0;width:100%;height:100%\" onmouseleave=\"v10s('stipx')\"></div>");
         }
         sb_appendf(sb, "</div></div> <div class=\"profile-detail-sales-panel svelte-1hghrmf\"><div class=\"profile-detail-sales-header svelte-1hghrmf\"><span>Active Listings</span> "
                        "<span class=\"profile-detail-sales-total svelte-1hghrmf\">%d live</span></div> ", cJSON_GetArraySize(v->listings));
@@ -3287,6 +3470,8 @@ static void open_hub(const int tab) {
 static void render_views(void) {
     View *v = top_view();
     if (!v || v->depth != v10_view_depth()) return; // another module's view is on top
+    g_sales.n = 0; // the Sales tab's chart sets it again
+    g_sales.w = g_sales.h = 0;
     StrBuf sb = {0};
     switch (v->type) {
     case V_PROFILE: sb_profile(&sb, v); break;
@@ -3308,6 +3493,7 @@ static void render_views(void) {
     keep_save(&k, none, 0);
     v10_view_set(html);
     keep_restore(&k);
+    sales_chart_paint();
 }
 
 // ------------------------------------------------------------------ actions
@@ -4185,6 +4371,10 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         backend_url_encode(enc, sizeof(enc), jstr(v->data, "player_twitchname"));
         snprintf(url, sizeof(url), "https://twitch.tv/%s", enc);
         if (enc[0]) ui_open_external(url);
+    } else if (!strcmp(op, "stip")) { // the Sales chart's tooltip: the day under the pointer
+        sales_chart_tip((int) arg_num(args, argc, 1, -1));
+    } else if (!strcmp(op, "stipx")) {
+        sales_chart_tip(-1);
     } else if (!strcmp(op, "range") && v && v->type == V_PROFILE) {
         v->sales_range = (int) arg_num(args, argc, 1, 3);
         cJSON_Delete(v->sales);
@@ -4331,6 +4521,11 @@ void v10_social_tick(void) {
     }
     conv_scroll_tick();
     menu_badge();
+    if (g_sales.n) { // Chart.js's responsive resize: the box changed size, the chart is drawn again at the new one
+        const HtmlElem cv = html_dom_by_id("v10sSalesCanvas");
+        if (!cv) g_sales.n = 0;
+        else if ((int) html_dom_offset_width(cv) != g_sales.w || (int) html_dom_offset_height(cv) != g_sales.h) sales_chart_paint();
+    }
 }
 
 // ------------------------------------------------------------------ --render-scenario: state.social

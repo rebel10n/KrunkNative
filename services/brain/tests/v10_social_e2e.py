@@ -6,6 +6,9 @@
 kn_brain on sqlite + two headless clients on the v10 page, driven by KRUNKNATIVE_UI_CMDS: clicks
 the page's own elements (the Social menu item, the sidebar tabs, the Search tab, New post, the
 friends list, the conversation, a profile, the clan view). Outcomes are checked in the database.
+The profile's Sales tab is rendered from tools/uidiff/scenarios/social-profile.json (--render-scenario) with two
+sales in the window: v10.0.7's line chart (deob-10.0.7.js:109206-109340, 112883-112891) is a canvas the size of its
+box with DOM ticks (whole numbers, comma thousands), a hover column per day and the filled #85bb65 line.
 77 = skip (no client_bin / kn_brain / websockets).
 """
 import asyncio, json, os, re, shutil, sqlite3, subprocess, sys, tempfile, threading, time
@@ -182,7 +185,41 @@ class Client:
             self.proc.kill(); self.proc.wait(5)
         self.out.close()
 
+def sales_chart():
+    """the Sales tab's chart on a --render-scenario of the profile (no brain needed)"""
+    with open(os.path.join(ROOT, "tools", "uidiff", "scenarios", "social-profile.json")) as f:
+        sc = json.load(f)
+    now = 1763900000000  # 2025-11-23, Date.now() of the profile (the window ends today)
+    day = lambda back: time.strftime("%Y-%m-%d", time.localtime(now / 1000 - back * 86400))
+    view = sc["state"]["social"]["view"]
+    view.update(tab=2, now=now, sales_range=0, sales=[{"d": day(1), "f": 1200}, {"d": day(5), "f": 300}], listings=[])
+    path, png, html = (os.path.join(WORK, "sales" + ext) for ext in (".json", ".png", ".html"))
+    json.dump(sc, open(path, "w"))
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env.update(KRUNKNATIVE_HEADLESS="1", KRUNKNATIVE_SCENARIO_HTML=html, XDG_CONFIG_HOME=os.path.join(WORK, "sales-cfg"))
+    r = subprocess.run([CLIENT, "--render-scenario", path, png], cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
+    check(r.returncode == 0, "Sales scenario renders (%s)" % (r.stdout + r.stderr)[-300:].replace("\n", " "))
+    doc = open(html, errors="replace").read() if os.path.exists(html) else ""
+    check("Total: 1,500 KR" in doc, "Sales: the header's total of the 1 Week window")
+    check('id="v10sSalesCanvas"' in doc and 'id="v10sSalesAxes"' in doc, "Sales: the chart's canvas and its axes layer")
+    ticks = re.findall(r"color:#444[^>]*>([0-9,]+)<", doc)
+    check(ticks == ["0", "200", "400", "600", "800", "1,000", "1,200"], "Sales: y ticks 0..1,200 by 200 (niceNum): %s" % ticks)
+    xs = re.findall(r"color:#666[^>]*>([0-9]{2} [A-Z][a-z]{2} [0-9]{2})<", doc)
+    check(xs and xs[0] == time.strftime("%d %b %y", time.localtime(now / 1000 - 6 * 86400)),
+          "Sales: the x labels start at the window's first day (autoSkip keeps it): %s" % xs)
+    check(doc.count("v10s('stip',") == 7, "Sales: a hover column per day of the week")
+    check("flex:1;background:#fbc02d" not in doc, "Sales: no bar strip")
+    try:
+        from PIL import Image
+    except ImportError:
+        return
+    im = Image.open(png).convert("RGB")
+    green = sum(1 for p in im.getdata() if abs(p[0] - 0x85) < 12 and abs(p[1] - 0xbb) < 12 and abs(p[2] - 0x65) < 12)
+    check(green > 50, "Sales: the #85bb65 line is drawn (%d px)" % green)
+
+
 def main():
+    sales_chart()
     log = open(os.path.join(WORK, "brain.log"), "w")
     cfg = os.path.join(WORK, "brain.json")
     json.dump({"database": {"driver": "sqlite", "path": DB, "migrations_dir": os.path.join(ROOT, "services", "db", "migrations")},
