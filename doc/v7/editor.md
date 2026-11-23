@@ -1241,8 +1241,8 @@ The default is to match v7.1.4. The rows below break that default. Where Krunker
 | `duplicateGroup` ReferenceError | fix (no observable behaviour) |
 | Wheel dolly speed frozen at 70 | keep (feel parity) |
 | "Toggle snapping: Control" not implemented | keep KN's Ctrl-hold disables snapping (already documented as a KN addition) |
-| Mis-bound switches (Anti-aliasing → `resMltV`, Frame Ceiling → thickness, Quick GUI Fix Hitbox `this`) | **fix** (Frame: "Has Ceiling" edits `frameCeiling`, so the Tools dump shows it off where v7 shows the thickness as on; Fix Hitbox: `editor_quickgui.c`) |
-| Color Merging loop-variable bug; Colorize Gold no-op | **fix** Color Merging: every object is visited once (`editor_tools.c`; `tools_check.py` models v7's loop, which reproduces v7's capture, and checks the native fix). Gold: the v7 button stays (the Tools dump stays v7's) and colours every object `#FFD700` with emissive `#4D4100` (WP6) |
+| Mis-bound switches (Anti-aliasing → `resMltV`, Frame Ceiling → thickness, Quick GUI Fix Hitbox `this`) | **match v10.0.7** (round 12; v10 keeps all three): Anti-aliasing edits `resMltV`, "Has Ceiling" edits `frameThickness` (no ceiling is ever added), the Quick GUI's Fix Hitbox does nothing (Shift+F still fixes the selection) |
+| Color Merging loop-variable bug; Colorize Gold no-op | **match v10.0.7** (round 12; editor-10.0.7.js:19106, 20205): Color Merging reuses the object loop's index (`tools_check.py`'s model of the loop reproduces v7's capture, and the native run gives the same); Gold changes nothing |
 | `la` omitted at 15 (default 45); particle defaults 1 vs 0 | **match on write** so exports are byte-compatible with v7; read with v7's load defaults |
 | `sci` written as `null` | **fix**: write `sci` from `scriptId` (`map-logic.md` decides runtime use) |
 | Bot `speedMlt` never written | keep (BOT_SPAWNER is `localOnly`) |

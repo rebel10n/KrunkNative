@@ -33,13 +33,13 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | editor.css | +`.entityPop`, `.history-*`, `#mpToolbarBtn`, `.mpBtn*`, `.settRow`, `#mp-chat`; −8 `twoFA*` rules; `#playbar` 4 columns; `#popupHolder` z-index 2147483646 | v7.1.4 | **done** (v10 file) |
 | Version text | "Krunker Editor v2.0.0 - FRVR" (E10:13908) | "- Yendis Entertainment" | **done** (`editor.c`) |
 | Toolbar menus File..Documentation | identical to v7 (IDX:14434-14552) | v7 | **done** |
-| Object > Group > Save as Archetype; Object > Entity > Place / Edit Selected / Archetypes | IDX:14511-14516 → E10:18065, 18095, 18128, 18417 | missing | **missing** (entities, 1.5) |
+| Object > Group > Save as Archetype; Object > Entity > Place / Edit Selected / Archetypes | IDX:14511-14516 → E10:18065, 18095, 18128, 18417 | missing | **done** (v10.0.7, `editor_entities.c`) |
 | Tools / Basic menu lists | 99-prefab table: Tools gain BOT_PATH_NODE, ENTITY; Basic gains SCRAPCRATE | 97 v7 prefabs | **done** (`editor_data.c` regenerated) |
 | Templates window KrunkScript tiles (E10 `_2189`, 29: + Particle Bursts .. Payments & Skins) | E10:13401-13433, 6356 | 18 v7 templates, 3 empty | **done** (`assets/editor/templates.json` from the v10 bundle via `gen_editor_data.py`; tiles' thumbnails from the asset host) |
 | Playbar | ▶ / host / teleport + 4th `#mpToolbarBtn` group_add (E10:9700-9714) | 3 buttons | **done** (button opens window 16) |
 | canvasUI toggles | unchanged | v7 | **done** |
 | canvasInfo | + Entities n/64, Archetypes n/32, shown when either > 0 (E10:19940-19960; CFG:7869-7870) | 6 stats | **done** (`editor_update_object_count`) |
-| Editor events `transformEnd`, `objectPropertyChanged`, `mapCleared` | E10:15286-15301, 9771 (multiplayer sync) | none | **missing** (only multiplayer uses them) |
+| Editor events `transformEnd`, `objectPropertyChanged`, `mapCleared` | E10:15286-15301, 9771 (multiplayer sync) | none | **done** (v10.0.7, `editor_mp.c`) |
 
 ### 1.2 Windows, popups, settings
 
@@ -47,12 +47,12 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 |---|---|---|---|
 | Windows 1-15 | same headers (E10:12926-13514) | v7 | **done** |
 | 8 Welcome | no "earn real money", no "$ paid to developers" item, no Scripting Discord (E10:13296-13323) | v7 text | **done** |
-| 1 Controls | Advanced tab + "Multiplayer" folder (Toggle Player List TAB, Focus Chat ENTER; IDX:21141-21170) | v7 | **missing** (multiplayer keys have nothing to drive) |
+| 1 Controls | Advanced tab + "Multiplayer" folder (Toggle Player List TAB, Focus Chat ENTER; IDX:21141-21170) | v7 | **done** (v10.0.7) |
 | 3 Settings | 5th tab "Multiplayer": Player Name, Render Coop Outlines, Player Opacity, Streamer Mode, Auto Chat Scroll in localStorage `mp_settings` (E10:13035, 9416-9468; IDX:21705-21760) | 4 tabs | **done** (settings stored, unused: no rooms) |
-| 16 Multiplayer, 17 Players | host form / room view; player list with TP / SEL / KICK / BAN (E10:9595-9646, 9686-9696) | missing | **KN partial**: v10's "no room" form; Host / Join say there is no editor room server |
+| 16 Multiplayer, 17 Players | host form / room view; player list with TP / SEL / KICK / BAN (E10:9595-9646, 9686-9696) | missing | **done** (v10.0.7: `editor_mp.c` against kn_brain's room relay, `services/brain/editor_rooms.c`) |
 | `#twoFAPop` | removed (dead `twoFAres` E10:20838) | v7 popup | **KN**: kept for KrunkNative 2FA |
-| Entity / archetype popups (`entityPop`) | E10:18099, 18138, 18425, 18589 | missing | **missing** |
-| initSettings `mpPlayerListKey`, `mpChatKey` | E10:14605-14606 | missing | **missing** (multiplayer) |
+| Entity / archetype popups (`entityPop`) | E10:18099, 18138, 18425, 18589 | missing | **done** (v10.0.7) |
+| initSettings `mpPlayerListKey`, `mpChatKey` | E10:14605-14606 | missing | **done** (v10.0.7) |
 | Quick GUI | unchanged | v7 | **done** |
 | Altcha captcha, FRVR auth | IDX:3055-3250, E10:12823 | hub login | **KN**: the account server signs in over the hub socket |
 
@@ -74,7 +74,7 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | ENVIRONMENT_ZONE / Environment Fade Time (`ambFadeTime`, map key dropped when 0) | IDX:18990, 20052; E10:8720, 14071, 16568 | missing | **done** |
 | Asset map-slot folders (Lightmap .. Roughness, `mp`) | IDX:16449-16501, E10:6740-6770, 8261 | key passed through | **partial**: `mp` round-trips, no folders |
 | BOT_PATH_NODE block (GroupId / NodeId / Next / Reversible, Fix Node, Create Next Node / Group, chain lines) | IDX:15704-15776, E10:17833-17885, 15532-15584 | missing | **partial**: prefab, keys and botPaths round trip; no inspector block or lines |
-| ENTITY inspector buttons (Edit Entity / Edit Archetype) | IDX:15179-15193 | missing | **missing** |
+| ENTITY inspector buttons (Edit Entity / Edit Archetype) | IDX:15179-15193 | missing | **done** (v10.0.7) |
 | Tools > Deoptimizations > Turn On All Faces | IDX:20250-20252, E10:20159-20188 | missing | **done** (`editor_tools.c`, `tool:turnOnAllFaces`) |
 | objectList / prefab / gui / terrain / zone / ocean panels | unchanged | v7 | **done** |
 
@@ -89,18 +89,45 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | botPaths import (a BOT_PATH_NODE per point, `bng/bn/bnn/bnr`) and export (grouped, sorted by `bn`) | E10:17046-17064, 16405-16420, 8038-8043 | dropped | **done** (`editor_model.c`, `editor_serialize_test` v10_checks) |
 | ENTITY `eid/ar/tag/as/sp`, parts `pn/sfz` | E10:7443-7457, 8770-8787 | dropped | **done** |
 | `scripts.shared` | E10:10253 | dropped | **done** (kept, exported and edited in the Shared tab; the template is omitted on export) |
-| top-level `archetypes` | E10:1951-2023 validation | kept as an unknown map key | **partial**: kept, counted; no editing |
+| top-level `archetypes` | E10:1951-2023 validation | kept as an unknown map key | **partial**: kept, counted and edited (v10.0.7); no map-check rules |
 
 ### 1.5 Entities and archetypes, multiplayer, scripting
 
 | Feature | v10 | After |
 |---|---|---|
-| Archetype save / place entity / entity popup / archetype popup / stage editor (plate at y 5000, radius 600) / browser / ghost previews / "archetypes" undo kind / prefab dangling and strip | E10:18065-18658, 18241-18300, 15319-15364, 17611, 17990 | **missing** (L; the game-side entity runtime is open too, `doc/v10/map-format.md` §9) |
-| Multiplayer co-editing: `mpHost/mpJoin/...` (21 sent, 27 received) on `editor.krunker.io/ws`, invites `?room=`, chat `#mp-chat`, remote players and outlines, script locks | E10:8945-10250, 20263-20314 | **missing** (needs an editor room relay in kn_brain) |
+| Archetype save / place entity / entity popup / archetype popup / stage editor (plate at y 5000, radius 600) / browser / ghost previews / "archetypes" undo kind / prefab dangling and strip | E10:18065-18658, 18241-18300, 15319-15364, 17611, 17990 | **done** (v10.0.7, `editor_entities.c`, `tools/editor/entities_e2e.py`); the game-side entity runtime is open (`doc/v10/map-format.md` §9) |
+| Multiplayer co-editing: `mpHost/mpJoin/...` (21 sent, 27 received) on `editor.krunker.io/ws`, invites `?room=`, chat `#mp-chat`, remote players and outlines, script locks | E10:8945-10250, 20263-20314 | **done** (v10.0.7: kn_brain's relay on the social socket, `editor_rooms.c`; `tools/editor/mp_e2e.py`, `brain_editor_rooms`) |
 | KrunkScript Shared tab (third tab after Server; template with `onEntityInit` / `simulateEntity`; 48 shared autocomplete entries), 16 new client/server entries (227 in all), client/server templates, `ksT` sends `{client, shared}` after validateMap | E10:10253, 11795-12624, 14901-14930, 15045-15075 | **partial**: the tab, template, hints, Validate (`KS_SIDE_SHARED`: GAME.UTILS and the entity hooks only, `ks_check.c`), the export round trip and Test play's check are **done** (`tools/editor/kss_v10.json`, `gen_editor_data.py`, `script_e2e.py`); the entity runtime that runs shared scripts is **missing**; the 18 v10-only GAME members the checker now accepts are no-ops until their subsystems land (`ks_api.h`) |
 | `scripting.html` / `css/scripting.css` | identical to the recovered v7-era page (P10 scripting.html) | **done** |
 | Dev bridge `?devbridge=` RPC | E10:10356-11300 | **KN**: `editor_bus_link.c` + `tools/editor-mcp` already cover it |
 | Publish Asset per-map UV channels ("Advanced" box, ten 0..7 rows, uploadA `uvc` = {slot: channel} for channels 1..7, else null) | E10:20417-20456, 20479-20490 | **done** (`editor_net.c` `uv_channel_rows`; kn_brain takes no asset uploads, so the value is only sent) |
+
+### 1.6 Krunker v10.0.7 (round 12)
+
+Checked line by line against `editor-10.0.7.js`, `index-10.0.7.js` and `editor-config-10.0.7.js`
+(`/home/dev/jails/kru/src/Krunker_v10.0.7/deob/`); `tools/editor/panels_e2e.py` (`make editor-panels-e2e`).
+
+| Feature | v10.0.7 | After |
+|---|---|---|
+| AI Rewards "Rarity Chances" (`rewardChance` / `rewc`, digits dots commas only) | IDX:9462-9472, E10:7357, 8467 | **done** |
+| Group "Key" select: the prototype's setters (map-slot accessors, canContactHit, isBoss, rewardChance, crateType, dyn) | E10:6610-7112, 14019; IDX:8461-8477 | **done** (the map-slot names edit `mp`) |
+| SHOWCASE Item / Skin picker without emotes and paints | E10:14567, 20982 | **done** |
+| T-key search: either-way match on texture name / alias / variant, skin keyword / drops / limited tag / weapon / name / creators | E10:20922-20968, CFG:4406 | **done** |
+| selectTex clears the asset texture | E10:20899-20906 | **done** |
+| Asset ID / Variant / Item / weapon Type / sign Content regenerate without rebuilding the panel | IDX:7697, 7942, 7983, 7997, 8187, 10003, 11296 | **done** |
+| historyLimit 100; Disable History empties undo / redo; Recent Actions names formatConstName(prefab) | E10:14628, 15363-15372, 7134 | **done** |
+| Reset Speed / Grid / Barrier / Snapping / All ask first (snapping back to 1, 1, 1; Reset All's refresh notice) | E10:14853-14901, 19954-19960 | **done** |
+| Grid Size abs, Spacing abs or the default | IDX:13308-13328 | **done** |
+| Resolution (view at resMltV of its size, 0.6 by default), Anti-aliasing (bound to resMltV as v10, MSAA from the next start) | E10:20071-20074, 14709; IDX:13135-13154 | **done** (`ed_view_target_begin`) |
+| Object Border Visuals (#ff0000), Highlight (random emissive under the mouse) | E10:6943, 7033, 15848-15862, 15958, 17607-17621 | **done** |
+| Publishing guide ends at step 4; Load Backup Clear All popups | E10:13494, 13570-13580 | **done** |
+| Import errors "Failed to import map with error:" | E10:17186, 17563 | **done** (KN's parse error text; alerts are #chatList lines) |
+| playTick / playSelect on the editor page | E10:12856-12861 | **done** |
+| Publish Game / Asset, plm, list windows | E10:13050-13950, 17000-17030, 20536-20870 | **done** (see the round 12 commits) |
+| Tools: "Has Ceiling" bound to frameThickness, Colorize > Gold a no-op, Color Merging's shared loop index; Deoptimizations > Turn On All Faces | IDX:12117-12119, 12189; E10:19106, 19863-19907, 20205-20260 | **done** (`tools_check.py`, `panels_e2e.py` tools) |
+| Quick GUI Fix Hitbox: `this.quickGUI` on the item config throws, the item only hides the menu | IDX:13806, 6124 | **done** (Shift+F still fixes) |
+| Undo: Optimize Faces / Color Merging are one undo step (v10 sets colours without history) | E10:20205, 20271 | **KN**: kept; KN's history records every object change (`ed_history_poll`) |
+| AI assistant panel | none in v10 | **KN**: kept; the editor's GameFont and dark panel colours |
 
 ## 2. Hub (`social.html`)
 
