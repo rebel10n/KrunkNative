@@ -49,7 +49,7 @@ static ClientRenderSettings g_rs = {
     .particles = 1, .particles_dist = 160.0f, .render_dist = 100.0f,
     .shadows = 1, .soft_shadows = 0, .high_res_shadows = 0, .dynamic_shadows = 0, .ambient_shading = 1,
     .show_trails = 1, .your_trails = 1, .muzzle_flash = 1, .bullet_tracers = 1, .bullet_tracer_color = "#ffffdb",
-    .sniper_flap = 0, .texture_anim = 1, .no_video_skins = 0, .object_anim = 1, .screen_shake = 1, .weapon_shine = 0, .lighting = 1,
+    .sniper_flap = 0, .sniper_flap_anim = 1, .texture_anim = 1, .no_video_skins = 0, .object_anim = 1, .screen_shake = 1, .weapon_shine = 0, .lighting = 1,
     .hud_health_high = "#9eeb56", .hud_health_low = "#eb5656",
     .speed_lines = 0.6f, .speed_lines_color = "#e6e6e6",
     .show_popup_score = 1, .popup_score_color = "#ffea78", .popup_score_shadow = 0,
@@ -477,7 +477,8 @@ static const RsEntry RS_TABLE[] = {
     RS_B("muzzleFlash", muzzle_flash, NULL),
     RS_B("bulletTracers", bullet_tracers, NULL),
     RS_S("bulletTracerCol", bullet_tracer_color, NULL),
-    RS_B("sniperFlap", sniper_flap, NULL),
+    RS_B("sniperFlap", sniper_flap, NULL),              // flapMesh (player_mesh.c)
+    RS_B("sniperFlapAnim", sniper_flap_anim, NULL),     // the flap's rotateMesh (deob-10.0.7.js:173489)
     RS_B("textureAnim", texture_anim, NULL),            // main.c freezes client_tick_textures at frame 0
     RS_B("noVideoSkins", no_video_skins, apply_no_video_skins), // v10.0.3: skin videos (skin_video.h)
     RS_B("objectAnim", object_anim, NULL),

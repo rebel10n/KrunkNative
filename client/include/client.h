@@ -588,6 +588,7 @@ typedef struct {
     // charm mount, the charm item inside it (swaying, player_update_meshes); NULL when none
     Mesh *charm_mount;
     Mesh *charm;
+    Mesh *flap; // sniperFlap: the weapon's scope flap (first person, weaponMeshes[i].flapMesh), follows weapon_right
     // the wrist item (type 11, players.js:1082-1089 / 1127-1130): first-person / own model only,
     // on the left arm; wrist (OBJ) or wrist_model (hasAnim GLTF) inside wrist_holder
     MeshTransform wrist_holder;
@@ -650,6 +651,8 @@ typedef struct {
     // stands in for the body, arms, weapons and cosmetics (still built, kept out of the scene); NULL: the default body
     struct PlayerClassModel *class_model;
     double pet_clock;             // gltf_clock() of the last pet / item-effect update, < 0 before the first
+    double swap_tween_clock;      // swapTweenA: gltf_clock() of the last swap (0.5 -> 1, 1200 ms Elastic.Out), < 0 none
+    int swap_tween_loadout;       // the loadoutIndex that swap started, -1 before the first
     float effect_timer;           // players.js itemEffects effectTimer (ms)
     // a weapon skin's model was not on disk when this was built (the plain weapon shows meanwhile):
     // player_weapon_skin_ready() says when to rebuild the player's meshes (client_refresh_weapon_skins)

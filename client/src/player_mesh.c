@@ -457,6 +457,35 @@ static void weapon_shine_material(BasicMaterial *material, const int shine, cons
 #define WEAPON_SPECULAR 0x292929u // the weapon / melee / sight specular
 #define PHONG_SPECULAR 0x111111u  // MeshPhongMaterial's default (the flap, the charm)
 
+// sniperFlap (deob-10.0.7.js:174237-174243): loadMesh({src: "attach/" + flap.src, tFilter Linear, mat weaponShine ?
+// Phong : Lambert, shininess 60, transparent}, flap.xOff, flap.yOff, flap.zOff, PI / 2, flap.scl, weaponMeshes[i])
+static Mesh *generate_flap_mesh(const Weapon *weapon, MeshTransform *parent) {
+    char model[128], texture[128];
+    snprintf(model, sizeof(model), "models/attach/%s.obj", weapon->flap.src);
+    snprintf(texture, sizeof(texture), "textures/attach/%s.png", weapon->flap.src);
+    char *model_path = concat(assets_path(), model);
+    char *texture_path = concat(assets_path(), texture);
+    Geometry *geometry = model_path ? load_obj_model(model_path, 0) : NULL;
+    const unsigned int texture_id = geometry && texture_path ? load_texture(texture_path) : 0;
+    free(model_path);
+    free(texture_path);
+    if (!geometry) return NULL;
+
+    BasicMaterial *material = basic_material_init();
+    if (!material) return NULL;
+    material->texture = texture_id;
+    material->base.transparent = 1;
+    weapon_shine_material(material, 1, 60.0f, PHONG_SPECULAR);
+    rt_materials_hint_model(material, model);
+    Mesh *mesh = mesh_init(geometry, (Material *) material);
+    mesh->transform.position = weapon->flap.offset;
+    mesh->transform.rotation.y = (float) M_PI * 0.5f;
+    const float scale = weapon->flap.scl ? weapon->flap.scl : 1.0f;
+    mesh->transform.scale = (vec3) {scale, scale, scale};
+    mesh->transform.parent = parent;
+    return mesh;
+}
+
 static Mesh *generate_attachment_mesh(const Weapon *weapon, const WeaponAttachment *attachment, MeshTransform *parent) {
     char model[128];
     char texture[128];
@@ -928,6 +957,7 @@ static void player_weapon_models_update(const PlayerMesh *player_mesh, const int
         const int visible = shown ? shown->visible : 0;
         if (arms->charm_mount) arms->charm_mount->visible = visible;
         if (arms->charm) arms->charm->visible = visible;
+        if (arms->flap) arms->flap->visible = arms->weapon_right ? arms->weapon_right->visible : 0;
         const int arm_visible = arms->left && arms->left->lower && arms->left->lower->mesh_count ? arms->left->lower->meshes[0]->visible : visible;
         if (arms->wrist) arms->wrist->visible = arm_visible;
         if (arms->wrist_model) {
@@ -1414,6 +1444,8 @@ void player_generate_meshes(Player *player, const int render_you) {
     player_mesh->render_you = render_you;
     player_mesh->kn_third_person = kn_third_person;
     player_mesh->pet_clock = -1.0;
+    player_mesh->swap_tween_clock = -1.0;
+    player_mesh->swap_tween_loadout = -1;
 
     // generateMeshes: petHolder = genObj3D(3, player.height, 0) on objInstances; regenMeshes / players.add:
     // game.pets.add(player) (a preview pet for the menu / viewer model, uid -1)
@@ -1801,7 +1833,12 @@ void player_generate_meshes(Player *player, const int render_you) {
                          player->loadout[i], sel_skin, sel_model[0] ? sel_model : "-", sel_tex[0] ? sel_tex : "-", (unsigned) weapon->tint,
                          arms->attachment && attachment ? attachment->src : "-", charm_index, (arms->wrist || arms->wrist_model) && look.wrist ? look.wrist->id : -1);
 
-                // TODO: flaps
+                // !server && renderYou && weapon.flap && sniperFlap && skin.mid == null && !skin.hasAnim
+                // (deob-10.0.7.js:174237): the scope flap on the weapon mesh
+                if (render_you && weapon->flap.src && client_render_settings()->sniper_flap &&
+                    !(gun_skin && (gun_skin->mid >= 0 || (gun_skin->flags & VS_HAS_ANIM))) && arms->weapon_right) {
+                    arms->flap = generate_flap_mesh(weapon, &arms->anchor);
+                }
             }
         }
 
@@ -2200,6 +2237,23 @@ void player_update_meshes(Player *player, const int is_preview) {
         charm_arms->charm->transform.rotation.z = player->direction.x * 0.2f - player->recoil_tween[0] * 1.5f - player->recoil_anim * 4.0f;
     }
 
+    // swapTweenA: swapWeapon (spawn included) sets 0.5 and tweens it to 1 over 1200 ms, Elastic.Out (deob-10.0.7.js:176445)
+    if (player_mesh->swap_tween_loadout != player->loadout_index) {
+        player_mesh->swap_tween_loadout = player->loadout_index;
+        player_mesh->swap_tween_clock = gltf_clock();
+    }
+    // sniperFlapAnim: rotateMesh(flapMesh, flap.rot * swapTweenA + 3 * stepChase - ... , null, null) (:173489-173491);
+    // off, the flap keeps loadMesh's x 0
+    PlayerArms *flap_arms = charm_arms;
+    if (flap_arms && flap_arms->flap && settings->sniper_flap_anim) {
+        const float k = player_mesh->swap_tween_clock < 0.0 ? 1.0f : (float) ((gltf_clock() - player_mesh->swap_tween_clock) / 1.2);
+        const float elastic = k >= 1.0f ? 1.0f : k <= 0.0f ? 0.0f : powf(2.0f, -10.0f * k) * sinf(5.0f * (k - 0.1f) * (float) M_PI) + 1.0f;
+        const float swap_tween_a = 0.5f + 0.5f * elastic;
+        const float sway = 3.0f * step_half_rotate + 2.8f * player->recoil_anim - player->lean_anim.z - 3.0f * player->lean_anim.x -
+                           1.8f * player->land_bob_yr + bob_anim_y + 0.1f * player->crouch_val;
+        flap_arms->flap->transform.rotation.x = player->weapon->flap.rot * swap_tween_a + sway;
+    }
+
     player_weapon_models_update(player_mesh, player->loadout_size);
 }
 
@@ -2238,6 +2292,7 @@ void player_meshes_fini(Player *player) {
             if (arms->wrist) fx_mesh_fini(arms->wrist);
             fx_gltf_fini(arms->wrist_model);
             if (arms->attachment) fx_mesh_fini(arms->attachment);
+            if (arms->flap) fx_mesh_fini(arms->flap);
 
             for (int j = 0; j < 2; j++) {
                 const PlayerArmMesh *arm = j ? arms->left : arms->right;

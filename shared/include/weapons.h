@@ -149,6 +149,13 @@ typedef struct {
     float crouch_drop;
     float attach_y_offset; // JS `attachYOff`
     float attach_z_offset; // JS `attachZOff`
+    // JS `flap` (the Sniper Rifle, copied by the AWP Blaster): the scope flap attach/<src> at offset, scale scl,
+    // swung open to rot * swapTweenA (client/src/player_mesh.c: sniperFlap / sniperFlapAnim). src NULL: none.
+    struct {
+        const char *src;
+        float rot, scl;
+        vec3 offset; // xOff, yOff, zOff
+    } flap;
     float scale;
 
     float hold_width;

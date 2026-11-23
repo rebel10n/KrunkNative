@@ -149,6 +149,18 @@ static void check_weapon_view(const Weapon *w, const cJSON *js) {
               "%s recoilAnim time / aimTime = %g / %g", w->name, (double) w->recoil_anim_time, (double) w->recoil_anim_aim_time);
     }
 
+    // flap {src, rot, scl, xOff, yOff, zOff} (the Sniper Rifle and its upgrade)
+    const cJSON *flap = cJSON_GetObjectItemCaseSensitive(js, "flap");
+    CHECK(!!w->flap.src == cJSON_IsObject(flap), "%s flap present %d", w->name, !!w->flap.src);
+    if (cJSON_IsObject(flap) && w->flap.src) {
+        const char *src = str(flap, "src");
+        CHECK(src && !strcmp(w->flap.src, src), "%s flap.src %s", w->name, w->flap.src);
+        CHECK(near(w->flap.rot, num(flap, "rot", 0)) && near(w->flap.scl, num(flap, "scl", 0)), "%s flap rot / scl", w->name);
+        CHECK(near(w->flap.offset.x, num(flap, "xOff", 0)) && near(w->flap.offset.y, num(flap, "yOff", 0)) &&
+                  near(w->flap.offset.z, num(flap, "zOff", 0)),
+              "%s flap offset %g %g %g", w->name, (double) w->flap.offset.x, (double) w->flap.offset.y, (double) w->flap.offset.z);
+    }
+
     // inspAnim {arZ, arX, arY, apZ, apX, apY, wpZ, wpY, wrY} (the Combat Knife)
     const cJSON *ia = cJSON_GetObjectItemCaseSensitive(js, "inspAnim");
     CHECK(w->has_inspect_anim == cJSON_IsObject(ia), "%s inspAnim present %d", w->name, w->has_inspect_anim);

@@ -52,7 +52,8 @@ typedef struct {
     int show_trails, your_trails, muzzle_flash; // showTrails/yourTrails/muzzleFlash (VFX)
     int bullet_tracers;      // bulletTracers (VFX)
     char bullet_tracer_color[RS_COLOR_MAX];  // bulletTracerCol
-    int sniper_flap;         // sniperFlap: scope flap animation on snipers (viewmodel)
+    int sniper_flap;         // sniperFlap: the scope flap on a first-person flap weapon (player_mesh.c, next model)
+    int sniper_flap_anim;    // sniperFlapAnim: the flap swings with the swap / step / recoil (else stays shut)
     int texture_anim;        // textureAnim: moving/framed textures (main.c client_tick_textures)
     int no_video_skins;      // noVideoSkins (v10.0.3 "Disable Video Skins", restart): skin videos off (skin_video.h)
     int object_anim;         // objectAnim: liquid wave animation (flag)

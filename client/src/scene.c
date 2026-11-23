@@ -58,6 +58,7 @@ void scene_add_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const si
             if (arms->attachment) scene_add_mesh(scene, arms->attachment);
             if (arms->charm_mount) scene_add_mesh(scene, arms->charm_mount);
             if (arms->charm) scene_add_mesh(scene, arms->charm);
+            if (arms->flap) scene_add_mesh(scene, arms->flap);
             if (arms->wrist) scene_add_mesh(scene, arms->wrist);
             scene_add_gltf(scene, arms->wrist_model);
 
@@ -134,6 +135,7 @@ void scene_remove_player_mesh(Scene *scene, const PlayerMesh *player_mesh, const
             if (arms->attachment) scene_remove_mesh(scene, arms->attachment);
             if (arms->charm_mount) scene_remove_mesh(scene, arms->charm_mount);
             if (arms->charm) scene_remove_mesh(scene, arms->charm);
+            if (arms->flap) scene_remove_mesh(scene, arms->flap);
             if (arms->wrist) scene_remove_mesh(scene, arms->wrist);
             scene_remove_gltf(scene, arms->wrist_model);
 
