@@ -112,6 +112,8 @@ void acct_get(int64_t id, AcctReplyFn cb, void *ud);
  * cb gets the account object (like acct_get). */
 void acct_ensure_central(int64_t central_id, const char *username, AcctReplyFn cb, void *ud);
 void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud);
+/* The display name removed (player_alias NULL): the account's alias is its username again. */
+void acct_clear_alias(int64_t id, AcctReplyFn cb, void *ud);
 /* -> {token}: new session, every other session of the account revoked. */
 void acct_change_password(int64_t id, const char *old_pass, const char *new_pass, AcctReplyFn cb, void *ud);
 /* Same without the old password: the caller checked the session's proof (v10.0.3's "upp", social_data.c). */
@@ -319,6 +321,7 @@ int gapi_is(const GapiReq *r, const char *method, const char *pattern); /* "/pla
 /* Modules: 1 = the request was theirs (answered now or later). */
 int clan_v10_gapi(SocialSession *s, const GapiReq *r); /* /clans/... (clan_v10.c) */
 void sh_gift(SocialSession *s, const cJSON *f);        /* "kr" */
+void sh_premium_gift(SocialSession *s, const cJSON *f); /* "prm": the hub's Premium gift (refused: real money) */
 void sh_clan(SocialSession *s, const cJSON *f);        /* "cln" */
 void sh_clan_request(SocialSession *s, const cJSON *f);/* "clnR" */
 void sh_clan_decline_all(SocialSession *s, const cJSON *f); /* "clnRA" (v10 clan window) */

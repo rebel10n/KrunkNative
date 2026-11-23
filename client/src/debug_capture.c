@@ -416,6 +416,19 @@ static void ui_cmds_run(Client *client, char *line) {
             html_dom_get_attr(e, "class", cls, sizeof(cls));
             fprintf(stderr, "[ui_cmds] at %.0f,%.0f: <%s id='%s' class='%s'>\n", x, y, tag, id, cls);
         }
+    } else if (!strcmp(cmd, "clip")) { // clip: print the system clipboard on one line (\n and \ escaped)
+        const char *clip = glfwGetClipboardString(w);
+        if (!clip) clip = "";
+        char *text = malloc(strlen(clip) * 2 + 1);
+        if (!text) return;
+        char *o = text;
+        for (const char *c = clip; *c; c++) {
+            if (*c == '\n' || *c == '\\') *o++ = '\\';
+            *o++ = *c == '\n' ? 'n' : *c;
+        }
+        *o = 0;
+        fprintf(stderr, "[ui_cmds] clip = '%s'\n", text);
+        free(text);
     } else if (!strcmp(cmd, "con")) {
         ui_console_exec(rest);
     } else if (!strcmp(cmd, "shot")) {

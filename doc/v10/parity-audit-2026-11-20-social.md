@@ -51,8 +51,8 @@ and MariaDB 11.8.
 | # | Item | 10.0.7 source | KN state | Severity |
 |---|------|---------------|----------|----------|
 | 5 | Mod page Edit (`updateMod` -> `plm` -> the publish popup prefilled, then `/upload-user-mod`). The button is drawn (`social_ui.c` creation actions) but has no handler, and kn_brain has no `plm`. | hub-10.0.7.js:6640-6651, 6814-6838 | dead button | medium |
-| 6 | Gift Premium (`confPremium` / `premiumGiftConfirmed` -> `prm`). | hub-10.0.7.js:5751-5759 | no handler, no op | medium (needs a check of how Box Office sells Premium) |
-| 7 | Hub functions with no Box Office handler. Each needs checking, since some are drawn under other names and some (`getSavedVal`, `saveVal`, `genericPopup`, `resetPops`, `createTip`, `cancelTip`) are page helpers the C side replaces: `removeFriend`, `showFriends`, `chatBanUser`, `copyProfile`, `shareGameTweet`, `socPostRes`, `updateChatList`, `clanRSr`, `changeRegion`, `hideAll`, `openListing`, `buyblackM`, `confListPopup`, `confQSPopup`, `loadMoreTradeHistory`, `bundleFilters`, `openReport`, `viewReporter`, `uploadMod` / `selectFile` / `updateFile`, `setCustomImages`, `createBadgeTip`. These are drawn but dead: `clanRSr`, `changeRegion`, `shareGameTweet`, `updateChatList`, `socPostRes`, `hideAll`. | hub-10.0.7.js `window.*` | mixed | medium |
+| 6 | Gift Premium (`confPremium` / `premiumGiftConfirmed` -> `prm`). | hub-10.0.7.js:5751-5759 | done (2026-11-23): `confPremium` / `premiumGiftConfirmed` in `social_ui.c`, brain `prm` (`sh_premium_gift`) | medium: Premium is real money only (Xsolla), so `prm` checks the target and option and answers v10's error frame with Box Office's no-payments text |
+| 7 | Hub functions with no Box Office handler. Each needs checking, since some are drawn under other names and some (`getSavedVal`, `saveVal`, `genericPopup`, `resetPops`, `createTip`, `cancelTip`) are page helpers the C side replaces: `removeFriend`, `showFriends`, `chatBanUser`, `copyProfile`, `shareGameTweet`, `socPostRes`, `updateChatList`, `clanRSr`, `changeRegion`, `hideAll`, `openListing`, `buyblackM`, `confListPopup`, `confQSPopup`, `loadMoreTradeHistory`, `bundleFilters`, `openReport`, `viewReporter`, `uploadMod` / `selectFile` / `updateFile`, `setCustomImages`, `createBadgeTip`. These are drawn but dead: `clanRSr`, `changeRegion`, `shareGameTweet`, `updateChatList`, `socPostRes`, `hideAll`. | hub-10.0.7.js `window.*` | done (2026-11-23): rechecked, no dead hub button left; `createBadgeTip` and the badge cards added | medium |
 | 8 | Item styles: `POST /items/:id/style {item_id, style}` (the style picker, deob-10.0.7.js:108820-108848), a copy's `m.style` (inventory 110719, cards 222514, 223502) and the `_s<n>` texture of a styled item in game (173602). Two items carry `styles`: KrunkCup Jerseys (48 styles, from bundle #30, which Box Office sells) and the KrunkCup Participation Band. kn_brain refuses the route (`WHY_ITEM_STYLE`). | deob-10.0.7.js:108820-108848, 173602 | refused | medium (low reach) |
 | 9 | Map versions: the Creations window's Versions tab (`getMapVersions` / `revertMapVersion`, deob-10.0.7.js:107794-107835; the list reads `version`, `created`, `data_size`, 108235-108266). kn_brain answers `[]` and refuses the revert (`WHY_VERSIONS`); the client has no Versions tab. | deob-10.0.7.js:107794-108270 | empty / refused | medium |
 | 10 | Email preferences (`GET/POST /email/preferences`, the settings toggle at deob-10.0.7.js:116916-116930). kn_brain refuses (`WHY_PREF`). | deob-10.0.7.js:116916 | refused | low |
@@ -72,12 +72,18 @@ and MariaDB 11.8.
 ## Status 2026-11-20 (end of the session)
 
 - 5 Mod page Edit: done (`plm`, the Update Mod popup; asset_upload_test, hub_creator_e2e).
-- 6 Gift Premium: skipped (the user has not decided on Premium).
+- 6 Gift Premium: done 2026-11-23. The hub's `confPremium(i)` popup (`windows.store.premium.gift`, YES / NO) and
+  `premiumGiftConfirmed(i)` send `["prm", id, i]` as hub-10.0.7.js:5751-5759 does. v10.0.7 sells Premium for real money
+  only, so the brain checks sign-in, the target and the option (0-3) and answers `["po", null, "Purchases are not
+  available in Krunker Box Office."]`. No price is invented. social_ws_test (all three stores), hub_creator_e2e.
 - 7 Hub handlers: clanRSr, changeRegion, updateChatList, socPostRes, hideAll, confListPopup, confQSPopup and
   bundleFilters were already implemented under the same names; buyblackM is KN's buyIllicit (`pbm`); openListing is
   empty in Krunker and copyProfile unreferenced. Added: shareGameTweet, removeFriend and the friends sidebar (`chtb`,
   `msg`), chatBanUser, the staff Reports tab (`rps`), loadMoreTradeHistory, createTip / cancelTip, the image
-  collection. Left: badge cards (createBadgeTip), which need badge art KN does not ship.
+  collection. 2026-11-23: badge cards and `createBadgeTip` (hub-10.0.7.js:460-463) added: the profile header's
+  `.customBadge` (stats.bdg), the Badges tab's `.badgeCard` grid in table order, and the tooltip (name in #FBC02D,
+  italic 8px description). The art is v10's `textures/badges/badge_<id>.png` from the asset host, the same files the
+  nametags, HUD and menu already use. Rechecked the dead list: none is still dead.
 - 8 Item styles: brain done (POST /items/:id/style, socket `ist`, item_styles 0393, m.style on the owned list;
   0be47980). Left for the client: the style picker popup, the inventory's Style button, the `_s<n>` thumbnails and
   in-game texture (deob-10.0.7.js:108855-108905, 135291, 173602), and the game server's loadout carrying m.style.

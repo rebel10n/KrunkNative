@@ -239,6 +239,29 @@ static kn_db_result *run_set_alias(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_SET_ALIAS = {"set_alias", NULL, run_set_alias};
 
+/* The display name cleared (v10.0.7's clearName, deob-10.0.7.js:223613-223620: ALIAS_REQUEST with no name): the
+ * profile shows the username again. name_changes keeps the change with new_name '' (the column is NOT NULL). One
+ * statement set for every dialect, PostgreSQL included (kn_set_alias always names a new alias). */
+static kn_db_result *run_clear_alias(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    kn_db_result *r = dbx_q(&x, SQL(.any = "SELECT player_alias FROM players WHERE player_id = $1 {for_update}"), KN_DB_ARGS(P(0)));
+    if (!r) return dbx_finish(&x, NULL);
+    if (kn_db_rows(r) < 1) {
+        kn_db_result_free(r);
+        return dbx_finish(&x, kn_db_result_user_error("Account not found."));
+    }
+    char *old = kn_db_isnull(r, 0, 0) ? NULL : strdup(kn_db_get(r, 0, 0));
+    kn_db_result_free(r);
+    if (old && old[0]) {
+        dbx_exec(&x, SQL(.any = "UPDATE players SET player_alias = NULL, updated_at = {now} WHERE player_id = $1"), KN_DB_ARGS(P(0)));
+        dbx_exec(&x, SQL(.any = "INSERT INTO name_changes (account_id, kind, old_name, new_name) VALUES ($1, 'alias', $2, '')"),
+                 KN_DB_ARGS(P(0), old));
+    }
+    free(old);
+    return dbx_json(&x, "kn_clear_alias", db_account_json(&x, PI(0)));
+}
+const kn_proc P_CLEAR_ALIAS = {"clear_alias", NULL, run_clear_alias};
+
 static kn_db_result *run_account_json(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     return dbx_json(&x, "kn_account_json", db_account_json(&x, PI(0)));

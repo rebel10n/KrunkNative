@@ -1023,6 +1023,13 @@ void acct_set_alias(int64_t id, const char *alias, AcctReplyFn cb, void *ud) {
     kn_db_call(g_acct_brain->db, &P_SET_ALIAS, KN_DB_ARGS(acct_itoa(ids, id), trimmed), op_account_done, o);
 }
 
+void acct_clear_alias(int64_t id, AcctReplyFn cb, void *ud) {
+    OpCtx *o = op_new(cb, ud, "alias");
+    if (!o) return;
+    char ids[24];
+    kn_db_call(g_acct_brain->db, &P_CLEAR_ALIAS, KN_DB_ARGS(acct_itoa(ids, id)), op_account_done, o);
+}
+
 void acct_get(int64_t id, AcctReplyFn cb, void *ud) {
     OpCtx *o = op_new(cb, ud, "get");
     if (!o) return;

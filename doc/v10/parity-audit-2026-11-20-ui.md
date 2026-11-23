@@ -29,16 +29,17 @@ are in `target.md` "10.0.7"; this audit looks for anything else the client draws
 | 6 | `copyGameLink` (host message "Click to Copy", team links) | :204616-204621 | n/a | none | dead in 10.0.7: its only caller passes the try-again text without a link (:204804) |
 | 7 | `selectPack` / `selectPackPop`, `downloadPack` | :217738-217746, :223432 | n/a | none | official desktop client only (`window.ClientSession`) |
 | 8 | `debugBots`, `botsPopup` | :224130-, :221123 | n/a | none | developer tools (`isDev`) |
-| 9 | `premiumConfirmed`, `clearName` | :223529, :219105 | n/a | none | the premium subscription, which Box Office does not sell (target.md) |
+| 9 | `premiumConfirmed`, `clearName` | :223529, :219105 | `kio_checkout.c` confPremium / premiumConfirmed; `account_ui.c` clearName; brain `nme` with no name, `clear_alias` | low | done (2026-11-23): the Confirmation popup and Premium flow as v10 up to checkout; the payment step is Box Office's no-payments stub (doc/v10/checkout-*.md). clearName removes the display name (`name_changes` records it) |
 | 10 | `pfpPopup` / `uploadProfilePic` | :218978, :223294 | `account_ui.c` `knPfpPick` | none | Box Office's own picker covers it |
-| 11 | `getDCExport` / `disconnectPopup` (copy disconnect diagnostics for support) | :229972-229975 | none | low | open: needs a decision on what Box Office support receives |
+| 11 | `getDCExport` / `disconnectPopup` (copy disconnect diagnostics for support) | :229972-229975 | `disconnect_report.c` | low | done (2026-11-23): v10's popup and its JSON (same keys, order and 2-space format) with copy-to-clipboard. v10 names no support link, so none is added |
 | 12 | `grabMap` / `openEdit` | :228260-228276 | `editor_net.c` | none | handled in the editor page |
 
 ## What remains
 
 - **Mod shaders (5):** done: `client/src/mod_shader_graph.c` (graph -> GLSL), `mod_shader.c` (the passes on the
   scene target), the Shader Inputs rows in `ui_settings.c` / `ui_windows.c`; doc/v10/mod-shaders.md.
-- **Disconnect report (11):** Krunker's popup builds a JSON blob for its support. Box Office would need a
-  support destination first.
+- **Disconnect report (11):** done: `client/src/ui/disconnect_report.c` builds v10's blob (ua, savedRegion,
+  connectedRegion, connectedHost, ping, v, steam, client, mobile, browser, code, reason, time) and copies it.
+  Nothing in 10.0.7 opens the popup, so no caller is added. premium_dc_e2e covers it.
 - **Not checked here:** the svelte components' inner layouts window by window (the uidiff scenarios cover
   them where captures exist), and the HUD's in-game behaviour (owned by the gameplay audit).

@@ -3098,17 +3098,21 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         cJSON_Delete(frame);
         return 1;
     }
-    if (!strcmp(name, "changeName")) { // dP("Please Wait..."); io.send("nme", displayN.value)
-        char alias[64];
+    // changeName / clearName (deob-10.0.7.js:223607-223620): "Please Wait...", then a Premium account sends ALIAS_REQUEST
+    // ("nme") with the field's text (null when empty) or, for Clear, with nothing: kn_brain clears the display name;
+    // without Premium the error "Premium required"
+    if (!strcmp(name, "changeName") || !strcmp(name, "clearName")) {
+        char alias[64] = "";
         popup_response(2, NULL, "Please Wait...");
-        read_input("displayN", alias, sizeof(alias));
-        if (!g_logged_in || !g_acc.premium || !alias[0]) {
-            popup_response(0, "Invalid name", NULL);
+        const int clear = name[1] == 'l';
+        if (!clear) read_input("displayN", alias, sizeof(alias));
+        if (!g_logged_in || !g_acc.premium) {
+            popup_response(0, "Premium required", NULL);
             return 1;
         }
         cJSON *frame = cJSON_CreateArray();
         cJSON_AddItemToArray(frame, cJSON_CreateString("nme"));
-        cJSON_AddItemToArray(frame, cJSON_CreateString(alias));
+        if (!clear) cJSON_AddItemToArray(frame, alias[0] ? cJSON_CreateString(alias) : cJSON_CreateNull());
         backend_social_send(frame);
         cJSON_Delete(frame);
         return 1;

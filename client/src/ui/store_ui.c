@@ -1804,12 +1804,17 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
         generic_popup(pop, "vouchPop");
         return 1;
     }
-    if (!strcmp(name, "showPurchase") || !strcmp(name, "premiumPopup")) { // Box Office: no payments
+    if (!strcmp(name, "premiumPopup")) { // premiumPopup(index) (deob-10.0.7.js:223591-223606) for every account: the
+        // purchase behind its Buy / Gift is kio_checkout.c's premium_buy (krunker.io's checkout, or Box Office's
+        // no-payments answer below)
+        kio_checkout_premium_popup(a0);
+        return 1;
+    }
+    if (!strcmp(name, "showPurchase")) { // Box Office: no payments
         if (kio_store_active()) { // krunker.io: the payment provider's checkout (kio_checkout.c)
             const char *s = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
             const int qty = argc > 2 && args[2].kind == HTML_ARG_NUM ? (int) args[2].num : 1;
-            if (!strcmp(name, "premiumPopup")) kio_checkout_premium_popup(a0); // :220470-220482
-            else if (s && !strncmp(s, "catalog:", 8)) kio_checkout_catalog_ref(s, qty); // showPurchase("catalog:{display}|ref", _, qty)
+            if (s && !strncmp(s, "catalog:", 8)) kio_checkout_catalog_ref(s, qty); // showPurchase("catalog:{display}|ref", _, qty)
             else if (s && !strncmp(s, "wildoffer:", 10)) kio_checkout_wild_offer(atoi(s + 10)); // :213091
             else kio_checkout_kr_pack(a0); // showPurchase(index): a KR pack (:213019-213056)
             return 1;

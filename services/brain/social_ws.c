@@ -770,6 +770,7 @@ static const SocialRoute k_routes[] = {
     {"ctd", sh_chat_thread},
     {"ict", sh_chat_send},
     {"kr", sh_gift},
+    {"prm", sh_premium_gift},           /* the hub's premiumGiftConfirmed (economy.c: refused, real money) */
     {"cln", sh_clan},
     {"clnR", sh_clan_request},
     {"ttl", sh_titles},                 /* v10: the account's titles (v10_customize.c) */
@@ -922,7 +923,7 @@ static const LabelClass k_label_class[] = {
     {"uml", RC_READ, ANS_REPLY}, {"recps", RC_READ, ANS_REPLY}, /* v10 CRAFT_DATA_REQUEST (craft.c, the Junkyard) */
     {"f", RC_WRITE, ANS_REPLY}, {"ps", RC_WRITE, ANS_REPLY}, {"com", RC_WRITE, ANS_REPLY},
     {"lps", RC_WRITE, ANS_REPLY}, {"dps", RC_WRITE, ANS_REPLY}, {"ict", RC_WRITE, ANS_REPLY},
-    {"kr", RC_WRITE, ANS_REPLY}, {"cln", RC_WRITE, ANS_REPLY}, {"clnR", RC_WRITE, ANS_REPLY},
+    {"kr", RC_WRITE, ANS_REPLY}, {"prm", RC_WRITE, ANS_REPLY}, {"cln", RC_WRITE, ANS_REPLY}, {"clnR", RC_WRITE, ANS_REPLY},
     {"clnRA", RC_WRITE, ANS_REPLY}, {"rpt", RC_WRITE, ANS_REPLY}, {"flg", RC_WRITE, ANS_REPLY}, {"hds", RC_WRITE, ANS_REPLY},
     {"ver", RC_WRITE, ANS_REPLY}, {"crt", RC_WRITE, ANS_REPLY}, {"sbdg", RC_WRITE, ANS_REPLY},
     {"nme", RC_WRITE, ANS_REPLY}, {"uploadS", RC_WRITE, ANS_REPLY}, {"uploadM", RC_WRITE, ANS_REPLY},

@@ -368,6 +368,29 @@ async def scenario(base, internal_url, secret):
         check(r[1] is None and r[2] == "Bob Display", "display name set")
         r = await b.call("nmeR", "nme", "x")
         check(r[1] == "Display name must be 3–14 characters.", "short display name refused")
+        # v10.0.7 clearName: ALIAS_REQUEST with no name (deob-10.0.7.js:223613-223620); an empty changeName sends null
+        r = await b.call("nmeR", "nme")
+        check(r[1] is None and r[2] == bob, "clearName: the display name cleared, the alias is the username again")
+        r = await b.call("0", "r", "profile", bob, bob_id, bob, None, 0)
+        check(r[3] and not r[3].get("player_alias"), "the profile has no display name: %r" % (r[3] or {}).get("player_alias"))
+        r = await b.call("nmeR", "nme", None)
+        check(r[1] is None and r[2] == bob, "an empty changeName (null) clears too (already clear: no change)")
+        async with Social(ws_url) as a:
+            await a.call("a", "a", 1, [alice, None, alice_token])
+            r = await a.call("nmeR", "nme", "Bob Display")
+            check(r[1] is None and r[2] == "Bob Display", "the cleared display name is free for another account")
+            r = await a.call("nmeR", "nme")
+            check(r[1] is None and r[2] == alice, "and alice clears hers")
+        r = await b.call("nmeR", "nme", "Bob Display")
+        check(r[1] is None and r[2] == "Bob Display", "display name set again after the clear")
+        # the hub's premiumGiftConfirmed -> "prm" [player_id, index] (hub-10.0.7.js:5756-5759): real money, refused
+        r = await b.call("po", "prm", alice_id, 1)
+        check(r and r[2] == "Purchases are not available in Krunker Box Office.", "Premium gift refused (no payments): %r" % (r,))
+        r = await b.call("po", "prm", alice_id, 4)
+        check(r and r[2] == "Invalid Premium option", "a Premium option out of store.premium refused: %r" % (r,))
+        async with Social(ws_url) as g:
+            r = await g.call("po", "prm", alice_id, 0)
+            check(r and r[2] == "Must be logged in", "a guest's Premium gift: Must be logged in: %r" % (r,))
 
         # clans (menu window protocol)
         r = await b.call("cln", "cln", 1, "BOB", None)

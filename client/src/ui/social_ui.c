@@ -1424,6 +1424,28 @@ static void profile_chat_ban_set(void *user, const int status, const char *body,
     free(name);
 }
 
+// The profile's earned badges (hub-10.0.7.js:2778): player_badge "1,5,9" split and mapped to numbers; kn_brain's socket
+// profile carries them as the "badges" array (player_badges)
+static int profile_has_badge(const cJSON *t, const int index) {
+    const cJSON *list = cJSON_GetObjectItemCaseSensitive(t, "badges"), *b;
+    cJSON_ArrayForEach(b, list) if (cJSON_IsNumber(b) && (int) b->valuedouble == index) return 1;
+    const char *csv = jstr(t, "player_badge");
+    for (const char *p = csv; p && *p;) {
+        char *end;
+        const long v = strtol(p, &end, 10);
+        if (end != p && v == index) return 1;
+        p = strchr(p, ',');
+        if (p) p++;
+    }
+    return 0;
+}
+
+// iîííïìï[i].url: textures/badges/badge_<id>[_<tex>].png on the asset host (hub-10.0.7.js:460-463; badge_texture)
+static void badge_url(const int index, char *out, const size_t n) {
+    char tex[96];
+    html_dom_asset_url(badge_texture(index, tex, sizeof(tex)), out, n);
+}
+
 static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     set_display("profileHolder", "block");
     const char *name = jstr(t, "player_name");
@@ -1466,6 +1488,15 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         sb_append(&sb, "<i class='material-icons' id='creatorBadge' title='Creator' style='margin-right:-2px;font-size:32px;color:#993299;vertical-align:middle;margin-top:-14px;'>verified</i>");
     if (premium) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#FBC02D;vertical-align:middle;margin-top:-14px;'>beenhere</i>");
     if (jnum(t, "player_featured")) sb_append(&sb, "<i class='material-icons' style='margin-right:1px;font-size:32px;color:#40C4FF;vertical-align:middle;margin-top:-14px;'>check_circle</i>");
+    // the selected badge (stats.bdg) when the profile has earned it (hub-10.0.7.js:2779-2780)
+    const cJSON *bdg = cJSON_GetObjectItemCaseSensitive(stats, "bdg");
+    if (cJSON_IsNumber(bdg) && bdg->valuedouble >= 0 && badge_get((int) bdg->valuedouble) && profile_has_badge(t, (int) bdg->valuedouble)) {
+        char url[512];
+        badge_url((int) bdg->valuedouble, url, sizeof(url));
+        sb_append(&sb, "<img draggable='false' src='");
+        sb_append_esc(&sb, url);
+        sb_append(&sb, "' class='customBadge'>");
+    }
     if (premium && alias && alias[0]) {
         sb_append(&sb, "<span id='nameSwitch' onclick='switchNames()'>");
         sb_append_esc(&sb, g_hub.profile_name);
@@ -1650,21 +1681,19 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     free(html);
     set_html("pTabContent_activity", "");
     set_html("pTabContent_listings", "");
-    // badges (v7 data/badges.js): KrunkNative has no badge table yet: the none text
-    // the earned badges (the row's badges: player_badges) by v7's names; no icons are shipped for them
+    // the Badges tab (hub-10.0.7.js:2966-2977): a card per earned badge in the table's order, its art, and the badge's
+    // tooltip on hover (createBadgeTip)
     StrBuf bsb = {0};
     int nbadges = 0;
-    const cJSON *earned = cJSON_GetObjectItemCaseSensitive(t, "badges"), *eb;
-    sb_append(&bsb, "<div class='scrollItemNew' style='text-align:left'>");
-    cJSON_ArrayForEach(eb, earned) {
-        const BadgeDef *def = badge_get(cJSON_IsNumber(eb) ? (int) eb->valuedouble : -1);
-        if (!def) continue;
+    sb_append(&bsb, "<div class='scrollItemNew'>");
+    for (int i = 0; i < BADGE_COUNT; i++) {
+        if (!profile_has_badge(t, i)) continue;
+        char url[512];
+        badge_url(i, url, sizeof(url));
         nbadges++;
-        sb_append(&bsb, "<div title='");
-        sb_append_esc(&bsb, def->desc);
-        sb_append(&bsb, "' style='display:inline-block;margin:6px;padding:8px 12px;border-radius:4px;background:rgba(255,255,255,0.08);color:#fbc02d;font-size:16px'>");
-        sb_append_esc(&bsb, def->name);
-        sb_append(&bsb, "</div>");
+        sb_appendf(&bsb, "<div class='badgeCard' data-index='%d' onmouseover='createBadgeTip(this)' onmouseout='cancelTip()'><img class='badgeImg' src='", i);
+        sb_append_esc(&bsb, url);
+        sb_append(&bsb, "'></div>");
     }
     if (!nbadges) sb_appendf(&bsb, "<div class='noneText'>%s</div>", I18N("social.profile.badges.none", "No Badges found for this user"));
     sb_append(&bsb, "</div>");
@@ -4403,6 +4432,26 @@ H(h_create_tip) {
     return 1;
 }
 
+// createBadgeTip(el) (hub-10.0.7.js:6879-6885): the badge of el's data-index, its name in gold over its description,
+// through the page's tooltip helper (iììïìiî, ui_tooltip_show)
+H(h_create_badge_tip) {
+    UNUSED;
+    char idx[16] = "";
+    if (!ev || !ev->target || html_dom_get_attr(ev->target, "data-index", idx, sizeof(idx)) < 0) return 1;
+    const BadgeDef *b = badge_get(idx[0] ? atoi(idx) : -1);
+    if (!b) return 1;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='tooltipSub'><span style='color:#FBC02D'>");
+    sb_append_esc(&sb, b->name);
+    sb_append(&sb, "</span></div><div class='tooltipSub' style='font-style:italic;font-size:8px;max-width: 300px;'>");
+    sb_append_esc(&sb, b->desc);
+    sb_append(&sb, "</div>");
+    char *html = sb_finish(&sb);
+    ui_tooltip_show(ev->target, html);
+    free(html);
+    return 1;
+}
+
 H(h_cancel_tip) {
     UNUSED;
     if (!(int) arg_n(args, argc, 0, 0)) {
@@ -4969,6 +5018,40 @@ H(h_gift_user) {
     cJSON_AddStringToObject(ext, "op", g_gift_op);
     cJSON_AddItemToArray(f, ext);
     hub_send(f);
+    io_wait(I18N("generic.wait", "Please wait..."));
+    return 1;
+}
+
+// confPremium(index) (hub-10.0.7.js:5751-5755): "Gift '<profile>' <days> days of Premium?" with YES / NO over the
+// store's premium table (classes chunk `premium`: 7 / 30 / 60 / 90 days, the store's k_premium). Nothing in the 10.0.7
+// hub draws a caller; the page defines it, so the Box Office hub does too.
+H(h_conf_premium) {
+    UNUSED;
+    const int index = (int) arg_n(args, argc, 0, -1);
+    const int days = store_ui_premium_days(index);
+    if (days <= 0 || !g_hub.profile_name[0]) return 1;
+    char dtext[16], q[256];
+    snprintf(dtext, sizeof(dtext), "%d", days);
+    I18N_F(q, "windows.store.premium.gift", "Are you sure you want to Gift '{0}' {1} days of Premium?", g_hub.profile_name, dtext);
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>");
+    sb_append_esc(&sb, q);
+    sb_appendf(&sb, "</div><div id='confirmBtn' onclick='premiumGiftConfirmed(%d)' onmouseover='playTick(0.1)'>YES</div>"
+                    "<div id='declineBtn' onclick='clearPops()' onmouseover='playTick(0.1)'>NO</div>",
+               index);
+    char *html = sb_finish(&sb);
+    generic_popup(html, "confPremiumPop", NULL);
+    free(html);
+    return 1;
+}
+
+// premiumGiftConfirmed(index) (hub-10.0.7.js:5756-5759): io.send("prm", profile.player_id, index) and the wait popup.
+// Premium is bought with real money (store.premium's USD prices), so kn_brain answers the Box Office refusal ("po").
+H(h_premium_gift_confirmed) {
+    UNUSED;
+    if (!g_hub.profile_id) return 1;
+    const double v[2] = {g_hub.profile_id, (int) arg_n(args, argc, 0, 0)};
+    send_ints("prm", 2, v);
     io_wait(I18N("generic.wait", "Please wait..."));
     return 1;
 }
@@ -7331,6 +7414,7 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"removeFriend", h_remove_friend},
     {"createTip", h_create_tip},
     {"cancelTip", h_cancel_tip},
+    {"createBadgeTip", h_create_badge_tip},
     {"knModPick", h_mod_form},
     {"knModPublish", h_mod_form},
     {"switchFeedTab", h_switch_feed_tab},
@@ -7369,6 +7453,8 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"giftPopup", h_gift_popup},          // economy (doc/v7/economy.md)
     {"calcGiftFee", h_calc_gift_fee},
     {"giftUser", h_gift_user},
+    {"confPremium", h_conf_premium},
+    {"premiumGiftConfirmed", h_premium_gift_confirmed},
     {"tradePopup", h_trade_popup},
     {"addItem", h_add_item},
     {"removeItem", h_remove_item},

@@ -35,6 +35,7 @@
 #include <alt_manager_ui.h> // the saved accounts window (alt_manager_ui.c)
 #include <v10_ui.h> // v10 Leaderboards / view stack (v10_competitive.c)
 #include <v10_party.h>    // v10 Invite / Join (v10_party.c)
+#include <disconnect_report.h> // disconnectPopup / getDCExport (disconnect_report.c)
 #include <strike_econ.h>  // Krunker Strike: the economy's knStrike* handlers (strike_econ.c)
 #include <paint_picker.h> // the owned card's paint popup (paint_picker_handle)
 #include <style_picker.h> // v10.0.7 owned item style picker
@@ -169,6 +170,8 @@ H(h_open_host_window) {
 // v10 Invite / Join (v10_party.c): openJoinWindow(a, skipClipboard), copyInviteLink(toast)
 H(h_open_join_window) { UNUSED; v10_party_open_join_window(arg_bool(ev, args, argc, 1, 0)); return 1; }
 H(h_copy_invite_link) { UNUSED; v10_party_copy_invite_link(arg_bool(ev, args, argc, 0, 0)); return 1; }
+// disconnectPopup(code, reason) / getDCExport(el, code, reason) (deob-10.0.7.js:229972-229997)
+H(h_disconnect_report) { UNUSED; disconnect_report_handle(html_ui_current_handler(), ev, args, argc); return 1; }
 
 // onclick="errorNotification.style.display = 'none'" (bare expression the handler
 // parser names kn.hideErrorNotification)
@@ -527,6 +530,10 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"knRetry", h_kn_retry},
     {"knHostOffline", h_kn_host_offline},
     {"copyInviteLink", h_copy_invite_link},
+    // the disconnect report (disconnect_report.c: v10.0.7 defines it, nothing calls it)
+    {"disconnectPopup", h_disconnect_report},
+    {"getDCExport", h_disconnect_report},
+    {"window.getDCExport", h_disconnect_report},
     // account
     {"registerAcc", h_commit_account},
     {"loginAcc", h_commit_account},

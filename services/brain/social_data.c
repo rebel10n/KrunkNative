@@ -589,7 +589,8 @@ static void op_wait_done(void *ud, const char *err, const cJSON *data) {
     social_unhold(s);
 }
 
-/* ["nme", alias] -> ["nmeR", err] | ["nmeR", null, alias] */
+/* ["nme", alias] -> ["nmeR", err] | ["nmeR", null, alias]. ["nme"] / ["nme", null] (v10.0.7's clearName and an empty
+ * changeName, deob-10.0.7.js:223607-223620) clears the display name: the answer's alias is the username. */
 void sh_alias(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) {
         social_send_n(s, "nmeR", 1, cJSON_CreateString("Not logged in."));
@@ -599,7 +600,9 @@ void sh_alias(SocialSession *s, const cJSON *f) {
     if (!w) return;
     w->s = social_hold(s);
     w->kind = 0;
-    acct_set_alias(s->account_id, fa_str(f, 1), op_wait_done, w);
+    const cJSON *a = fa(f, 1);
+    if (!a || cJSON_IsNull(a)) acct_clear_alias(s->account_id, op_wait_done, w);
+    else acct_set_alias(s->account_id, fa_str(f, 1), op_wait_done, w);
 }
 
 /* v10.0.3's Account Security: "You can update your password every 30 minutes" (deob-10.0.3.js:247680) */

@@ -238,6 +238,24 @@ void sh_gift(SocialSession *s, const cJSON *f) {
                 gift_done, NULL);
 }
 
+/* ["prm", player_id, index] (the hub's premiumGiftConfirmed, hub-10.0.7.js:5756-5759): a Premium gift of
+ * store.premium[index] (7 / 30 / 60 / 90 days). Krunker sells Premium for real money only (the table's USD prices,
+ * deob-10.0.7.js:103942-103964; premiumPopup's "Buy - <price> USD", 223591-223606; the purchase is the Xsolla "xstp"
+ * product, 223341-223354; no KR price exists), and Box Office has no payment
+ * provider (doc/v10/checkout-*.md), so the gift is refused like every other real-money purchase: "po" with the text the
+ * client shows for one (store_ui.c kn.store.noPurchases). */
+#define PREMIUM_OPTIONS 4
+void sh_premium_gift(SocialSession *s, const cJSON *f) {
+    if (!social_require_auth(s)) return;
+    const cJSON *to = fa(f, 1), *idx = fa(f, 2);
+    if (!cJSON_IsNumber(to) || to->valuedouble <= 0 || !cJSON_IsNumber(idx) || idx->valuedouble < 0 ||
+        idx->valuedouble >= PREMIUM_OPTIONS || idx->valuedouble != (double) (int) idx->valuedouble) {
+        social_error(s, "Invalid Premium option");
+        return;
+    }
+    social_error(s, "Purchases are not available in Krunker Box Office.");
+}
+
 /* ------------------------------------------------------------------ market pages */
 
 typedef struct MarketCtx {

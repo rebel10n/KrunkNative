@@ -9,7 +9,8 @@ kn_brain on sqlite + one client_bin at a time, logged in from seeded storage and
      the Leaderboard tab lists the seeded scores; the Data tab finds a player's keys, deletes one, then Delete By
      Key removes a key of every player; Edit -> Add / Take Out moves the map funds; Update Leaderboard republishes
   2. a mod's Edit (updateMod -> plm): the Update Mod popup prefilled with the mod's name
-  3. a developer's Chat Ban on a profile (/moderation/chat)
+  3. a developer's Chat Ban on a profile (/moderation/chat); the profile's badges (the header's selected badge, the
+     Badges tab's cards with their art, createBadgeTip); confPremium's gift question and kn_brain's refusal of "prm"
   4. Market > Trading > History pages (loadMoreTradeHistory)
   5. the chat sidebar (chtb): the friend's bubble, a message from them counts on it ("msg"), Friends lists them,
      Remove unfollows
@@ -279,6 +280,8 @@ def staff_profile(port, ids, tokens, names):
     A, B = ids
     q("UPDATE players SET player_developer = 1 WHERE player_id = ?", A)
     q("INSERT INTO reports (reporter_id, target_id, reason, details) VALUES (?, ?, 'Scamming', 'took the KR and left')", A, B)
+    q("INSERT INTO player_badges (account_id, badge) VALUES (?, 29), (?, 0)", B, B)
+    q("UPDATE players SET player_stats = json_set(player_stats, '$.bdg', 29) WHERE player_id = ?", B)
     c = Client(port, names[0], tokens[0], "p=profile&q=" + names[1], "staff")
     try:
         # the Reports tab (canViewReports, hub-10.0.7.js:2173-2175, 4176-4193)
@@ -296,9 +299,41 @@ def staff_profile(port, ids, tokens, names):
         c.ui("chatBanUser()")
         check(wait(lambda: not q("SELECT 1 FROM feature_bans WHERE account_id = ? AND feature = 'chat' AND revoked_at IS NULL", B)),
               "Chat Unban revoked it")
+        badges(c)
+        premium_gift(c, names)
     finally:
         c.close()
         q("UPDATE players SET player_developer = 0 WHERE player_id = ?", A)
+
+
+def badges(c):
+    """bob's badges (seeded: 0 Legacy Challenger, 29 VIP, selected 29): the header's customBadge, the Badges tab's cards
+    with their art and createBadgeTip (hub-10.0.7.js:2778-2780, 2966-2977, 6879-6885)"""
+    check(c.count("#profileHolder .customBadge[src$='img/badges/badge_18.png']") == 1,
+          "the header shows the selected badge (stats.bdg 29, VIP: badge_18.png)")
+    c.ui("openProfileTab('badges')")
+    check(wait(lambda: c.count("#pTabContent_badges .badgeCard") == 2, 10), "the Badges tab: a card per earned badge")
+    check(c.count("#pTabContent_badges .badgeCard[data-index='0'] .badgeImg[src$='textures/badges/badge_0.png']") == 1 and
+          c.count("#pTabContent_badges .badgeCard[data-index='29'] .badgeImg[src$='img/badges/badge_18.png']") == 1,
+          "each with its art (textures/badges/badge_0.png, img/badges/badge_18.png)")
+    check(c.count("#pTabContent_badges .noneText") == 0, "no none text")
+    c.cmd("clicksel 0 #pTabContent_badges .badgeCard")
+    check(c.text_has(".tooltip", "Legacy Challenger", 5) and "Completed Old Challenge Lvl 30" in (c.textof(".tooltip") or ""),
+          "createBadgeTip: the badge's name and description: %r" % c.textof(".tooltip"))
+    c.shot("badges")
+    c.cmd("move 5 5")
+    check(wait(lambda: c.count(".tooltip") == 0, 5), "cancelTip on mouseout removes it")
+
+
+def premium_gift(c, names):
+    """confPremium / premiumGiftConfirmed -> "prm" (hub-10.0.7.js:5751-5759): real money, refused by kn_brain"""
+    c.ui("clearPops();confPremium(1)")
+    check(c.text_has("#genericPop", "Are you sure you want to Gift '%s' 30 days of Premium?" % names[1]),
+          "confPremium(1): the gift question names the profile and 30 days: %r" % c.textof("#genericPop"))
+    c.shot("premium-gift")
+    c.cmd("clickid confirmBtn")
+    check(c.text_has("#genericPop", "Purchases are not available in Krunker Box Office."),
+          "YES (premiumGiftConfirmed): kn_brain's no-payments answer: %r" % c.textof("#genericPop"))
 
 
 def trade_history(port, ids, tokens, names):

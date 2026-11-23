@@ -702,6 +702,17 @@ void kio_checkout_premium_popup(const int index) { // premiumPopup(index) (:2204
     free(html);
 }
 
+// The purchase of selectPremium(index) / giftPremium(index, name) (deob-10.0.7.js:223536-223560 -> iíìììií :223341, the
+// Xsolla "xstp" product): no account opens the sign-in (showWindow(5)); a krunker.io account goes to krunker.io's
+// checkout (premium_start); a Box Office account gets the store's no-payments answer, as a KR pack does (store_ui.c
+// showPurchase): Premium has only USD prices (store.premium, :103942-103964) and Box Office no payment provider.
+static void premium_buy(const int index, const char *gift) {
+    if (!signed_in()) return;
+    if (store_ui_premium_days(index) <= 0) return;
+    if (official()) premium_start(index, gift);
+    else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
+}
+
 static void premium_gift_named(const int accepted, const char *text, void *user) { // giftPremium(index, name.trim())
     const int index = (int) (intptr_t) user;
     if (!accepted || !text) return;
@@ -709,7 +720,26 @@ static void premium_gift_named(const int accepted, const char *text, void *user)
     char name[64];
     snprintf(name, sizeof(name), "%s", text);
     for (size_t n = strlen(name); n > 0 && (name[n - 1] == ' ' || name[n - 1] == '\t'); n--) name[n - 1] = 0;
-    if (name[0] && official() && signed_in()) premium_start(index, name);
+    if (name[0]) premium_buy(index, name);
+}
+
+// confPremium(index) (deob-10.0.7.js:223527-223531): the Confirmation popup, YES = premiumConfirmed(index). Nothing in
+// 10.0.7 calls it (premiumPopup's Buy goes to selectPremium); the page defines it, so Box Office does too.
+static void conf_premium(const int index) {
+    const int days = store_ui_premium_days(index);
+    if (days <= 0) return;
+    char what[16], text[192];
+    snprintf(what, sizeof(what), "%d", days);
+    I18N_F(text, "windows.store.premium.purchase", "Are you sure you want to purchase {0} days of Premium?", what);
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='pubHed'>Confirmation</div><div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>");
+    sb_append_esc(&sb, text);
+    sb_appendf(&sb, "</div><div id='confirmBtn' onclick='logBtnFRVR(`buy_premium_confirm`);premiumConfirmed(%d)' onmouseover='playTick(0.1)'>YES</div>"
+                    "<div id='declineBtn' onclick='clearPops()' onmouseover='playTick(0.1)'>NO</div>",
+               index);
+    char *html = sb_finish(&sb);
+    generic_popup(html, "confPremiumPop");
+    free(html);
 }
 
 void kio_checkout_bp_tier(const int tier, const char *gift_to) { // selectBPTier (:212948-212966)
@@ -965,6 +995,39 @@ int kio_checkout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *ar
         }
         return 1;
     }
+    // Premium (deob-10.0.7.js:223527-223606) for every account: the popups as v10 draws them, the purchase itself by
+    // premium_buy (krunker.io's checkout, or Box Office's no-payments answer)
+    if (!strcmp(name, "selectPremium")) { // selectPremium(index) (:223536-223553)
+        premium_buy((int) num_arg(args, argc, 0, -1), NULL);
+        return 1;
+    }
+    if (!strcmp(name, "selectPremiumGift")) { // selectPremiumGift(el, index) (:223561-223590): the gift form, then giftPremium
+        const int index = (int) num_arg(args, argc, argc > 1 ? 1 : 0, -1);
+        const int days = store_ui_premium_days(index);
+        if (days <= 0) return 1;
+        char daystext[96], what[16], desc[256];
+        snprintf(what, sizeof(what), "%d", days);
+        I18N_F(daystext, "windows.store.premium.days", "{0} days of Premium", what);
+        I18N_F(desc, "windows.store.gift.desc", "Enter the name of the player you want to send '{0}' to. We will let them know you gifted it.", daystext);
+        ui_prompt(desc, premium_gift_named, (void *) (intptr_t) index);
+        return 1;
+    }
+    if (!strcmp(name, "giftPremium")) { // giftPremium(index, name) (:223554-223560)
+        const char *who = str_arg(args, argc, 1);
+        if (!active_account()) menu_show_window(5, 1);
+        else if (who && who[0]) premium_buy((int) num_arg(args, argc, 0, -1), who);
+        return 1;
+    }
+    if (!strcmp(name, "confPremium")) { // confPremium(index) (:223527-223531)
+        conf_premium((int) num_arg(args, argc, 0, -1));
+        return 1;
+    }
+    if (!strcmp(name, "premiumConfirmed")) { // premiumConfirmed(index) (:223532-223535): v10 sends "prm" index on the game
+        // socket; the purchase is premium_buy's (KrunkNative sends no payment request krunker.io's page would not)
+        ui_loadout_clear_pops();
+        premium_buy((int) num_arg(args, argc, 0, -1), NULL);
+        return 1;
+    }
     if (!official()) return -1;
     if (!strcmp(name, "knCheckoutDone")) { // the wait popup's Done: read the account again; nothing credited = confirmSlow
         if (!K.browser) return 1;
@@ -984,26 +1047,6 @@ int kio_checkout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *ar
         if (id > 0 && signed_in())
             ui_prompt("Enter the player name below to send them this bundle. We will let them know you have gifted it to them.", bundle_gift_named,
                       (void *) (intptr_t) id);
-        return 1;
-    }
-    if (!strcmp(name, "selectPremium")) { // selectPremium(index) (:220415)
-        if (signed_in()) premium_start((int) num_arg(args, argc, 0, -1), NULL);
-        return 1;
-    }
-    if (!strcmp(name, "selectPremiumGift")) { // selectPremiumGift(el, index) (:220440): the gift form, then giftPremium
-        const int index = (int) num_arg(args, argc, argc > 1 ? 1 : 0, -1);
-        const int days = store_ui_premium_days(index);
-        if (days <= 0 || !signed_in()) return 1;
-        char daystext[96], what[16], desc[256];
-        snprintf(what, sizeof(what), "%d", days);
-        I18N_F(daystext, "windows.store.premium.days", "{0} days of Premium", what);
-        I18N_F(desc, "windows.store.gift.desc", "Enter the name of the player you want to send '{0}' to. We will let them know you gifted it.", daystext);
-        ui_prompt(desc, premium_gift_named, (void *) (intptr_t) index);
-        return 1;
-    }
-    if (!strcmp(name, "giftPremium")) { // giftPremium(index, name)
-        const char *who = str_arg(args, argc, 1);
-        if (who && who[0] && signed_in()) premium_start((int) num_arg(args, argc, 0, -1), who);
         return 1;
     }
     return -1;

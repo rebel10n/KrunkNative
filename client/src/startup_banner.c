@@ -4,6 +4,7 @@
 #include <headless.h>
 #include <startup_banner.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -67,6 +68,21 @@ static const char *platform_arch(void) {
 #endif
 }
 #endif
+
+void startup_user_agent(char *out, const size_t n) {
+    if (!out || !n) return;
+#ifdef __EMSCRIPTEN__
+    char *ua = (char *) EM_ASM_PTR({
+        var u = "";
+        try { u = navigator.userAgent.toString(); } catch (e) {}
+        return stringToNewUTF8(u);
+    });
+    snprintf(out, n, "%s", ua ? ua : "");
+    free(ua);
+#else
+    snprintf(out, n, "Mozilla/5.0 (%s; %s) KrunkNative/%s", platform_os(), platform_arch(), kn_build_commit_short());
+#endif
+}
 
 void startup_banner(void) {
 #ifdef __EMSCRIPTEN__

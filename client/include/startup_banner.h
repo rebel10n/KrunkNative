@@ -7,3 +7,7 @@
 // Native: the same facts as plain "[startup]" lines on stdout: build (commit, build time, protocol),
 // platform, GL backend (headless.h), GL_RENDERER and GL_VERSION.
 void startup_banner(void);
+#include <stddef.h>
+// navigator.userAgent: the browser's on the web; natively "Mozilla/5.0 (<OS>; <arch>) KrunkNative/<commit>" (the
+// disconnect report's ua / browser, disconnect_report.c).
+void startup_user_agent(char *out, size_t n);
