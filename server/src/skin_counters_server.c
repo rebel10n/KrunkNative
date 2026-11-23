@@ -1,6 +1,7 @@
 // v10.0.4 counter skins on the server (server/include/server_skin_counters.h).
 #include <server_skin_counters.h>
 #include <server_log.h>
+#include <server_accounts.h> // accounts_worn_copy: the copy a slot names
 #include <net_ext.h>
 #include <ruleset.h> // rules_weapons: a weapon's melee flag without a game table
 #include <shared.h>
@@ -157,11 +158,20 @@ void skin_counters_bases(const ClientConnection *owner, const PlayerSkins *skins
 
 void skin_counters_send(ClientConnection *to, const ClientConnection *owner, const Player *player) {
     if (!to || !player || to->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
-    NetSkinCopiesPacket packet = {.uid = player->uid};
-    skin_counters_bases(owner, &player->skins, packet.base, packet.seed);
+    NetSkinCopiesPacketV2 packet = {.v1.uid = player->uid};
+    skin_counters_bases(owner, &player->skins, packet.v1.base, packet.v1.seed);
+    // a slot that names a copy ("<copyId>#<index>", v10.0.7's skinId): that copy's seed and wear (generateMeshes reads the
+    // slot's m: seed iiiíìiî, deob-10.0.7.js:174100 / :174182; wear, :174102-174107 / :174184-174189)
+    const int32_t worn[3] = {player->skins.primary, player->skins.secondary, player->skins.melee};
     int any = 0;
-    for (int k = 0; k < 3; k++) any |= packet.base[k] >= 0 || packet.seed[k] > 0;
-    if (!any) return;
+    for (int k = 0; k < 3; k++) {
+        const ServerSkinCopy *copy = worn[k] >= 0 ? accounts_worn_copy(owner, SKIN_COPY_SLOT_PRIMARY + k, worn[k]) : NULL;
+        if (copy) packet.v1.seed[k] = copy->seed;
+        packet.wear[k] = worn[k] >= 0 ? accounts_worn_wear(owner, SKIN_COPY_SLOT_PRIMARY + k, worn[k]) : -1.0f;
+        any |= packet.v1.base[k] >= 0 || packet.v1.seed[k] > 0 || packet.wear[k] >= 0.0f;
+    }
+    // an owner with copies always sends one, so a client drops the wear (and seed) of a copy the player no longer wears
+    if (!any && !(owner && owner->acct.skin_copy_count)) return;
     uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
     const uint16_t len = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_SKIN_COPIES, &packet, sizeof(packet));
     if (len) net_send_packet(to->fd, NET_PACKET_EXT, buf, len);

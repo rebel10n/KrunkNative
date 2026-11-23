@@ -212,6 +212,8 @@ typedef enum {
     NET_EXT_KN_LOOK = 0x81A2,         // C -> link NetLookPacket, before each ENT to an official lobby: the colours and title
     // 0x81B0 v10.0.7 ADD_PLAYERS' rankedRank and flagIndex (KrunkNative server and the krunker.io link -> player_accounts.c)
     NET_EXT_KN_PLAYER_RANK_FLAG = 0x81B0, // S -> C NetPlayerRankFlagPacket, right after a player's NET_PACKET_PLAYER_INFO
+    // 0x81C0 v10.0.7 loadout copies: the "<copyId>#<index>" slots (doc/v10/paint-copy.md section 6)
+    NET_EXT_KN_SKIN_COPY_IDS = 0x81C0, // C -> S / link NetSkinCopyIdsPacket, right before each ENT: the copy each slot names
 } NetExtSubtype;
 
 // NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
@@ -241,6 +243,14 @@ typedef struct {
     int32_t seed[3];
 } NetSkinCopiesPacket;
 _Static_assert(sizeof(NetSkinCopiesPacket) == 28, "NetSkinCopiesPacket: the wire body is 28 bytes");
+// V2 (40 bytes): the same, then each slot's wear: the copy's m.wear, the level of the weapon model's wearMap
+// (generateMeshes' `wear`, deob-10.0.7.js:174102-174107 for the melee, :174184-174189 for a weapon), -1 none. A reader takes
+// both sizes (a V1 body: no wear); an older client reads the V1 prefix.
+typedef struct {
+    NetSkinCopiesPacket v1;
+    float wear[3];
+} NetSkinCopiesPacketV2;
+_Static_assert(sizeof(NetSkinCopiesPacketV2) == 40, "NetSkinCopiesPacketV2: the wire body is 40 bytes");
 
 // NET_EXT_KN_SKIN_STYLES (S -> C): the style each worn cosmetic of player `uid` wears (v10.0.7 item styles: the owned
 // copy's m.style, set with items.setStyle, deob-10.0.7.js:27102-27106), as pairs (store index, style); generateMeshData
@@ -255,6 +265,45 @@ typedef struct {
     int32_t style[NET_SKIN_STYLES_MAX];  // its style, 1..styles.length - 1
 } NetSkinStylesPacket;
 _Static_assert(sizeof(NetSkinStylesPacket) == 72, "NetSkinStylesPacket: the wire body is 72 bytes");
+// V2 (104 bytes): the same pairs, then each pair's wear (the worn copy's m.wear: generateMeshData's wearMap level,
+// deob-10.0.7.js:173646-173651), -1 none. A V2 lists every worn cosmetic with a style > 0 or a wear (its style may be 0); an
+// older client reads the V1 prefix, where a style 0 is "none" as an absent pair is.
+typedef struct {
+    NetSkinStylesPacket v1;
+    float wear[NET_SKIN_STYLES_MAX];
+} NetSkinStylesPacketV2;
+_Static_assert(sizeof(NetSkinStylesPacketV2) == 104, "NetSkinStylesPacketV2: the wire body is 104 bytes");
+
+// NET_EXT_KN_SKIN_COPY_IDS (C -> S, and C -> the krunker.io link): the copy each loadout slot of the ENT that follows
+// names. v10.0.7 keeps a slot as "<copyId>#<index>" when the owned entry it was picked from has an id (iîìîiìï,
+// deob-10.0.7.js:24381-24383; the owned cards: :220896, :223502; selectSkin: :217816-217830) and sends that string in
+// ENTER_GAME (:215052); its server splits it into skinId / skinIndex (iïiíiïí, :24362-24380) and the slot wears that
+// copy: its paint, style, seed and wear. KrunkNative's ENT keeps the plain indices; this packet carries the copy ids in
+// SKIN_COPY_SLOT order, each with the store index its slot holds (after cosmetics_route), 0 = a plain index (a stack, a
+// free item, None or an older client: the server's plain-index rule, the first copy of that index). Sent before every
+// ENT, so a slot that no longer names a copy goes back to 0. A server with no such copy (traded, sold, consumed) or
+// whose copy is of another index falls back to the plain-index rule too.
+enum {
+    SKIN_COPY_SLOT_PRIMARY, SKIN_COPY_SLOT_SECONDARY, SKIN_COPY_SLOT_MELEE,
+    SKIN_COPY_SLOT_HAT, SKIN_COPY_SLOT_BODY, SKIN_COPY_SLOT_WAIST, SKIN_COPY_SLOT_FACE, SKIN_COPY_SLOT_DYE,
+    SKIN_COPY_SLOT_HEAD, SKIN_COPY_SLOT_BACK, SKIN_COPY_SLOT_SHOE, SKIN_COPY_SLOT_PET, SKIN_COPY_SLOT_WRIST,
+    SKIN_COPY_SLOT_CHARM1, SKIN_COPY_SLOT_CHARM2, SKIN_COPY_SLOT_CARD,
+    SKIN_COPY_SLOTS
+};
+typedef struct {
+    int32_t skin[SKIN_COPY_SLOTS];    // the store index the slot wears (the ENT's), -1 none
+    int32_t copy_id[SKIN_COPY_SLOTS]; // the owned copy's id, 0 = a plain index
+} NetSkinCopyIdsPacket;
+_Static_assert(sizeof(NetSkinCopyIdsPacket) == 128, "NetSkinCopyIdsPacket: the wire body is 128 bytes");
+// The copy id a packet gives store index `skin`: the slot `slot` holds it (slot < 0: any slot), else the first slot that
+// holds it with an id; 0 none.
+static inline int32_t net_skin_copy_id_of(const NetSkinCopyIdsPacket *p, const int slot, const int32_t skin) {
+    if (!p || skin < 0) return 0;
+    if (slot >= 0 && slot < SKIN_COPY_SLOTS && p->skin[slot] == skin && p->copy_id[slot] > 0) return p->copy_id[slot];
+    for (int k = 0; k < SKIN_COPY_SLOTS; k++)
+        if (p->skin[k] == skin && p->copy_id[k] > 0) return p->copy_id[k];
+    return 0;
+}
 
 // NET_EXT_KN_SKIN_STAT (S -> C, to the counting player only): SKIN_STAT "sks" [weapon, stat, amount] (deob-10.0.4.js:184311),
 // handled as countSkinStat(you, weapon, stat, amount) (:221919-221923). stat: the index in SKIN_STATS (shared.h).

@@ -118,7 +118,15 @@ void accounts_load_skins(ClientConnection*, const cJSON *account);
 // The account fields getSkins gives store items by (accounts_owns_skin): "twitch" (else data[31], tw_twitchname) and
 // "player_skinmaker" of the brain's account JSON
 void accounts_load_owner(ClientConnection*, const cJSON *account);
-// The paint of each worn skin, from the owner's painted copies (NULL owner: none). Sent with SKINS V2.
+// The owned copy a slot of the owner's spawn names (worn_copies: v10.0.7's "<copyId>#<index>", NET_EXT_KN_SKIN_COPY_IDS):
+// slot a SKIN_COPY_SLOT_* (-1 any) holding store index skin. NULL for a plain index, a copy the account no longer has or a
+// copy of another index: the plain-index rule (the first copy of that index) applies then.
+const ServerSkinCopy *accounts_worn_copy(const ClientConnection *owner, int slot, int skin);
+// The wear that slot shows (the model's wearMap level): the named copy's m.wear (-1 none), else the first copy of the index
+// with a wear (the plain-index rule, as the paint); -1 none.
+float accounts_worn_wear(const ClientConnection *owner, int slot, int skin);
+// The paint of each worn skin, from the copy its slot names, else the owner's painted copies (NULL owner: none). Sent with
+// SKINS V2.
 void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skins, PlayerSkinPaints *out);
 // v10.0.7 item styles: NET_EXT_KN_SKIN_STYLES to `to` with the styles player's worn cosmetics wear (the owner's styled
 // copies), sent before SPAWN and after a mid-match inventory refresh. A count-zero packet clears old styles.

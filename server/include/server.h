@@ -10,6 +10,7 @@
 #include <chat_commands.h>
 #include <player_card.h> // WP-E: PLAYER_CARD_STAT_COUNT (ServerAccount)
 #include <progression.h> // WP-E part 2c: PROGRESSION_STAT_COUNT (ServerAccount)
+#include <net_ext.h> // NetSkinCopyIdsPacket (ClientConnection: the copies an ENT's slots name)
 #include <pthread.h>
 
 #ifdef WIN32
@@ -54,6 +55,19 @@ typedef struct {
     int32_t skin;
     WornSkinPaint paint;
 } ServerSkinPaint;
+
+// One owned copy of the account ({ind, cnt: 1, id, m, st: 0} in the owned list): what a loadout slot naming it
+// ("<copyId>#<index>", NetSkinCopyIdsPacket) wears. paint, style, seed and wear come from its m (seed: skin_copy_seed of
+// m.seed or the id, deob-10.0.7.js:24346-24352); style 0 and wear < 0 are none.
+#define SERVER_SKIN_COPY_MAX 512
+typedef struct {
+    int32_t id;
+    int32_t skin;
+    WornSkinPaint paint;
+    int32_t style;
+    int32_t seed;
+    float wear;
+} ServerSkinCopy;
 
 // v10.0.4 counter skins (server/src/skin_counters_server.c): a counter skin the account owns, its copy's stat (m[stat],
 // the counter's base) and what this match counted on it (skinStats, deob-10.0.4.js:175891-175893; saved with the commit)
@@ -130,6 +144,9 @@ typedef struct {
     struct {
         int32_t skin, style;
     } skin_styles[SERVER_SKIN_STYLE_MAX];
+    // every owned copy with an id (accounts_load_skins), for the slots that name one (accounts_worn_copy)
+    uint16_t skin_copy_count;
+    ServerSkinCopy skin_copies[SERVER_SKIN_COPY_MAX];
     int badge;                        // badgeIndex (v7 account stats.bdg, badges.js), -1 none
     // player-viewer WP-E part 2a: the death screen's account values (players.js:4860), read from the
     // brain account at auth: stats["c" + classIndex] and every config.playerCardStats value
@@ -184,6 +201,10 @@ typedef struct {
     int streak_indexes[3];         // WP-B: STREAK_SLOTS (v7 ENT streakIndexes), applied at spawn
     unsigned char streak_indexes_set:1; // 0: the default pick (Nuke only)
     int pc_stat_index;             // WP-E: NET_PACKET_PC_STAT (v7 ENT pcStatIndex), -1 none
+    // v10.0.7 "<copyId>#<index>" slots: NET_EXT_KN_SKIN_COPY_IDS before the ENT (ent_copies, zero for an older client), worn
+    // from the spawn on like the skins (worn_copies, accounts_worn_copy)
+    NetSkinCopyIdsPacket ent_copies;
+    NetSkinCopyIdsPacket worn_copies;
     char name[SERVER_PLAYER_NAME_MAX];
     char address[CHAT_CMD_ADDRESS_SIZE]; // dotted peer address (chat /ip, /banip)
     unsigned char op:1;            // CLI `op`: passes the DEV checks of chat commands while perms are on

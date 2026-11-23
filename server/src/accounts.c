@@ -2570,11 +2570,57 @@ static int acc_has_paint(const ServerAccount *acct, const int skin) {
     return 0;
 }
 
+// The wear of an owned copy's metadata m (the object, or its JSON string): v10.0.7's m.wear, 0 <= wear < 1 (a minted copy,
+// migration 0398; the model's wearMap level, deob-10.0.7.js:173646-173651, :174184-174189). -1 when the copy has none.
+static float acc_copy_wear(const cJSON *entry) {
+    const cJSON *m = cJSON_IsObject(entry) ? cJSON_GetObjectItem(entry, "m") : NULL;
+    cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL;
+    if (parsed) m = parsed;
+    const cJSON *wear = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "wear") : NULL;
+    const float out = cJSON_IsNumber(wear) && wear->valuedouble >= 0.0 && wear->valuedouble <= 1.0 ? (float) wear->valuedouble : -1.0f;
+    cJSON_Delete(parsed);
+    return out;
+}
+
+// The seed of an owned copy (iiiíìiî, deob-10.0.7.js:24346-24352): m.seed, else its id; 0 for a stack
+static int32_t acc_copy_seed(const cJSON *entry) {
+    const cJSON *m = cJSON_IsObject(entry) ? cJSON_GetObjectItem(entry, "m") : NULL;
+    cJSON *parsed = cJSON_IsString(m) && m->valuestring ? cJSON_Parse(m->valuestring) : NULL;
+    if (parsed) m = parsed;
+    const cJSON *seed = cJSON_IsObject(m) ? cJSON_GetObjectItem(m, "seed") : NULL;
+    const cJSON *id = cJSON_IsObject(entry) ? cJSON_GetObjectItem(entry, "id") : NULL;
+    const int32_t out = skin_copy_seed(cJSON_IsNumber(id) ? (int64_t) id->valuedouble : 0, cJSON_IsNumber(seed), cJSON_IsNumber(seed) ? seed->valuedouble : 0.0);
+    cJSON_Delete(parsed);
+    return out;
+}
+
+const ServerSkinCopy *accounts_worn_copy(const ClientConnection *owner, const int slot, const int skin) {
+    if (!owner || skin < 0) return NULL;
+    const int32_t id = net_skin_copy_id_of(&owner->worn_copies, slot, skin);
+    if (id <= 0) return NULL;
+    for (uint16_t i = 0; i < owner->acct.skin_copy_count; i++) {
+        const ServerSkinCopy *c = &owner->acct.skin_copies[i];
+        if (c->id == id) return c->skin == skin ? c : NULL; // a copy of another index: the plain-index rule
+    }
+    return NULL; // gone (traded, sold, consumed): the plain-index rule
+}
+
+float accounts_worn_wear(const ClientConnection *owner, const int slot, const int skin) {
+    if (!owner || skin < 0) return -1.0f;
+    const ServerSkinCopy *copy = accounts_worn_copy(owner, slot, skin);
+    if (copy) return copy->wear;
+    for (uint16_t i = 0; i < owner->acct.skin_copy_count; i++) // the plain-index rule: the first copy with a wear
+        if (owner->acct.skin_copies[i].skin == skin && owner->acct.skin_copies[i].wear >= 0.0f) return owner->acct.skin_copies[i].wear;
+    return -1.0f;
+}
+
 // account.data[10] (Account.getData skins): [{ind, cnt}, ...] -> bitset; a painted copy ({ind, cnt: 1, id, m}) also
-// records its paint (the first copy of each store index keeps it).
+// records its paint (the first copy of each store index keeps it), and every copy with an id its paint, style, seed and
+// wear (skin_copies: what a slot naming that copy wears).
 void accounts_load_skins(ClientConnection *client, const cJSON *account) {
     memset(client->acct.skins_owned, 0, sizeof(client->acct.skins_owned));
     client->acct.skin_paint_count = 0;
+    client->acct.skin_copy_count = 0;
     const cJSON *data = cJSON_IsObject(account) ? cJSON_GetObjectItem(account, "data") : NULL;
     const cJSON *skins = cJSON_IsArray(data) ? cJSON_GetArrayItem(data, 10) : cJSON_IsObject(account) ? cJSON_GetObjectItem(account, "skins") : NULL;
     client->acct.skins_known = cJSON_IsArray(skins);
@@ -2598,13 +2644,25 @@ void accounts_load_skins(ClientConnection *client, const cJSON *account) {
             client->acct.skin_styles[client->acct.skin_style_count].skin = skin;
             client->acct.skin_styles[client->acct.skin_style_count++].style = style;
         }
+        const cJSON *id = cJSON_IsObject(e) ? cJSON_GetObjectItem(e, "id") : NULL;
+        if (cJSON_IsNumber(id) && id->valuedouble >= 1 && id->valuedouble <= 0x7fffffff && client->acct.skin_copy_count < SERVER_SKIN_COPY_MAX) {
+            ServerSkinCopy *c = &client->acct.skin_copies[client->acct.skin_copy_count++];
+            c->id = (int32_t) id->valuedouble;
+            c->skin = skin;
+            acc_copy_paint(e, &c->paint);
+            c->style = style;
+            c->seed = acc_copy_seed(e);
+            c->wear = acc_copy_wear(e);
+        }
     }
     skin_counters_load(client, skins); // v10.0.4 counter skins: each one's copy stat m[stat]
     if (client->acct.skins_known) server_log("%s owns %d skin(s) on this network", client->name, count);
 }
 
-// The paint each worn skin of a player shows (SKINS V2): the owner's painted copy of that store index, the way the
-// official client reads a plain index (deob-10.0.3.js:252090-252095). owner NULL (a bot, a guest): none.
+// The paint each worn skin of a player shows (SKINS V2): the copy its slot names ("<copyId>#<index>", v10.0.7's skinId,
+// deob-10.0.7.js:24362-24380), whatever its paint (an unpainted copy shows none); a plain index (or a copy that is gone)
+// wears the owner's painted copy of that store index, the way the official client reads a plain index
+// (deob-10.0.3.js:252090-252095). owner NULL (a bot, a guest): none.
 void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skins, PlayerSkinPaints *out) {
     *out = PLAYER_SKIN_PAINTS_NONE;
     if (!owner || !skins) return;
@@ -2612,6 +2670,11 @@ void accounts_skin_paints(const ClientConnection *owner, const PlayerSkins *skin
     WornSkinPaint *slots[3] = {&out->primary, &out->secondary, &out->melee};
     for (int k = 0; k < 3; k++) {
         if (worn[k] < 0) continue;
+        const ServerSkinCopy *copy = accounts_worn_copy(owner, SKIN_COPY_SLOT_PRIMARY + k, worn[k]);
+        if (copy) {
+            *slots[k] = copy->paint;
+            continue;
+        }
         for (uint16_t i = 0; i < owner->acct.skin_paint_count; i++) {
             if (owner->acct.skin_paints[i].skin == worn[k]) {
                 *slots[k] = owner->acct.skin_paints[i].paint;
@@ -2627,14 +2690,24 @@ void accounts_skin_styles_send(ClientConnection *to, const ClientConnection *own
     const int32_t worn[] = {player->cosmetics.hat, player->cosmetics.body, player->cosmetics.waist, player->cosmetics.face,
                             player->cosmetics_v7.head, player->cosmetics_v7.back, player->cosmetics_v7.shoe,
                             player->cosmetics_v7.pet, player->cosmetics_v7.wrist};
-    NetSkinStylesPacket packet = {.uid = player->uid};
-    for (size_t k = 0; k < sizeof(worn) / sizeof(worn[0]) && packet.count < NET_SKIN_STYLES_MAX; k++) {
-        const int style = worn[k] >= 0 ? acc_style_of(&owner->acct, worn[k]) : 0;
-        if (style <= 0) continue;
-        packet.skin[packet.count] = worn[k];
-        packet.style[packet.count++] = style;
+    // the copy slot of each (net_skin_copy_id_of falls back to any slot holding the index: cosmetics_route moves items)
+    static const int copy_slot[] = {SKIN_COPY_SLOT_HAT, SKIN_COPY_SLOT_BODY, SKIN_COPY_SLOT_WAIST, SKIN_COPY_SLOT_FACE, SKIN_COPY_SLOT_HEAD,
+                                    SKIN_COPY_SLOT_BACK, SKIN_COPY_SLOT_SHOE, SKIN_COPY_SLOT_PET, SKIN_COPY_SLOT_WRIST};
+    NetSkinStylesPacketV2 packet = {.v1.uid = player->uid};
+    for (size_t k = 0; k < sizeof(worn) / sizeof(worn[0]) && packet.v1.count < NET_SKIN_STYLES_MAX; k++) {
+        if (worn[k] < 0) continue;
+        // the copy the slot names: its m.style and m.wear (v10.0.7's slot metadata, deob-10.0.7.js:173681-173688); a plain
+        // index: the first styled copy's style and the first worn copy's wear (the plain-index rule)
+        const ServerSkinCopy *copy = accounts_worn_copy(owner, copy_slot[k], worn[k]);
+        const int style = copy ? copy->style : acc_style_of(&owner->acct, worn[k]);
+        const float wear = accounts_worn_wear(owner, copy_slot[k], worn[k]);
+        if (style <= 0 && wear < 0.0f) continue;
+        packet.v1.skin[packet.v1.count] = worn[k];
+        packet.wear[packet.v1.count] = wear;
+        packet.v1.style[packet.v1.count++] = style > 0 ? style : 0;
     }
-    // an owner with styled copies always sends one (count 0 too), so a client drops a style the player stopped wearing
+    for (int k = packet.v1.count; k < NET_SKIN_STYLES_MAX; k++) packet.wear[k] = -1.0f;
+    // always one (count 0 too), so a client drops a style or a wear the player stopped wearing
     uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
     const uint16_t len = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_SKIN_STYLES, &packet, sizeof(packet));
     if (len) net_send_packet(to->fd, NET_PACKET_EXT, buf, len);

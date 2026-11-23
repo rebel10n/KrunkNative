@@ -1064,6 +1064,14 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(skin_paint_wire_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    # skin_copy_ids_test (v10.0.7 "<copyId>#<index>" slots, NET_EXT_KN_SKIN_COPY_IDS): the copy a slot names gives its paint,
+    #   seed, style and wear to a joiner; a gone copy, another index's copy or no packet fall back to the plain-index rule
+    add_executable(skin_copy_ids_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/skin_copy_ids_test.c)
+    target_link_libraries(skin_copy_ids_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(skin_copy_ids_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME skin_copy_ids_test COMMAND skin_copy_ids_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     add_executable(votekick_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/votekick_test.c)
     target_link_libraries(votekick_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
