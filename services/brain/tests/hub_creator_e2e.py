@@ -7,7 +7,8 @@ kn_brain on sqlite + one client_bin at a time, logged in from seeded storage and
 
   1. the creator's map page (hub-10.0.7.js glb / sd / dd / dkd / mfnds, v10_catalog.c):
      the Leaderboard tab lists the seeded scores; the Data tab finds a player's keys, deletes one, then Delete By
-     Key removes a key of every player; Edit -> Add / Take Out moves the map funds; Update Leaderboard republishes
+     Key removes a key of every player; Edit -> Deposit / Withdraw moves the map funds (v10's KR Fee line,
+     calcMapFee); Update Leaderboard republishes. The board, rows and popups are v10's markup (:3627-3822, 6653-6679)
   2. a mod's Edit (updateMod -> plm): the Update Mod popup prefilled with the mod's name
   3. a developer's Chat Ban on a profile (/moderation/chat); the profile's badges (the header's selected badge, the
      Badges tab's cards with their art, createBadgeTip); confPremium's gift question and kn_brain's refusal of "prm"
@@ -215,6 +216,8 @@ def map_page(port, ids, tokens, names, map_name, map_id, stamp):
         board = c.textof("#mapLeaders") or ""
         check(ok and names[0] in board and board.index(names[0]) < board.index(names[1]),
               "Leaderboard tab: both players, the lower score first (Score / ASC): %r" % board)
+        check(board.startswith("PlayerScore") and "1. " + names[0] in board and "2. " + names[1] in board,
+              "v10's board: Player / Score header, numbered rows (hub-10.0.7.js:3804-3822): %r" % board)
         c.shot("leaderboard")
 
         c.ui("updateMapTab(3, true)")
@@ -222,32 +225,43 @@ def map_page(port, ids, tokens, names, map_name, map_id, stamp):
         c.type("searchDInput", names[1])
         c.ui("searchPData()")
         check(c.text_has("#dataList", "coins") and "gems" in (c.textof("#dataList") or ""), "Search lists the player's keys")
+        check(c.count("#dataList .deleteDBtn") == 2 and (c.textof("#dataList") or "").startswith("KeyValue"),
+              "v10's Data rows: Key / Value header, a delete_forever button per key (:3663-3681)")
         c.shot("data")
         c.ui("deleteData('%s', 'coins')" % names[1])
         check(wait(lambda: not q("SELECT 1 FROM ks_storage WHERE map_id = ? AND account_id = ? AND skey = 'coins'", map_id, B)),
               "the row's delete removed that key of that player")
         check(wait(lambda: "coins" not in (c.textof("#dataList") or "coins")), "and the row left the list")
         c.ui("deleteDataPop()")
-        check(c.has("delKeyInput"), "Delete By Key asks for the key")
-        c.type("delKeyInput", "gems")
-        c.ui("deleteDataConf()")
-        check(c.has("confBtn"), "and asks again")
-        c.cmd("clickid confBtn")
+        check(c.has("deleteDKey") and c.text_has("#genericPop", "Delete All From Key"), "Delete By Key asks for the key (v10's Delete Data popup)")
+        c.ui("window.deleteDataConf()")
+        check(c.text_has("#genericPop", "No Key Provided"), "no key: No Key Provided")
+        c.ui("deleteDataPop()")
+        c.type("deleteDKey", "gems")
+        c.ui("window.deleteDataConf()")
+        check(c.has("confirmBtn") and c.text_has("#genericPop", "This action is not reversible!"), "and asks again (YES / NO)")
+        c.cmd("clickid confirmBtn")
         check(wait(lambda: not q("SELECT 1 FROM ks_storage WHERE map_id = ? AND skey = 'gems'", map_id)),
               "Delete By Key removed the key of every player")
 
         c.ui("clearPops();openEdit('%s', %d, 0)" % (map_name, map_id))
         check(c.has("mapFundsInp"), "Edit opens the creator's popup")
-        c.shot("edit")
+        check(c.text_has("#genericPop", "Open in Editor") and c.text_has("#genericPop", "Update Leaderboard") and
+              c.count("#genericPop .mapFndB") == 2 and (c.textof("#mapFeeVal") or "") == "None",
+              "v10's Edit popup: Open in Editor, Update Leaderboard, Withdraw / Deposit, KR Fee None")
         c.type("mapFundsInp", "300")
+        check(wait(lambda: (c.textof("#mapFeeVal") or "").replace(" ", "") == "-30KR", 5),
+              "calcMapFee: 300 KR shows a -30 KR fee: %r" % c.textof("#mapFeeVal"))
+        c.shot("edit")
         c.ui("chngMapFunds(%d, 0)" % map_id)
         check(wait(lambda: one("SELECT map_funds FROM published_maps WHERE map_id = ?", map_id) == 300) and
-              one("SELECT player_funds FROM players WHERE player_id = ?", A) == 700, "Add: 300 KR into the map")
+              one("SELECT player_funds FROM players WHERE player_id = ?", A) == 700, "Deposit: 300 KR into the map")
+        check(c.text_has("#genericPop", "Success!"), "mfr: v10's SUCCESS popup")
         c.ui("clearPops();openEdit('%s', %d, 300)" % (map_name, map_id))
         c.type("mapFundsInp", "100")
         c.ui("chngMapFunds(%d, 1)" % map_id)
         check(wait(lambda: one("SELECT map_funds FROM published_maps WHERE map_id = ?", map_id) == 200) and
-              one("SELECT player_funds FROM players WHERE player_id = ?", A) == 800, "Take Out: 100 KR back")
+              one("SELECT player_funds FROM players WHERE player_id = ?", A) == 800, "Withdraw: 100 KR back")
         check(c.text_has("#profileKR", "800"), "the KR in the nav bar follows")
 
         upd = one("SELECT map_updatecounter FROM published_maps WHERE map_id = ?", map_id)
@@ -259,7 +273,7 @@ def map_page(port, ids, tokens, names, map_name, map_id, stamp):
         data = json.loads(one("SELECT map_data FROM published_maps WHERE map_id = ?", map_id) or "{}")
         lbs = [o for o in data.get("objects", []) if o.get("i") == PREFAB_LEADERBOARD]
         check(lbs and lbs[0].get("ldc") == "Laps", "the LEADERBOARD carries the custom stat: %r" % lbs)
-        check(c.text_has("#mapLeaders", "Laps") and "Nobody" in (c.textof("#mapLeaders") or ""),
+        check(c.text_has("#mapLeaders", "Laps") and "No Records Yet!" in (c.textof("#mapLeaders") or ""),
               "the Leaderboard tab follows the new display (a custom stat: Box Office keeps no custom scores)")
         c.shot("leaderboard-custom")
 
@@ -268,6 +282,11 @@ def map_page(port, ids, tokens, names, map_name, map_id, stamp):
         check(c.has("modNameNew"), "Edit on a mod opens the Update Mod popup")
         check(c.value("modNameNew") == "Hub Pack " + stamp, "prefilled with the mod's name: %r" % c.value("modNameNew"))
         check("Update" in (c.textof(".pubHed") or ""), "titled as an update: %r" % c.textof(".pubHed"))
+        check(c.count("#publishMod .publishLeft #modThumbSelect") == 1 and c.count("#publishMod .publishRight #modZipSelect") == 1 and
+              c.text_has("#pubGame", "Update") and "/ 25" in (c.textof("#modZipSize") or "") and "/ 250" in (c.textof("#modThumbSize") or ""),
+              "v10's Publish Mod markup: thumbnail / .zip Select, the 250 KB and 25 MB limits, the Update button (hub-10.0.7.js:6734-6754)")
+        c.ui("uploadMod()")
+        check(c.text_has("#modUpResp", "zip"), "Update with no .zip: the response line says so: %r" % c.textof("#modUpResp"))
         c.shot("update-mod")
         c.ui("clearPops();updateMod('Not Mine %s')" % stamp)
         check(c.text_has("#genericPop", "Mod not found"), "another account's mod: Mod not found")
@@ -282,6 +301,8 @@ def staff_profile(port, ids, tokens, names):
     q("INSERT INTO reports (reporter_id, target_id, reason, details) VALUES (?, ?, 'Scamming', 'took the KR and left')", A, B)
     q("INSERT INTO player_badges (account_id, badge) VALUES (?, 29), (?, 0)", B, B)
     q("UPDATE players SET player_stats = json_set(player_stats, '$.bdg', 29) WHERE player_id = ?", B)
+    # season 9 (brain.ranked.season), placed (6 matches), 1000 + 100 * 3.5 = 1350: Gold 1 (rankedRank 7)
+    q("INSERT INTO ranked_profiles (account_id, season, region, cr, wins, losses) VALUES (?, 9, 'na', '3.5', 4, 2)", B)
     c = Client(port, names[0], tokens[0], "p=profile&q=" + names[1], "staff")
     try:
         # the Reports tab (canViewReports, hub-10.0.7.js:2173-2175, 4176-4193)
@@ -311,6 +332,8 @@ def badges(c):
     with their art and createBadgeTip (hub-10.0.7.js:2778-2780, 2966-2977, 6879-6885)"""
     check(c.count("#profileHolder .customBadge[src$='img/badges/badge_18.png']") == 1,
           "the header shows the selected badge (stats.bdg 29, VIP: badge_18.png)")
+    check(c.count("#profileHolder .leftTopHolder .playerProfileRank[src$='img/ranked/ranks/rank_gold.svg'][alt='Rank']") == 1,
+          "the header's rankedRank: Gold 1, rank_gold.svg (hub-10.0.7.js:2780)")
     c.ui("openProfileTab('badges')")
     check(wait(lambda: c.count("#pTabContent_badges .badgeCard") == 2, 10), "the Badges tab: a card per earned badge")
     check(c.count("#pTabContent_badges .badgeCard[data-index='0'] .badgeImg[src$='textures/badges/badge_0.png']") == 1 and
@@ -390,7 +413,8 @@ def main():
     cfg = os.path.join(WORK, "brain.json")  # its own config: never the developer's config/config.json
     with open(cfg, "w") as f:
         json.dump({"database": {"driver": "sqlite", "path": DB, "migrations_dir": os.path.join(ROOT, "services", "db", "migrations")},
-                   "brain": {"host": "127.0.0.1", "port": port, "federation": False, "internal_secret": "hubc-e2e-%d" % os.getpid()},
+                   "brain": {"host": "127.0.0.1", "port": port, "federation": False, "internal_secret": "hubc-e2e-%d" % os.getpid(),
+                             "ranked": {"season": 9}},
                    "accounts": {"signup_rewards": {"enabled": False}, "free_premium": False, "starting_kr": 0, "login_throttle_s": 0,
                                 "password_iterations": 1000, "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, f)
     brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)

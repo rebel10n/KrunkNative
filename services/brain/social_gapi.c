@@ -582,6 +582,15 @@ static cJSON *take(cJSON *from, const char *key) {
     return v ? v : cJSON_CreateNull();
 }
 
+int social_profile_rank(cJSON *row) {
+    cJSON *ranked = row ? cJSON_DetachItemFromObjectCaseSensitive(row, "ranked") : NULL;
+    int rank = 0;
+    if (cJSON_IsObject(ranked) && kn_json_int(ranked, "season", -1) == ranked_season_now())
+        rank = ranked_rank_of(kn_json_num(ranked, "cr", 0), (int) kn_json_int(ranked, "matches", 0));
+    cJSON_Delete(ranked);
+    return rank;
+}
+
 static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     GCtx *c = extra;
     cJSON *obj = kn_db_ok(res) ? acct_db_json(res) : NULL;
@@ -652,11 +661,7 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     }
     /* ranked_rank (the rank chip, deob-10.0.3.js:126135): the rank of the running season's profile db_social.c
      * picked (a placed one, the best rated), 0 Unranked when that row is of an earlier season or missing */
-    cJSON *ranked = cJSON_DetachItemFromObjectCaseSensitive(row, "ranked");
-    int rank = 0;
-    if (cJSON_IsObject(ranked) && kn_json_int(ranked, "season", -1) == ranked_season_now())
-        rank = ranked_rank_of(kn_json_num(ranked, "cr", 0), (int) kn_json_int(ranked, "matches", 0));
-    cJSON_Delete(ranked);
+    const int rank = social_profile_rank(row);
     cJSON_DeleteItemFromObjectCaseSensitive(row, "ranked_rank");
     cJSON_AddNumberToObject(row, "ranked_rank", rank);
     cJSON_Delete(obj);

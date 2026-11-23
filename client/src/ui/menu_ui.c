@@ -1063,8 +1063,14 @@ void menu_update_instructions(void) {
             sb_append(&eb, "</div>");
             if (servers_ui_rejoining())
                 sb_appendf(&eb, "<div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.8)'>%s</div>", servers_ui_rejoin_text());
-            else if (strstr(lower, "connection banned"))
+            else if (strstr(lower, "connection banned") && (krunker_net_active() || krunker_net_failure_shown(g_ui.connect_error)))
+                // krunker.io's ban (an official game's screen): v10's line and krunker.io's appeal address (g:229053)
                 sb_append(&eb, "<div style='margin-top:10px;font-size:13px;color:rgba(255,255,255,0.4)'>Contact <span style='color:#fff'>krunker+banappeal@frvr.com</span> to Appeal the Ban</div><div></div>");
+            else if (strstr(lower, "connection banned") || !strncmp(lower, "banned", 6))
+                // Box Office's ban (its servers reject with "Banned" / "Banned: <reason>", server/src/accounts.c): the
+                // same line, naming Box Office's own destination, the menu's Contact (windows[20] tab 1, #termsInfo)
+                sb_append(&eb, "<div style='margin-top:10px;font-size:13px;color:rgba(255,255,255,0.4)'>Contact <span id='banAppealContact' style='color:#fff;cursor:pointer' "
+                               "onclick='windows[20].tabIndex=1,showWindow(21)'>Krunker Box Office</span> to Appeal the Ban</div><div></div>");
             else
                 sb_appendf(&eb, "<div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>%s</div>", I18N("error.extentions", "If you have any extensions, disable them"));
         }

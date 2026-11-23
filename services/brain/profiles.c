@@ -116,6 +116,11 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     /* io_0(e, a, t=row, r=games, l=mods, c=followState, f=assets) */
     cJSON *row = cJSON_DetachItemFromObject(obj, "row");
     const cJSON *pid = row ? cJSON_GetObjectItemCaseSensitive(row, "player_id") : NULL;
+    if (row) { /* rankedRank: the header's rank icon (hub-10.0.7.js:2780), the running season's rank, 0 Unranked */
+        const int rank = social_profile_rank(row);
+        cJSON_DeleteItemFromObjectCaseSensitive(row, "rankedRank");
+        cJSON_AddNumberToObject(row, "rankedRank", rank);
+    }
     cJSON_AddItemToArray(f, row);
     cJSON_AddItemToArray(f, cJSON_DetachItemFromObject(obj, "games"));
     cJSON_AddItemToArray(f, cJSON_DetachItemFromObject(obj, "mods"));
@@ -398,8 +403,8 @@ const char *profile_report_reason(const cJSON *v) {
  * only (an empty list for others). Rows: {rp_id, rp_date, rp_reportername, rp_index (v10's reason
  * index; reasons not in v10's list count as Other), rp_text}, newest first. */
 void profile_reports_query(SocialSession *s, const char *name, int raw, SocialDbFn fn, void *extra) {
-#define REPORTS_SQL(TEXT, ACCOUNT)                                                                                \
-    "SELECT rp.id AS rp_id, rp.created_at AS rp_date, {epoch_ms:rp.created_at} AS rp_ms__i, a.username AS rp_reportername, " \
+#define REPORTS_SQL(TEXT, ACCOUNT, MS)                                                                            \
+    "SELECT rp.id AS rp_id, rp.created_at AS rp_date, " MS " AS rp_ms__i, a.username AS rp_reportername, " \
     "CASE rp.reason WHEN 'Hacking' THEN 0 WHEN 'Exploiting' THEN 1 WHEN 'Scamming' THEN 2 "                       \
     "WHEN 'Harassment' THEN 3 WHEN 'Boosting' THEN 5 WHEN 'Market Manipulation' THEN 6 ELSE 4 END AS rp_index__i, " \
     TEXT " AS rp_text "                                                                                             \
@@ -407,9 +412,13 @@ void profile_reports_query(SocialSession *s, const char *name, int raw, SocialDb
     "WHERE rp.target_id = " ACCOUNT " "                                                                            \
     "AND EXISTS (SELECT 1 FROM players p WHERE p.player_id = $2 AND (p.player_moderator > 0 OR p.player_developer > 0)) " \
     "ORDER BY rp.id DESC LIMIT 100"
-    static const kn_sql escaped = {.pg = REPORTS_SQL("kn_html(rp.details)", "kn_account_id($1)"),
-                                   .any = REPORTS_SQL("{html:rp.details}", ACCOUNT_ID_OF_1)};
-    static const kn_sql plain = {.pg = REPORTS_SQL("rp.details", "kn_account_id($1)"), .any = REPORTS_SQL("rp.details", ACCOUNT_ID_OF_1)};
+    /* .pg is sent as written (no {template} expansion): its epoch is spelled out as store_postgres.c expands {epoch_ms} */
+#define REPORTS_PG_MS "(extract(epoch FROM rp.created_at) * 1000)::bigint"
+    static const kn_sql escaped = {.pg = REPORTS_SQL("kn_html(rp.details)", "kn_account_id($1)", REPORTS_PG_MS),
+                                   .any = REPORTS_SQL("{html:rp.details}", ACCOUNT_ID_OF_1, "{epoch_ms:rp.created_at}")};
+    static const kn_sql plain = {.pg = REPORTS_SQL("rp.details", "kn_account_id($1)", REPORTS_PG_MS),
+                                 .any = REPORTS_SQL("rp.details", ACCOUNT_ID_OF_1, "{epoch_ms:rp.created_at}")};
+#undef REPORTS_PG_MS
 #undef REPORTS_SQL
     char me[24];
     social_query(s, raw ? &plain : &escaped, KN_DB_ARGS(name ? name : "", social_viewer(s, me)), fn, extra);

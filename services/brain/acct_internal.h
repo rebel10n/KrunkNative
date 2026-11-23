@@ -261,6 +261,10 @@ const char *social_viewer(const SocialSession *s, char buf[24]);
 
 /* ---- handlers (profiles.c, leaderboards.c, social_data.c) */
 void sh_page(SocialSession *s, const cJSON *f);        /* "r" */
+/* A P_PROFILE row's ranked rank: detaches its "ranked" object (the latest season's ranked_profiles row, db_social.c)
+ * and returns the running season's rank (ranked_rank_of), 0 Unranked for an earlier season or none. The gapi
+ * profile writes it as ranked_rank, the hub's "r" profile as rankedRank (social_gapi.c, profiles.c). */
+int social_profile_rank(cJSON *row);
 void sh_search(SocialSession *s, const cJSON *f);      /* "sp" */
 void sh_follow(SocialSession *s, const cJSON *f);      /* "f" */
 void sh_followers(SocialSession *s, const cJSON *f);   /* "gfs" */

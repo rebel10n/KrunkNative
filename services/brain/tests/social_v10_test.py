@@ -189,9 +189,19 @@ async def scenario(names):
     check(d.get("player_badge") == "3,12" and d.get("player_twitchname") == "kn_tw_a" and d.get("ranked_rank") == 7,
           "A's profile: player_badge \"3,12\", player_twitchname, ranked_rank 7 (Gold 1) (got %r %r %r)"
           % (d.get("player_badge"), d.get("player_twitchname"), d.get("ranked_rank")))
+    # the hub's profile row (["r", "profile", name]): rankedRank, the header's rank icon (hub-10.0.7.js:2780)
+    await B.send(["r", "profile", an])
+    hub = await B.recv_until(lambda f: f[0] == "0" and f[1] == "profile")
+    row = hub[3] if hub and len(hub) > 3 and isinstance(hub[3], dict) else {}
+    check(row.get("rankedRank") == 7 and "ranked" not in row,
+          "the hub's profile row: rankedRank 7 (Gold 1), no raw ranked object (got %r)" % row.get("rankedRank"))
     q("DELETE FROM ranked_profiles WHERE account_id = ? AND season = 9", a_id)
     st, r = await B.gapi("GET", "/players/%s" % an)
     check(st == 200 and r["data"]["ranked_rank"] == 0, "only an earlier season's profile: ranked_rank 0 (Unranked)")
+    await B.send(["r", "profile", an])
+    hub = await B.recv_until(lambda f: f[0] == "0" and f[1] == "profile")
+    row = hub[3] if hub and len(hub) > 3 and isinstance(hub[3], dict) else {}
+    check(row.get("rankedRank") == 0, "the hub's profile row: rankedRank 0 for an earlier season only (got %r)" % row.get("rankedRank"))
     st, r = await B.gapi("POST", "/players/%s/follow" % an, {"follow": True})
     check(st == 200 and r["data"]["following"] is True, "B follows A back")
     check(await B.recv_until(lambda f: f[0] == "gmc" and f[1] >= 2, timeout=1.0) is None,

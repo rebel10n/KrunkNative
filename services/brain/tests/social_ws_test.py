@@ -332,6 +332,8 @@ async def scenario(base, internal_url, secret):
         row = r[3]
         check(r[1] == "profile" and r[2] == alice and row and row["player_name"] == alice, "profile row")
         check(isinstance(row["player_stats"], str), "player_stats is a JSON string (JSON.parse in io_0)")
+        check(row.get("rankedRank") == 0 and "ranked" not in row,
+              "rankedRank 0 (no ranked profile: Unranked; the header's rank icon, hub-10.0.7.js:2780): %r" % row.get("rankedRank"))
         check(r[6] == [{"f": 0}], "follow state not following")
         await b.send("f", alice, 1)  # no reply; the socket runs requests in order
         r = await b.call("0", "r", "profile", alice, bob_id, bob, None, 0)

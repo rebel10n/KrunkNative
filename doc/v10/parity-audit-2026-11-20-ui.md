@@ -45,5 +45,11 @@ are in `target.md` "10.0.7"; this audit looks for anything else the client draws
 - **Disconnect report (11):** done: `client/src/ui/disconnect_report.c` builds v10's blob (ua, savedRegion,
   connectedRegion, connectedHost, ping, v, steam, client, mobile, browser, code, reason, time) and copies it.
   Nothing in 10.0.7 opens the popup, so no caller is added. premium_dc_e2e covers it.
+- **Ban appeal (2026-11-23):** the Lost Connection screen's "Contact … to Appeal the Ban" line (g:229053) keeps
+  krunker.io's address only for an official krunker.io game's "Connection Banned". A Box Office ban (its servers
+  reject with "Banned" / "Banned: <reason>") gets the same line naming Krunker Box Office, which opens the menu's
+  Contact (`windows[20].tabIndex=1,showWindow(21)`, as #termsInfo does): the repository has no other support
+  destination (no support mail in config.example.json or the docs). That window is still v10's own text (FRVR's
+  support desk); Box Office has not written its own. connect_ux_e2e (banned).
 - **Not checked here:** the svelte components' inner layouts window by window (the uidiff scenarios cover
   them where captures exist), and the HUD's in-game behaviour (owned by the gameplay audit).

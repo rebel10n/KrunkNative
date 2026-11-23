@@ -16,6 +16,9 @@ free_ports. Two headless client_bin runs against server_bin:
      behind the spinner, the Lost Connection box shows ("Lost connection to the server (no data for
      10 s)", NET_SESSION_IDLE_SECONDS) with v10's Find Game as its first tab, and nothing reconnects
      on its own. Server A is started again and that tab (call knRetry) brings the client back in the game.
+  3. banned: a server whose gameserver.bans_file bans 127.0.0.1 refuses the client ("Banned"). The Lost Connection
+     box has v10's appeal line (g:229053) naming Krunker Box Office, which opens the menu's Contact (windows[20]
+     tab 1); krunker.io's appeal address is only for an official krunker.io game's ban.
 
 Samples are read with the input script's `nodes` / `text` lines (class selectors: the id selectors do
 not see the page's boot markup). Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL;
@@ -207,10 +210,47 @@ def giveup_scenario():
     os.killpg(a2.pid, signal.SIGTERM)
 
 
+def banned_scenario():
+    """a Box Office server that bans the client's address (gameserver.bans_file "ips"): the Lost Connection screen
+    has v10's appeal line (g:229053), naming Box Office's own destination, the menu's Contact (windows[20] tab 1)
+    instead of krunker.io's appeal address, which is for krunker.io's bans"""
+    port = free_ports(1)[0]
+    bans = os.path.join(WORK, "bans.json")
+    with open(bans, "w") as f:
+        f.write('{"ips": ["127.0.0.1"]}')
+    os.environ["KN_GAMESERVER_BANS_FILE"] = bans
+    try:
+        s = start_server(port, "banned-srv")
+    finally:
+        del os.environ["KN_GAMESERVER_BANS_FILE"]
+    time.sleep(1.5)
+    p, log = start_client("banned", ["--connect", f"127.0.0.1:{port}"],
+                          "0 boot\n6000 nodes @box .instructionsHeader\n6050 text @appeal span[id=banAppealContact]\n"
+                          "6100 grep @line Appeal body\n6150 grep @kio banappeal body\n"
+                          "6200 clicksel span[id=banAppealContact]\n7500 nodes @contact .contactsHeader\n8000 quit\n")
+    finish(p, 90)
+    text = read(log)
+    box = nodes_at(text, "@box", 6000, 6050)
+    check("banned: the server refuses the banned address (Lost Connection box)", box and box[0] >= 1 and
+          "IP banned" in read(os.path.join(WORK, "banned-srv.log")), str(box))
+    appeal = text_at(text, "@appeal", 6050, 6100)
+    check("banned: the appeal line names Krunker Box Office", appeal and appeal[0][1] == 1 and appeal[0][2] == "Krunker Box Office",
+          str(appeal))
+    grep = lambda label, lo: [(int(m.group(2)), int(m.group(3))) for m in re.finditer(
+        r"\[input_script\] grep t=(\d+) " + re.escape(label) + r" needle=\S* n=(\d+) hits=(\d+)", text) if lo <= int(m.group(1)) < lo + 50]
+    line, kio = grep("@line", 6100), grep("@kio", 6150)
+    check("banned: v10's appeal line (Contact ... to Appeal the Ban)", line and line[0][1] == 1, str(line))
+    check("banned: no krunker.io appeal address for a Box Office ban", kio and kio[0] == (1, 0), str(kio))
+    contact = nodes_at(text, "@contact", 7500, 7550)
+    check("banned: the appeal link opens the menu's Contact window", contact and contact[0] >= 1, str(contact))
+    os.killpg(s.pid, signal.SIGTERM)
+
+
 def main():
     try:
         switch_scenario()
         giveup_scenario()
+        banned_scenario()
     finally:
         for p in procs:
             if p.poll() is None:

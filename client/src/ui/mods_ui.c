@@ -34,6 +34,7 @@
 #include <cJSON.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -376,10 +377,53 @@ static int zip_mb(const AccountInfo *a) { return a && a->premium ? 50 : 25; }
 static void set_resp(const char *text, const int err) {
     snprintf(P.resp, sizeof P.resp, "%s", text ? text : "");
     P.resp_err = err;
+    if (P.done) { // the hub's popup: uploadResp (hub-10.0.7.js:6806-6813) shows #modResHolder and writes the text
+        HtmlElem holder = html_dom_by_id("modResHolder");
+        if (holder) html_dom_set_style(holder, "display", "");
+    }
     HtmlElem el = html_dom_by_id("modUpResp");
     if (!el) return;
-    html_dom_set_style(el, "color", err ? "#e33b3b" : "rgba(255,255,255,0.7)");
+    if (!P.done) html_dom_set_style(el, "color", err ? "#e33b3b" : "rgba(255,255,255,0.7)");
     html_dom_set_text(el, P.resp);
+}
+
+// The hub's Publish / Update Mod popup, v10.0.7's markup (publishModPopup, hub-10.0.7.js:6734-6754): the thumbnail on
+// the left (Select, its KB limit), the .zip on the right (Select, its MB limit), the name, the response line and the
+// Publish / Update button. selectFile opens the platform file dialog (mods_ui_handle), uploadMod is publish().
+static char *hub_publish_form(void) {
+    const AccountInfo *acc = active_account();
+    if (!acc) return NULL;
+    const int kb = thumb_kb(acc), mb = zip_mb(acc);
+    StrBuf sb = {0};
+    sb_append(&sb, "<div id='publishMod' style='display:block'><div class='publishLeft' id='modThumbH'><img id='modThumbPrev' src='");
+    esc(&sb, P.thumb_src[0] ? P.thumb_src : "./img/noimg.png");
+    sb_appendf(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' style='width: 100%%;height: 100%%;'><div id='modThumbSize'>0 / %d "
+                    "<span style='color:rgba(255, 255, 255, 0.4)!important;'>KB</span></div><input onclick='selectFile(&quot;modThumb&quot;)' "
+                    "type='button' id='modThumbSelect' value='Select'><div class='changeThumb'>Select Thumbnail</div><input id='modThumb' "
+                    "type='file' accept='image/png' style='width:1px;visibility:hidden;' onchange='updateFile(this.id,0,0,%d)'></div>",
+               kb, kb);
+    sb_appendf(&sb, "<div class='publishRight'><div style='color:rgba(255, 255, 255, 0.6)!important;font-size:18px;margin-bottom: 5px;' id='modZipH'>"
+                    "<div style='color:rgba(255, 255, 255, 0.6)!important;font-size:16px'>Mod File (.zip):<input onclick='selectFile(&quot;modZip&quot;)' "
+                    "type='button' id='modZipSelect' class='fileSelect' value='Select'><input id='modZip' type='file' accept='.zip' "
+                    "style='width:1px;visibility:hidden;' onchange='updateFile(this.id, 1, true,%d)'><span style='color:rgba(255, 255, 255, 0.6)!important;"
+                    "font-size: 14px;float:right;margin-top: 5px;' id='modZipSize'>0 / %d <span style='color:rgba(255, 255, 255, 0.4)!important;'>MB</span>"
+                    "</span></div></div></div>",
+               mb, mb);
+    sb_append(&sb, "<input id='modNameNew' type='text' maxlength='500' class='mapInput' ");
+    if (P.update && P.prefill[0]) {
+        sb_append(&sb, "value='");
+        esc(&sb, P.prefill);
+        sb_append(&sb, "'");
+    } else {
+        sb_append(&sb, "placeholder='Name'");
+    }
+    sb_appendf(&sb, " autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div><div id='modResHolder' "
+                    "style='margin-top:8px;margin-bottom:5px;display:%s'><div id='modUpResp' style='color:rgba(0,0,0,0.3);display: inline-block;'>",
+               P.resp[0] ? "block" : "none");
+    esc(&sb, P.resp);
+    sb_appendf(&sb, "</div></div><div id='pubGame' style='margin-top:10px;width: calc(100%% - 11px);' onclick='uploadMod()'>%s</div>",
+               P.update ? "Update" : "Publish");
+    return sb_finish(&sb);
 }
 
 static char *publish_form(void) {
@@ -435,18 +479,21 @@ static void forget_files(void) {
     P.resp_err = 0;
 }
 
-// the hub's popup cannot be re-rendered under the player: the picked file's size and name go in place
-static void picked_in_place(const int thumb) {
+// the hub's popup cannot be re-rendered under the player: updateFile (hub-10.0.7.js:6779-6802) in place. #<id>H's
+// title is the file's name and #<id>Select reads Change; the .zip's size line is round(MB, 2) / its limit (the
+// thumbnail's updateFile passes no size flag, so its "0 / KB" line stays)
+static void picked_in_place(const int thumb, const char *path) {
     const AccountInfo *acc = active_account();
-    char t[96];
+    const char *base = path ? strrchr(path, '/') : NULL;
+    base = base ? base + 1 : path ? path : "";
     HtmlElem e;
-    if (thumb) {
-        snprintf(t, sizeof t, "%.2f / %d KB", P.thumb_size / 1e3, thumb_kb(acc));
-        if ((e = html_dom_by_id("modThumbSize"))) html_dom_set_text(e, t);
-    } else {
-        snprintf(t, sizeof t, "%.2f / %d MB", P.zip_size / 1e6, zip_mb(acc));
-        if ((e = html_dom_by_id("modZipSize"))) html_dom_set_text(e, t);
-        if ((e = html_dom_by_id("modZipName"))) html_dom_set_text(e, P.zip_name);
+    if ((e = html_dom_by_id(thumb ? "modThumbH" : "modZipH"))) html_dom_set_attr(e, "title", base);
+    if ((e = html_dom_by_id(thumb ? "modThumbSelect" : "modZipSelect"))) html_dom_set_value(e, "Change");
+    if (!thumb) {
+        char t[160];
+        snprintf(t, sizeof t, "%g / %d <span style='color:rgba(255, 255, 255, 0.4)!important;'>MB</span>",
+                 round(P.zip_size / 1e6 * 100.0) / 100.0, zip_mb(acc));
+        if ((e = html_dom_by_id("modZipSize"))) html_dom_set_html(e, t);
     }
 }
 
@@ -457,7 +504,7 @@ char *mods_ui_hub_publish(const char *name, const char *mod_id, const int thumb,
     snprintf(P.prefill, sizeof P.prefill, "%s", P.update ? name : "");
     if (P.update && thumb && mod_id && *mod_id) snprintf(P.thumb_src, sizeof P.thumb_src, USER_ASSETS "/md%s/thumb.png", mod_id);
     else P.thumb_src[0] = 0;
-    return publish_form();
+    return hub_publish_form();
 }
 
 static void picked_publish(void *user, const char *path) {
@@ -476,7 +523,7 @@ static void picked_publish(void *user, const char *path) {
         const char *b = strrchr(path, '/');
         snprintf(P.zip_name, sizeof P.zip_name, "%s", b ? b + 1 : path);
     }
-    if (P.done) picked_in_place(thumb);
+    if (P.done) picked_in_place(thumb, path);
     char name[256] = "";
     HtmlElem in = html_dom_by_id("modNameNew");
     if (in) html_dom_get_value(in, name, sizeof name);
@@ -759,7 +806,10 @@ int mods_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         const int thumb = !strcmp(sarg(args, argc, 0), "thumb");
         if (thumb && !level_ok(active_account())) return 1;
         ed_pick_file(thumb ? "image/png" : ".zip", picked_publish, thumb ? (void *) 1 : NULL);
-    } else if (!strcmp(name, "knModPublish")) {
+    } else if (!strcmp(name, "selectFile")) { // the hub's popup: selectFile("modThumb" | "modZip")
+        const int thumb = !strcmp(sarg(args, argc, 0), "modThumb");
+        ed_pick_file(thumb ? "image/png" : ".zip", picked_publish, thumb ? (void *) 1 : NULL);
+    } else if (!strcmp(name, "knModPublish") || !strcmp(name, "uploadMod")) {
         publish();
     } else return -1;
     return 1;

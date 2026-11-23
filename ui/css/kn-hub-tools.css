@@ -1,25 +1,3 @@
-/* Box Office's own styles for the hub map page tools (client/src/ui/social_ui.c "the map page tools"):
- * the Leaderboard and Data tab rows and the creator's Edit popup. */
-.knMapBoardHead, .knMapBoardRow { display: flex; justify-content: space-between; gap: 12px; }
-.knMapBoardHead { font-size: 18px; color: rgba(255, 255, 255, 0.75); padding-bottom: 6px; margin-bottom: 6px;
-                  border-bottom: 1px solid rgba(255, 255, 255, 0.35); }
-.knMapBoardRow { font-size: 16px; color: rgba(255, 255, 255, 0.6); padding: 2px 0; }
-.knMapBoardRow > span:last-child { color: rgba(255, 255, 255, 0.45); text-align: right; }
-.knMapBoardEmpty { font-size: 16px; color: rgba(255, 255, 255, 0.6); text-align: center; padding: 6px 0; }
-.knMapDataDel { font-size: 18px; vertical-align: middle; cursor: pointer; color: #f0675f; }
-.knMapDataDel:hover { color: #ff8a83; }
-.knMapEdit { display: flex; flex-direction: column; gap: 8px; color: #fff; min-width: 320px; }
-.knMapEdit .inputGrey2 { float: none; width: 100%; box-sizing: border-box; padding: 4px; }
-.knMapEditTitle { font-size: 20px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.knMapEditOpen { font-size: 15px; color: #5fb4ff; cursor: pointer; }
-.knMapEditOpen:hover { text-decoration: underline; }
-.knMapEditSect { font-size: 17px; margin-top: 10px; color: rgba(255, 255, 255, 0.85); }
-.knMapEditNote { font-size: 14px; color: rgba(255, 255, 255, 0.5); margin-left: 6px; }
-.knMapEditBtns { display: flex; gap: 10px; }
-.knMapEditBtns .button { flex: 1; text-align: center; padding: 6px 0; }
-.knMapFundsAdd, .knMapLbSave { background-color: #3d9be9; }
-.knMapFundsTake { background-color: #e5554b; }
-
 /* the settings' image collection (image_collection.c), the same rules as css/kn-alt.css on the menu page */
 .kn-image-grid {
 	display: flex;

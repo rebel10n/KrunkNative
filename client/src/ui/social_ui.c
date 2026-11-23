@@ -30,6 +30,7 @@
 #include <html_ui.h>
 #include <social.h>
 #include <badges.h>    // badge_get: the earned badges of a profile (Badges tab)
+#include <ranked.h>    // ranked_rank_icon: the profile header's rank (rankedRank)
 #include <v10_social.h> // v10_gapi: the giveaway post (gapi POST /social/post)
 #include <ui_logic.h>
 #include <ui_vgrid.h> // the market / inventory / item lists are virtual grids
@@ -1496,6 +1497,18 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         sb_append(&sb, "<img draggable='false' src='");
         sb_append_esc(&sb, url);
         sb_append(&sb, "' class='customBadge'>");
+    }
+    // t.rankedRank (hub-10.0.7.js:2780): the rank's icon, img/ranked/ranks/rank_<tier>.svg (index-D_a-cl5k.js
+    // iiïìîïï, unknown ranks the unranked icon), drawn only for a truthy rank. Box Office's profile row carries it
+    // (services/brain/profiles.c), krunker.io's comes as krunker.io sends it.
+    const cJSON *rr = cJSON_GetObjectItemCaseSensitive(t, "rankedRank");
+    const double rank = cJSON_IsNumber(rr) ? rr->valuedouble : cJSON_IsString(rr) && rr->valuestring[0] ? atof(rr->valuestring) : 0;
+    if (rank != 0 || (cJSON_IsString(rr) && rr->valuestring[0])) {
+        char url[256];
+        html_dom_asset_url(ranked_rank_icon(rank == (int) rank ? (int) rank : 0), url, sizeof(url));
+        sb_append(&sb, "<img draggable='false' src='");
+        sb_append_esc(&sb, url);
+        sb_append(&sb, "' class='playerProfileRank' alt='Rank'>");
     }
     if (premium && alias && alias[0]) {
         sb_append(&sb, "<span id='nameSwitch' onclick='switchNames()'>");
@@ -6844,8 +6857,9 @@ H(h_delete_creation) {
 //   mfnds the Edit popup's Deposit (0) / Withdraw (1) (chngMapFunds, :6673-6679) -> mfr(funds | null) (:3796-3803)
 //   ulb   its Leaderboard Display (updateMapLB, :6680-6688) -> upMp(text)
 //   edMp  its Open in Editor (grabMap, :6689-6693) -> edMp(json | null): staged as mapToEdit (s2c_ui_edit_map)
-// The markup and wording here are Box Office's own. The Edit popup shows no fee line: kn_brain moves the exact
-// amount, as the game's Creations window does (deob-10.0.7.js:107760-107764).
+// The markup and wording are v10.0.7's: the Edit popup (openEdit, :6653-6656) with its KR Fee line (calcMapFee,
+// :6657-6671: 10% of the typed amount, shown only), the Leaderboard tab's board (:3804-3822), the Data tab's rows
+// (:3663-3681), Delete By Key (deleteDataPop / deleteDataConf, :3627-3642) and the funds answer (mfr, :3796-3803).
 static struct {
     char name[160];  // the map page's map
     int id;
@@ -7102,65 +7116,92 @@ static void hub_map_opened(const char *name, const int id) {
     if (g_map_tab == 4) hub_map_versions_show();
 }
 
-// a stored value as the hub shows it: a "time" key / board is milliseconds, shown as h:mm:ss.cc or m:ss.cc
-static void map_tools_value(StrBuf *sb, const char *label, const cJSON *v) {
+// UTILS.getTime(ms, true, ms >= 3600000, 1000, ms >= 86400000, round) (config-BDN_kuhS.js iîíiïií): "mm:ss.<fraction
+// rounded to `round` places, without its "0.">", hours (and days) once the time reaches them
+static void js_get_time(const double t, const int round_to, char *out, const size_t n) {
+    const int show_hour = t >= 3600000.0, show_day = t >= 86400000.0;
+    double frac = fmod(t, 1000.0) / 1000.0;
+    if (frac != 0.0 && round_to) frac = round(frac * pow(10, round_to)) / pow(10, round_to); // Number.round(round_to)
+    char ms[24] = "0";
+    if (frac != 0.0) {
+        char num[32];
+        js_num(num, sizeof(num), frac);
+        snprintf(ms, sizeof(ms), "%s", !strncmp(num, "0.", 2) ? num + 2 : num); // replace("0.", "")
+    }
+    const int seconds = (int) fmod(t / 1000.0, 60.0), minutes = (int) fmod(t / 60000.0, 60.0);
+    const int hours = (int) floor(fmod(t / 3600000.0, 24.0));
+    const long long days = (long long) floor(t / 86400000.0);
+    char day[32] = "", hour[16] = "";
+    if (show_day) snprintf(day, sizeof(day), "%s%lld:", days < 10 ? "0" : "", days);
+    if (show_hour) snprintf(hour, sizeof(hour), "%s%d:", show_day && hours < 10 ? "0" : "", hours); // days is "0d": truthy
+    snprintf(out, n, "%s%s%02d:%02d.%s", day, hour, minutes, seconds, ms);
+}
+
+// a stored value as v10 writes it: "time" (any case) through getTime, anything else as JS prints it
+static void map_tools_value(StrBuf *sb, const char *label, const cJSON *v, const int round_to) {
     char num[48];
     const double ms = cJSON_IsNumber(v) ? v->valuedouble : cJSON_IsString(v) ? atof(v->valuestring) : 0;
-    if (label && !strcasecmp(label, "time") && ms > 0) {
-        const long long t = (long long) ms, h = t / 3600000, m = (t / 60000) % 60, s = (t / 1000) % 60, cs = (t % 1000) / 10;
-        if (h) snprintf(num, sizeof(num), "%lld:%02lld:%02lld.%02lld", h, m, s, cs);
-        else snprintf(num, sizeof(num), "%lld:%02lld.%02lld", m, s, cs);
+    if (label && !strcasecmp(label, "time")) {
+        js_get_time(ms, round_to, num, sizeof(num));
         sb_append(sb, num);
     } else if (cJSON_IsString(v)) {
         sb_append_esc(sb, v->valuestring);
-    } else {
+    } else if (cJSON_IsNumber(v)) {
         js_num(num, sizeof(num), ms);
         sb_append(sb, num);
+    } else {
+        sb_append(sb, cJSON_IsTrue(v) ? "true" : cJSON_IsFalse(v) ? "false" : cJSON_IsNull(v) ? "null" : "undefined");
     }
 }
 
+// glbR(type, map, [name, value, ...]) (hub-10.0.7.js:3804-3822): #mapLeaders
 static void map_tools_board(const char *type, const cJSON *list) {
     if (!el("mapLeaders")) return;
     StrBuf sb = {0};
-    sb_append(&sb, "<div class='knMapBoardHead'><span>Player</span><span>");
-    if (type && !strcmp(type, "score")) sb_append(&sb, "Score");
-    else if (type && !strcmp(type, "time")) sb_append(&sb, "Time");
-    else sb_append_esc(&sb, type ? type : "");
-    sb_append(&sb, "</span></div>");
+    sb_append(&sb, "<div style='font-size:22px;margin-bottom: 2px;color:rgba(255,255,255,0.7)'>Player<span style='float: right;color:rgba(255,255,255,0.7)'>");
+    if (type && type[0]) { // capitalize(type): the first character upper-cased
+        const char first[2] = {(char) toupper((unsigned char) type[0]), 0};
+        sb_append_esc(&sb, first);
+        sb_append_esc(&sb, type + 1);
+    }
+    sb_append(&sb, "</span></div><hr style='border-color: #fff;'>");
     const int n = cJSON_GetArraySize(list);
-    for (int i = 0; i + 1 < n; i += 2) {
-        sb_appendf(&sb, "<div class='knMapBoardRow'><span>%d. ", i / 2 + 1);
-        sb_append_esc(&sb, cJSON_GetStringValue(cJSON_GetArrayItem(list, i)));
-        sb_append(&sb, "</span><span>");
-        map_tools_value(&sb, type, cJSON_GetArrayItem(list, i + 1));
+    for (int i = 0; i < n; i += 2) {
+        sb_appendf(&sb, "<div style='font-size:16px;margin-bottom: 2px;color:rgba(255,255,255,0.5)'>%d. ", i / 2 + 1);
+        const cJSON *who = cJSON_GetArrayItem(list, i);
+        if (cJSON_IsString(who)) sb_append_esc(&sb, who->valuestring);
+        sb_append(&sb, "<span style='float:right;color:rgba(255,255,255,0.4);'>");
+        map_tools_value(&sb, type, cJSON_GetArrayItem(list, i + 1), 1);
         sb_append(&sb, "</span></div>");
     }
-    if (n < 2) sb_append(&sb, "<div class='knMapBoardEmpty'>Nobody is on this board yet</div>");
+    if (!n) sb_append(&sb, "<div style='font-size:16px;margin-bottom: 2px;text-align:center'>No Records Yet!</div>");
     char *html = sb_finish(&sb);
     set_html("mapLeaders", html);
     free(html);
 }
 
+// sdR([{mk, kv}], player) (:3663-3681): #dataList
 static void map_tools_rows(void) {
     if (!el("dataList")) return;
     StrBuf sb = {0};
-    sb_append(&sb, "<div class='knMapBoardHead'><span>Key</span><span>Value</span></div>");
+    sb_append(&sb, "<div style='font-size:20px;margin-bottom:2px;color:rgba(255,255,255,0.7);'>Key<span style='float:right;color:rgba(255,255,255,0.7);'>Value</span></div>"
+                   "<hr style='border-color: #fff;'>");
     const cJSON *row;
     int n = 0;
     cJSON_ArrayForEach(row, g_map_tools.rows) {
         const char *key = jstr(row, "mk") ? jstr(row, "mk") : "";
-        sb_append(&sb, "<div class='knMapBoardRow'><span><span class='material-icons knMapDataDel' title='Delete' onclick='deleteData(&quot;");
+        sb_append(&sb, "<div style='font-size:16px;margin-bottom: 2px;'><span class='material-icons deleteDBtn' onclick='deleteData(&quot;");
         sb_append_js_escape(&sb, g_map_tools.player);
         sb_append(&sb, "&quot;, &quot;");
         sb_append_js_escape(&sb, key);
-        sb_append(&sb, "&quot;)'>delete</span> ");
+        sb_append(&sb, "&quot;)'>delete_forever</span> <span style='color:rgba(255,255,255,0.5);'>");
         sb_append_esc(&sb, key);
-        sb_append(&sb, "</span><span>");
-        map_tools_value(&sb, key, cJSON_GetObjectItemCaseSensitive(row, "kv"));
+        sb_append(&sb, "</span><span style='float: right;color:rgba(255,255,255,0.4)'>");
+        map_tools_value(&sb, key, cJSON_GetObjectItemCaseSensitive(row, "kv"), 2);
         sb_append(&sb, "</span></div>");
         n++;
     }
-    if (!n) sb_append(&sb, "<div class='knMapBoardEmpty'>This player has no saved data on this game</div>");
+    if (!n) sb_append(&sb, "<div style='font-size:16px;margin-bottom: 2px;text-align:center;color:rgba(255,255,255,0.7)'>No Records Yet!</div>");
     char *html = sb_finish(&sb);
     set_html("dataList", html);
     free(html);
@@ -7193,8 +7234,9 @@ static int hub_map_tools_frame(const char *label, const cJSON *frame) {
         clear_pops();
         hub_mod_popup(cJSON_IsObject(a2) ? a2 : NULL);
     } else if (!strcmp(label, "mfr")) {
-        if (cJSON_IsNumber(a1)) hub_set_funds(a1->valuedouble);
-        io_po(cJSON_IsNumber(a1), cJSON_IsNumber(a1) ? "Map funds updated" : "The map funds could not be changed");
+        // :3796-3803: the funds and SUCCESS ("Success!"), else the error popup's default text
+        if (a1 && !cJSON_IsNull(a1)) hub_set_funds(cJSON_GetNumberValue(a1));
+        io_po(a1 && !cJSON_IsNull(a1), NULL);
     } else if (!strcmp(label, "upMp")) {
         const char *text = cJSON_GetStringValue(a1);
         io_po(text && !strcmp(text, "Leaderboard Updated!"), text ? text : "Error");
@@ -7225,21 +7267,24 @@ H(h_open_edit) {
     const int id = (int) arg_n(args, argc, 1, 0);
     char funds[48];
     comma_number(funds, sizeof(funds), arg_n(args, argc, 2, 0));
+    // hub-10.0.7.js:6653-6656, word for word (the name escaped, as KN escapes every name it writes)
     StrBuf sb = {0};
-    sb_append(&sb, "<div class='knMapEdit'><div class='knMapEditTitle'>");
+    sb_append(&sb, "<div style='font-size:20px;color:#fff'>");
     sb_append_esc(&sb, name ? name : "");
-    sb_append(&sb, "<span class='knMapEditOpen' onclick='grabMap(&quot;");
+    sb_append(&sb, "<div style='float:right' class='editLink' onclick='grabMap(&quot;");
     sb_append_js_escape(&sb, name ? name : "");
-    sb_append(&sb, "&quot;)'>Edit in the Editor</span></div>");
-    sb_appendf(&sb, "<div class='knMapEditSect'>Game Funds <span class='knMapEditNote'>%s KR in this game</span></div>", funds);
-    sb_append(&sb, "<input type='number' min='0' id='mapFundsInp' class='inputGrey2' placeholder='KR'>");
-    sb_appendf(&sb, "<div class='knMapEditBtns'><div class='button knMapFundsAdd' onclick='chngMapFunds(%d, 0)'>Add</div>"
-                    "<div class='button knMapFundsTake' onclick='chngMapFunds(%d, 1)'>Take Out</div></div>", id, id);
-    sb_append(&sb, "<div class='knMapEditSect'>Leaderboard Display</div>"
-                   "<select id='leaderType' class='inputGrey2'><option value='0'>Score</option><option value='1'>Time</option></select>"
-                   "<input type='text' id='leaderTypeCust' class='inputGrey2' maxlength='40' placeholder='Custom stat (optional)'>"
-                   "<select id='leaderOrder' class='inputGrey2'><option value='0'>Lowest first</option><option value='1'>Highest first</option></select>");
-    sb_appendf(&sb, "<div class='knMapEditBtns'><div class='button knMapLbSave' onclick='updateMapLB(%d)'>Save</div></div></div>", id);
+    sb_append(&sb, "&quot;)'>Open in Editor</div></div><div></div><div style='margin-top:25px;font-size:24px;color:#b2b2b2'>Leaderboard Display:</div>"
+                   "<div style='font-size:18px;color:#fff'>Type:<select id='leaderType' class='inputGrey2' style='padding: 4px;'><option value='0'>Score</option><option value='1'>Time</option></select></div>"
+                   "<div style='margin-top: 5px;font-size:18px;color:#fff'>Custom Type:<input id='leaderTypeCust' class='inputGrey2' style='padding: 4px;'></div>"
+                   "<div style='margin-top:5px;font-size:18px;color:#fff'>Order:<select id='leaderOrder' class='inputGrey2' style='padding: 4px;'><option value='0'>ASC</option><option value='1'>DESC</option></select></div>");
+    sb_appendf(&sb, "<div class='mapLeaderB' onclick='updateMapLB(%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>Update Leaderboard</div>"
+                    "<div style='margin-top:25px;font-size:24px;color:#b2b2b2'>Map Funds:</div>"
+                    "<div style='font-size:18px;color:#fff'>Funds <span style='float:right;color:rgba(255,255,255,0.5)'>%s <span style='color:#fff'>KR</span></span></div>"
+                    "<div style='font-size:18px;color:#fff'>KR Fee <span id='mapFeeVal' style='float:right;color:rgba(255,255,255,0.5)'>None</span></div>"
+                    "<input type='number' oninput='calcMapFee(this)' id='mapFundsInp' placeholder='Enter KR Amount'></input>"
+                    "<div class='mapFndB' onclick='chngMapFunds(%d, 1)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)' style='background-color:#fc5a4e'>Withdraw</div>"
+                    "<div class='mapFndB' onclick='chngMapFunds(%d, 0)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)' style='margin-left:16px;background-color:#4ca9f5'>Deposit</div>",
+               id, funds, id, id);
     char *html = sb_finish(&sb);
     generic_popup(html, "editMapPop", NULL);
     free(html);
@@ -7263,11 +7308,32 @@ static double map_tools_input_number(const char *id) {
     return atof(text);
 }
 
-// chngMapFunds(id, 0 deposit | 1 withdraw): the amount of #mapFundsInp
+// calcMapFee(input) (hub-10.0.7.js:6657-6671): a negative amount reads 0; #mapFeeVal shows floor(10%) or None
+H(h_calc_map_fee) {
+    (void) user; (void) args; (void) argc;
+    const HtmlElem in = ev ? ev->target : 0;
+    if (!in) return 1;
+    char text[64] = "";
+    html_dom_get_value(in, text, sizeof(text));
+    double v = atof(text);
+    if (v < 0) v = 0; // only the fee reads 0: v10 writes the value back only when it is not 0
+    const double fee = floor(v * 0.1);
+    if (fee) {
+        char n[48], html[160];
+        comma_number(n, sizeof(n), fee);
+        snprintf(html, sizeof(html), "<span style='color:rgba(255,255,255,0.7)'>-%s <span style='color:#fff'>KR</span></span>", n);
+        set_html("mapFeeVal", html);
+    } else {
+        set_html("mapFeeVal", "None");
+    }
+    return 1;
+}
+
+// chngMapFunds(id, 0 deposit | 1 withdraw) (:6673-6679): parseInt of #mapFundsInp, sent when it is not 0
 H(h_chng_map_funds) {
     UNUSED;
-    const double amount = floor(map_tools_input_number("mapFundsInp"));
-    if (amount <= 0) return 1;
+    const double amount = trunc(map_tools_input_number("mapFundsInp"));
+    if (!amount || isnan(amount)) return 1;
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("mfnds"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
@@ -7320,23 +7386,37 @@ H(h_delete_data) {
     return 1;
 }
 
-// deleteDataPop(): asks which key to delete for every player
+// deleteDataPop() (hub-10.0.7.js:3627-3632): which key to delete for every player (signed in)
 H(h_delete_data_pop) {
     UNUSED;
-    generic_popup("<div class='knMapEdit'><div class='knMapEditSect'>Delete a key for every player</div>"
-                  "<input type='text' id='delKeyInput' class='inputGrey2' maxlength='64' placeholder='Key'>"
-                  "<div class='knMapEditBtns'><div class='button knMapFundsTake' onclick='deleteDataConf()'>Delete</div></div></div>",
-                  "confSubmitPop", NULL);
+    if (!g_hub.logged_in) return 1;
+    generic_popup("<div class='imageListHeader' style='font-size: 26px;'>Delete Data</div><div style='font-size:20px;color:#fff'>"
+                  "<div style='margin-top: 3px;font-size: 22px;color: rgba(255, 255, 255, 0.7);'>Key:<input type='text' id='deleteDKey' class='inputGrey2' placeholder='Key'></div>"
+                  "<div class='mapFndB' onclick='window.deleteDataConf()' onmouseover='playTick(0.1)' style='background-color:#fc5a4e;width: 380px;margin-top: 10px;'>Delete All From Key</div></div>",
+                  "imageNewPop", NULL);
     return 1;
 }
 
-// deleteDataConf(): the confirmation of Delete By Key
+// deleteDataConf() (:3634-3642): "No Key Provided", else the confirmation; YES deleteKeyData(key), NO showPopup()
 H(h_delete_data_conf) {
     UNUSED;
+    if (!g_hub.logged_in) return 1;
     g_map_tools.key[0] = 0;
-    if (el("delKeyInput")) html_dom_get_value(el("delKeyInput"), g_map_tools.key, sizeof(g_map_tools.key));
-    if (!g_map_tools.key[0]) return 1;
-    confirm_popup("Every player's saved value for this key will be removed. Continue?", "deleteKeyData()", "confSubmitPop");
+    if (el("deleteDKey")) html_dom_get_value(el("deleteDKey"), g_map_tools.key, sizeof(g_map_tools.key));
+    if (!g_map_tools.key[0]) {
+        io_po(0, "No Key Provided");
+        return 1;
+    }
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='color:#fff;font-size:18px;position:relative;margin-bottom:5px;color:#FBC02D'>This action is not reversible!</div>"
+                   "<div style='color:#fff;font-size:19px;position:relative;margin-bottom:15px;'>Are you sure you want to delete this data?</div>"
+                   "<div id='confirmBtn' onclick='deleteKeyData(&quot;");
+    sb_append_js_escape(&sb, g_map_tools.key);
+    sb_append(&sb, "&quot;)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div>"
+                   "<div id='declineBtn' onclick='showPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "confSubmitPop", NULL);
+    free(html);
     return 1;
 }
 
@@ -7417,6 +7497,9 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"createBadgeTip", h_create_badge_tip},
     {"knModPick", h_mod_form},
     {"knModPublish", h_mod_form},
+    {"selectFile", h_mod_form},  // the Publish / Update Mod popup (hub-10.0.7.js:6746-6754, mods_ui.c)
+    {"uploadMod", h_mod_form},
+    {"updateFile", h_noop},      // its hidden file inputs' onchange: selectFile's platform dialog fills them in place
     {"switchFeedTab", h_switch_feed_tab},
     {"toggleView", h_toggle_view},
     {"favoriteM", h_noop},
@@ -7519,6 +7602,7 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"deleteData", h_delete_data},
     {"deleteDataPop", h_delete_data_pop},
     {"deleteDataConf", h_delete_data_conf},
+    {"calcMapFee", h_calc_map_fee},
     {"deleteKeyData", h_delete_key_data},
     {"logBtnFRVR", h_noop},     // analytics
     {"imagePopup", h_image_collection}, // the settings' image collection (image_collection.c)

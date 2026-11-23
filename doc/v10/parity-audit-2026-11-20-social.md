@@ -91,3 +91,26 @@ and MariaDB 11.8.
 - 10 Email preferences: done (0391, the settings toggle, the register box, the opt-in popup on the game page;
   0db2983a, 55bd7a2b; email_prefs_e2e). Box Office asks only when it can mail (`accounts.email.promotional_optin`).
 
+
+## Sweep 2026-11-23
+
+Every `window.*` function in hub-10.0.7.js and every handler its markup calls was checked against social_ui.c's
+handlers (`window.<name>` resolves to `<name>`, html_dom_core.c), and every genericPopup class against KN's.
+
+- Profile header `rankedRank` (hub-10.0.7.js:2780): ported. The rank icon (`img/ranked/ranks/rank_<tier>.svg`,
+  index-D_a-cl5k.js's table, unknown ranks the unranked icon) follows the selected badge as `.playerProfileRank`
+  for a truthy rank. Box Office's `["r", "profile"]` row now carries `rankedRank` (profiles.c: the running season's
+  rank, the same rule as the gapi profile's `ranked_rank`, social_profile_rank); a krunker.io account's profile row
+  is krunker.io's own, read the same way. social_v10_test, hub_creator_e2e.
+- Map page tools: the markup was Box Office's own; now v10's. The Edit popup (openEdit :6653-6656, with the KR Fee
+  line of calcMapFee :6657-6671 and chngMapFunds sending parseInt of the field), the Leaderboard board (glbR
+  :3804-3822) and Data rows (sdR :3663-3681) with getTime for "time", Delete By Key (deleteDataPop / deleteDataConf
+  :3627-3642: "No Key Provided", YES / NO) and the funds answer (mfr: SUCCESS, else the default error). The KR Fee
+  line is display only in v10's page too; kn_brain moves the exact amount (open: whether krunker.io's `mfnds` took
+  10% is not in any client). hub_creator_e2e.
+- Publish / Update Mod popup: the markup was the game window's (mods_ui.c publish_form); the hub's is now v10's
+  (publishModPopup :6734-6754: publishLeft / publishRight, selectFile, uploadMod, #modResHolder). Box Office keeps
+  its own upload transport (the platform file dialog, chunked to kn_brain). hub_creator_e2e.
+- Left as they are: `buyblackM` is KN's `buyIllicit` (same frame, KN adds an idempotency key); `openOneTrust` (the
+  ad consent manager, Box Office shows no ads); the documented Box Office additions (KR in trade offers, the
+  developers' creator badge, the map page's Versions tab from the game's Creations window).
