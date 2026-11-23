@@ -626,9 +626,9 @@ after every load, and fail2ban restores the bans from its database. The edge_fir
 fail2ban's next ban fails `actioncheck`, recreates the table and re-bans. edge_firewall itself
 is unchanged.
 
-**Lockout.** ignoreip covers the admin workstation's egress, amph (the byod watchdog SSHes
-into every edge from 5.188.124.55), kru, meal, the edges, the private ranges and each host's own
-addresses. CI logs in with keys: in mode normal, key logins, pre-auth closes and MaxStartups
+**Lockout.** ignoreip covers the admin workstation's egress, divide (91.199.82.174: kru, amph
+and abulxt's edge are private guests on its vmbr1, inside 172.16.0.0/12), the private ranges and
+each host's own addresses. CI logs in with keys: in mode normal, key logins, pre-auth closes and MaxStartups
 drops never count as failures, so GitHub's runners are not listed.
 `fail2ban_ignoreip_github_actions: true` adds api.github.com/meta "actions" (about 7000
 CIDRs, fetched on the controller with its `GITHUB_TOKEN` if set, since anonymous requests are

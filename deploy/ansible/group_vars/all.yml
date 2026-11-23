@@ -63,18 +63,16 @@ fail2ban_owner: "krunknative (inputs: deploy/ansible group_vars/all.yml, group_v
 # Never banned, on every host of both repos (plus 127.0.0.1/8, ::1 and each
 # host's own addresses). Keep in sync with abulxt group_vars/abulxt.yml.
 fail2ban_ignoreip:
-  # amph, abulxt origin (eth0, ens19): the byod watchdog SSHes into every edge from .55
-  - 5.188.124.41
-  - 5.188.124.55
-  # kru, KrunkNative central node (CT 120 on meal)
-  - 5.188.124.56
+  # divide, the Proxmox host of kru, amph and abulxt's edge: its own SSH and the guests' NAT
+  # egress. kru (172.16.5.47) and amph (172.16.5.3) are private on its vmbr1, covered by
+  # 172.16.0.0/12 below.
+  - 91.199.82.174
   # admin workstation egress (seen as the source of the admin's SSH logins)
   - 5.188.124.57
-  # meal, the Proxmox host
-  - 5.188.124.253
-  # (the old VPSs clara, angeles, chitown and ashburn were cancelled 2026-11-13: their addresses go
-  # back to G-Core, never exempt them)
-  # private ranges: meal's LAN 172.16.5.0/24 (kru, amph ens20), docker bridges
+  # (gone, never exempt them again: amph's old .41/.55, kru's old .56, meal 5.188.124.253, which was
+  # unreachable on 2026-11-22, and the VPSs clara, angeles, chitown and ashburn, cancelled
+  # 2026-11-13. Their addresses go back to G-Core.)
+  # private ranges: divide's vmbr1 172.16.5.0/24 (kru, amph, the edge), docker bridges
   - 10.0.0.0/8
   - 172.16.0.0/12
   - 192.168.0.0/16
