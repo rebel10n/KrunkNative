@@ -557,11 +557,16 @@ def web_main():
                 await call("Emulation.setDeviceMetricsOverride", width=w, height=h, deviceScaleFactor=dpr, mobile=False)
                 await call("Page.navigate", url=page_url)
                 # startup: frames from the first menu frame on (the preview arrives last)
+                # The 15 s window starts at the first frame that shows the box, not at the navigation: on a loaded
+                # host the page can take most of 15 s to get there, which left 1 frame to check (P1, load ~56).
                 start, startup_bad, startup_seen = time.monotonic(), [], 0
-                tries = 0
-                while time.monotonic() - start < 15.0 and (n in (0, 3) or not startup_seen):
+                first_shown, tries = None, 0
+                while (time.monotonic() - start < 120.0 and
+                       (first_shown is None or (time.monotonic() - first_shown < 15.0 and (n in (0, 3) or not startup_seen)))):
                     geo = await evaluate(geometry)
                     if geo and geo.get("shown"):
+                        if first_shown is None:
+                            first_shown = time.monotonic()
                         shots = await pair(f"{tag}-start{tries:02d}")
                         tries += 1
                         if not shots:
@@ -572,7 +577,7 @@ def web_main():
                         startup_seen += 1
                         ok, detail = seam_check(shade_ratio(frame, world), device_box(geo))
                         if not ok:
-                            startup_bad.append(f"{time.monotonic() - start:.1f}s: {detail}")
+                            startup_bad.append(f"{time.monotonic() - first_shown:.1f}s: {detail}")
                     else:
                         await asyncio.sleep(0.05)
                 menu = await until_menu(240)
