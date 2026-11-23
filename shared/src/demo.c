@@ -1,5 +1,6 @@
 // K.P.D demo files (shared/include/demo.h, doc/v10/replays.md).
 #include <demo.h>
+#include <net_ext.h> // NET_EXT_KN_PLAYER_RANK_FLAG
 #include <shared.h>
 #include <cJSON.h>
 #include <stdio.h>
@@ -278,6 +279,14 @@ static int anonymize_packet(void *user, const uint8_t type, uint8_t *payload, co
         info.flags &= NET_PLAYER_INFO_BOT;
         memset(info.clan, 0, sizeof(info.clan));
         memcpy(payload, &info, sizeof(info));
+    } else if (type == NET_PACKET_EXT && length == NET_EXT_HEADER_SIZE + sizeof(NetPlayerRankFlagPacket) &&
+               (payload[0] | payload[1] << 8) == NET_EXT_KN_PLAYER_RANK_FLAG) {
+        // the account's rank and Country Flag go with the rest of the account
+        NetPlayerRankFlagPacket rank_flag;
+        memcpy(&rank_flag, payload + NET_EXT_HEADER_SIZE, sizeof(rank_flag));
+        rank_flag.ranked_rank = 0;
+        rank_flag.flag = -1;
+        memcpy(payload + NET_EXT_HEADER_SIZE, &rank_flag, sizeof(rank_flag));
     }
     return 1;
 }

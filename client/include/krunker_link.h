@@ -225,6 +225,8 @@ typedef struct {
     int class_index; // "0" [6] / "rg" items [15]: the kill card's killer class icon
     char name[32];   // "0" [5] / "00" name (not the alias): the "uh" host line names it
     NetPlayerInfoPacket info; // "0"'s account fields (level, clan, flags) as emitted (HOST follows "uh")
+    int ranked_rank; // "0" [46] rankedRank (0 none), emitted with the info as NET_EXT_KN_PLAYER_RANK_FLAG
+    int flag;        // "0" [26] flagIndex (-1 none)
     int grapple;   // "k"[11] grapple: 1 hooked at grapple_point (NET_PACKET_GRAPPLE goes out on a change)
     float grapple_point[3];
 } KrunkerLinkPlayer;

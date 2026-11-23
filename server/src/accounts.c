@@ -522,12 +522,36 @@ static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *i
     snprintf(info->clan, sizeof(info->clan), "%s", client->acct.clan);
 }
 
+// getPlayerAddData's [46] rankedRank and [26] flagIndex of `client` as `to` sees them (deob-10.0.7.js:176753):
+//   rankedRank: `account && showBadges.rank ? rankedRank : 0`, for every viewer (anonMode does not gate it);
+//   flagIndex:  `anonMode && !viewerIsDev ? -1 : account ? account.stats.flg : -1`, the player itself included.
+static void acc_fill_rank_flag(const ClientConnection *client, NetPlayerRankFlagPacket *out, const ClientConnection *to) {
+    memset(out, 0, sizeof(*out));
+    out->uid = client->player ? client->player->uid : client->id;
+    const int account = client->acct.account_id > 0;
+    const Player *player = client->player;
+    out->ranked_rank = account && (!player || (player->show_badges & PLAYER_SHOW_BADGE_RANK)) ? client->acct.ranked_rank : 0;
+    const int anon_hidden = player && player->anon_mode && !(to && (to->acct.flags & NET_PLAYER_INFO_DEV));
+    out->flag = account && !anon_hidden ? client->acct.flag : -1;
+}
+
+// NET_EXT_KN_PLAYER_RANK_FLAG right after `client`'s PLAYER_INFO to `to`, an EXT peer (an older one has no such subtype)
+static void acc_send_rank_flag(const ClientConnection *client, const ClientConnection *to) {
+    if (!to || to->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    NetPlayerRankFlagPacket body;
+    acc_fill_rank_flag(client, &body, to);
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_PLAYER_RANK_FLAG, &body, sizeof(body));
+    if (n) net_send_packet(to->fd, NET_PACKET_EXT, buf, n);
+}
+
 static void acc_broadcast_info(const ClientConnection *client) {
     if (!g_acc.brain || !client->player) return;
     NetPlayerInfoPacket info;
     for (size_t i = 0; i < g_server->client_count; i++) {
         acc_fill_info(client, &info, &g_server->clients[i]);
         net_send_packet(g_server->clients[i].fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
+        acc_send_rank_flag(client, &g_server->clients[i]);
     }
 }
 
@@ -539,6 +563,7 @@ void accounts_send_infos_to(ClientConnection *target) {
         NetPlayerInfoPacket info;
         acc_fill_info(client, &info, target);
         net_send_packet(target->fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
+        acc_send_rank_flag(client, target);
     }
 }
 
@@ -2272,6 +2297,11 @@ static void acc_handle_ranked_reply(const cJSON *frame) {
             .rp_change = cJSON_IsNumber(rp) ? rp->valueint : 0,
         };
         acc_send_latest_mmr(client, &packet);
+        // the new tier is the account's rankedRank from now on (its ADD_PLAYERS [46]): everyone's board and end table
+        if (client->acct.ranked_rank != packet.latest_rank) {
+            client->acct.ranked_rank = packet.latest_rank;
+            acc_broadcast_info(client);
+        }
     }
     if (!cJSON_IsTrue(cJSON_GetObjectItem(frame, "ok"))) {
         server_log_error("[ranked] result rejected: %s", acc_str(cJSON_GetObjectItem(frame, "err"), "?"));
@@ -2774,6 +2804,7 @@ static void acc_become_guest(ClientConnection *client, const char *why) {
     // a verified account plays as a guest (Guest_N, nothing saved), never under a claimed name
     client->acct.central_pending = 0;
     client->acct.flag = -1;
+    client->acct.ranked_rank = 0;
     client->acct.username[0] = 0;
     if (director_gate_enabled()) { // Krunker Strike: required tickets, private lobbies (director_gate.h)
         char msg[96] = "";
@@ -2817,6 +2848,7 @@ static int acc_director_join(ClientConnection *client, const NetJoinPacket *join
     // the director's guest: no account (Strike accounts are not kn accounts)
     client->acct.central_pending = 0;
     client->acct.flag = -1;
+    client->acct.ranked_rank = 0;
     client->acct.username[0] = 0;
     client->acct.account_id = 0;
     acc_set_ready(client);
@@ -3200,6 +3232,10 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     // the Country Flag (stats.flg, an index into the client's Country Flag list): the Strike kill card's flag
     const cJSON *flg = cJSON_IsObject(stats) ? cJSON_GetObjectItem(stats, "flg") : NULL;
     client->acct.flag = cJSON_IsNumber(flg) && flg->valueint >= 0 ? flg->valueint : -1;
+    // v10 account.rankedRank = ranked_rank || 0 (deob-10.0.7.js:115141): kn_brain's account carries the running season's
+    // tier (db_common.c db_account_ranked_rank), sent as ADD_PLAYERS' rankedRank (NET_EXT_KN_PLAYER_RANK_FLAG)
+    const cJSON *rr = cJSON_GetObjectItem(account, "ranked_rank");
+    client->acct.ranked_rank = cJSON_IsNumber(rr) && rr->valueint > 0 && rr->valueint <= RANK_KRACKED ? rr->valueint : 0;
     client->acct.badge = cJSON_IsNumber(bdg) && bdg->valueint >= 0 ? bdg->valueint : -1;
     // WP-E part 2c: only a badge the account owns (kn_brain's account "badges", badges.js indices)
     const cJSON *owned = cJSON_GetObjectItem(account, "badges");
@@ -3426,6 +3462,8 @@ static void acc_live_leave_account(ClientConnection *client) {
     a->premium = 0;
     a->funds = 0;
     a->badge = -1;
+    a->flag = -1;
+    a->ranked_rank = 0;
     a->skins_known = 0;
     a->skin_paint_count = 0;
     memset(a->skins_owned, 0, sizeof(a->skins_owned));

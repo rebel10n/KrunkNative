@@ -299,6 +299,8 @@ static void check_cosmetics_packets(void) {
     CHECK(net_packet_read_ent(&full, &packet) && full.cosmetics_v7.head == 6401 && full.cosmetics_v7.back == 246 && full.cosmetics_v7.shoe == 2860 &&
           full.cosmetics_v7.pet == 2964 && full.cosmetics_v7.wrist == 4249 && full.cosmetics_v7.charms[0] == 5000 && full.cosmetics_v7.player_card == 6000 &&
           full.show_badges == PLAYER_SHOW_BADGE_PREMIUM && full.attach_index == 1, "V9 ENT v7 slots / showBadges");
+    ent.show_badges = PLAYER_SHOW_BADGE_PREMIUM | 0xF0;
+    memcpy(packet.payload, &ent, sizeof(ent));
     packet.length = NET_ENT_PACKET_V9_SIZE + 7;
     CHECK(net_packet_read_ent(&full, &packet) && full.cosmetics_v7.pet == 2964 && full.anon_mode == 1, "ENT longer than V9 reads its prefix");
     ent.cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;

@@ -210,6 +210,8 @@ typedef enum {
     NET_EXT_KN_HIT_SILENT = 0x81A0,   // NetHitSilentPacket, right before a NET_PACKET_HIT: DO_DAMAGE `silent` (no hit sound)
     NET_EXT_KN_KILL_PACKAGE = 0x81A1, // NetKillPackagePacket, right before a NET_PACKET_KILL: killInfo.pkg (stk 1's package)
     NET_EXT_KN_LOOK = 0x81A2,         // C -> link NetLookPacket, before each ENT to an official lobby: the colours and title
+    // 0x81B0 v10.0.7 ADD_PLAYERS' rankedRank and flagIndex (KrunkNative server and the krunker.io link -> player_accounts.c)
+    NET_EXT_KN_PLAYER_RANK_FLAG = 0x81B0, // S -> C NetPlayerRankFlagPacket, right after a player's NET_PACKET_PLAYER_INFO
 } NetExtSubtype;
 
 // NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
@@ -868,6 +870,21 @@ typedef struct {
     uint8_t count;                      // ids in use
     uint8_t ids[NET_CHAT_ACTIONS_MAX];  // v10's action ids
 } NetChatActionsPacket;
+
+// NET_EXT_KN_PLAYER_RANK_FLAG (S -> C, EXT peers; also the krunker.io link's "0" ADD_PLAYERS): two slots of v10.0.7's
+// getPlayerAddData (deob-10.0.7.js:176753) that NetPlayerInfoPacket does not carry, for the Tab board's .newLeaderRanked
+// (:227637) and the end table's .endTableFlag / .endTableRanked (:226756, :226763):
+//   [46] rankedRank: `account && showBadges.rank ? rankedRank : 0` (the account's ranked_rank; ENT [33] rankBadge);
+//   [26] flagIndex:  `anonMode && !viewerIsDev ? -1 : account ? account.stats.flg : -1` (the Country Flag index).
+// It follows every PLAYER_INFO of the player, which resets both on the client (0, -1), so a server or a PLAYER_INFO
+// without one (a bot, an older server) shows neither. A separate packet: NetPlayerInfoPacket's size is checked exactly,
+// and a client that does not know the subtype ignores it.
+typedef struct {
+    int32_t uid;
+    int32_t ranked_rank; // the RankedRank tier (shared/include/ranked.h: 0 Unranked .. 13 Kracked), 0 = none shown
+    int32_t flag;        // the Country Flag index (client account_flags.h), -1 = none
+} NetPlayerRankFlagPacket;
+_Static_assert(sizeof(NetPlayerRankFlagPacket) == 12, "NetPlayerRankFlagPacket: the wire body is 12 bytes");
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)

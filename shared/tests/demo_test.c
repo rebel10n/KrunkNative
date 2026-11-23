@@ -2,6 +2,7 @@
 // suspect segments and clamp (computeSuspectSegments / clampToSegments, deob-10.0.7.js:201693-201751),
 // hideIdentities and the rejected files.
 #include <demo.h>
+#include <net_ext.h>
 #include <shared.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,6 +68,9 @@ static void build(DemoBuf *out) {
     NetPlayerInfoPacket info = {.uid = 1, .account_id = 77, .level = 40, .flags = NET_PLAYER_INFO_PREMIUM | NET_PLAYER_INFO_BOT};
     snprintf(info.clan, sizeof(info.clan), "CLAN");
     frame(&f, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
+    const NetPlayerRankFlagPacket rank_flag = {.uid = 1, .ranked_rank = 9, .flag = 40}; // its rank and Country Flag
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(rank_flag)];
+    frame(&f, NET_PACKET_EXT, ext, net_ext_pack(ext, sizeof(ext), NET_EXT_KN_PLAYER_RANK_FLAG, &rank_flag, sizeof(rank_flag)));
     record(out, 5000, DEMO_REC_STREAM, &f);
     kill(&f, 1, 2);
     record(out, 20000, DEMO_REC_STREAM, &f);
@@ -110,6 +114,11 @@ static int find_chat_and_info(void *user, const uint8_t type, uint8_t *payload, 
         NetPlayerInfoPacket i;
         memcpy(&i, payload, sizeof(i));
         snprintf(out[1], 32, "%d/%d/%u/%s", (int) i.account_id, (int) i.level, (unsigned) i.flags, i.clan);
+    } else if (type == NET_PACKET_EXT && length == NET_EXT_HEADER_SIZE + sizeof(NetPlayerRankFlagPacket) &&
+               (payload[0] | payload[1] << 8) == NET_EXT_KN_PLAYER_RANK_FLAG) {
+        NetPlayerRankFlagPacket r;
+        memcpy(&r, payload + NET_EXT_HEADER_SIZE, sizeof(r));
+        snprintf(out[2], 32, "%d/%d/%d", (int) r.uid, (int) r.ranked_rank, (int) r.flag);
     }
     return 1;
 }
@@ -168,13 +177,14 @@ int main(void) {
     char name[32] = "";
     demo_frames_each(d.records[0].bytes, d.records[0].length, find_spawn_name, name);
     CHECK(!strcmp(name, "Player_1"));
-    char chat_name[32] = "", info[32] = "";
-    char *outs[2] = {chat_name, info};
+    char chat_name[32] = "", info[32] = "", rank_flag[32] = "";
+    char *outs[3] = {chat_name, info, rank_flag};
     demo_frames_each(d.records[1].bytes, d.records[1].length, find_chat_and_info, outs);
     CHECK(!strcmp(chat_name, "Player_1"));
     char want[32];
     snprintf(want, sizeof(want), "0/0/%u/", (unsigned) NET_PLAYER_INFO_BOT);
     CHECK(!strcmp(info, want));
+    CHECK(!strcmp(rank_flag, "1/0/-1")); // NET_EXT_KN_PLAYER_RANK_FLAG: no rank, no flag
     demo_free(&d);
 
     // rejected files

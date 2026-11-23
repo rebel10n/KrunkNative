@@ -518,6 +518,8 @@ static void test_combat(void) {
     b[KRUNKER_ADD_IS_HACKER] = KRUNKER_V_BOOL(1); b[KRUNKER_ADD_FEATURED] = KRUNKER_V_BOOL(1); b[KRUNKER_ADD_PREMIUM_T] = KRUNKER_V_NUM(5);
     b[KRUNKER_ADD_ALIAS] = KRUNKER_V_STR("Ace"); b[KRUNKER_ADD_ACCID] = KRUNKER_V_NUM(4242); b[KRUNKER_ADD_IS_BOT] = KRUNKER_V_BOOL(1);
     b[KRUNKER_ADD_CREATOR_BADGE] = KRUNKER_V_NUM(1);
+    b[KRUNKER_ADD_RANKED_RANK] = KRUNKER_V_NUM(7); // Gold 2
+    b[KRUNKER_ADD_FLAG_INDEX] = KRUNKER_V_NUM(12); // Australia
     feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
     {
         READ_IN(NetSpawnPacket, s1, SPAWN, 1);
@@ -529,6 +531,21 @@ static void test_combat(void) {
                          NET_PLAYER_INFO_CREATOR | NET_PLAYER_INFO_HOST;
         CHECK(i1_p && i1.uid == 7 && i1.level == 33 && i1.account_id == 4242 && !strcmp(i1.clan, "CLN") && i1.flags == want,
               "0: account fields of 7 (flags %#x)", i1_p ? i1.flags : 0);
+        // [46] rankedRank / [26] flagIndex: NET_EXT_KN_PLAYER_RANK_FLAG right after each PLAYER_INFO (nil: 0 / -1)
+        NetPlayerRankFlagPacket r[2];
+        int at[2] = {-1, -1}, ok = 1;
+        for (int n = 0; n < 2; n++) {
+            uint16_t len = 0;
+            at[n] = find_ext(NET_EXT_KN_PLAYER_RANK_FLAG, n, &len);
+            const uint8_t *body = at[n] >= 0 ? ext_body(at[n], NET_EXT_KN_PLAYER_RANK_FLAG, &len) : NULL;
+            if (!body || len != sizeof(r[n])) ok = 0;
+            else memcpy(&r[n], body, sizeof(r[n]));
+        }
+        CHECK(ok && r[0].uid == 9 && r[0].ranked_rank == 0 && r[0].flag == -1, "0: our rank / flag (none: 0, -1)");
+        CHECK(ok && r[1].uid == 7 && r[1].ranked_rank == 7 && r[1].flag == 12, "0: 7's rankedRank 7, flagIndex 12 (%d, %d)",
+              ok ? r[1].ranked_rank : -9, ok ? r[1].flag : -9);
+        CHECK(ok && find_in(NET_PACKET_PLAYER_INFO, 1) < find_in(NET_PACKET_EXT, at[1]) && find_in(NET_PACKET_EXT, at[0]) < find_in(NET_PACKET_PLAYER_INFO, 1),
+              "0: each one follows its PLAYER_INFO");
     }
     clear();
 
@@ -617,7 +634,14 @@ static void test_combat(void) {
         READ_IN(NetPlayerInfoPacket, a, PLAYER_INFO, 0);
         READ_IN(NetPlayerInfoPacket, c, PLAYER_INFO, 1);
         uint16_t len = 0;
-        const uint8_t *body = ext_body(0, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len);
+        const int k = find_ext(NET_EXT_KN_OFFICIAL_CHAT_I18N, 0, &len);
+        const uint8_t *body = k >= 0 ? ext_body(k, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len) : NULL;
+        uint16_t rl = 0;
+        const int rk = find_ext(NET_EXT_KN_PLAYER_RANK_FLAG, 1, &rl);
+        NetPlayerRankFlagPacket r = {0};
+        if (rk >= 0 && rl == sizeof(r)) memcpy(&r, ext_body(rk, NET_EXT_KN_PLAYER_RANK_FLAG, &rl), sizeof(r));
+        CHECK(rk >= 0 && (r.uid == 7 ? r.ranked_rank == 7 && r.flag == 12 : r.ranked_rank == 0 && r.flag == -1),
+              "uh: the PLAYER_INFO resend brings the rank / flag again (%d: %d, %d)", r.uid, r.ranked_rank, r.flag);
         CHECK(a_p && c_p && (a.flags & NET_PLAYER_INFO_HOST) == (a.uid == 9 ? NET_PLAYER_INFO_HOST : 0) &&
               (c.flags & NET_PLAYER_INFO_HOST) == (c.uid == 9 ? NET_PLAYER_INFO_HOST : 0), "uh: HOST moves to us");
         CHECK(body && len > sizeof(NetOfficialChatI18nHeader) + 1 && !strcmp((const char *) body + sizeof(NetOfficialChatI18nHeader) + 1,
@@ -627,13 +651,17 @@ static void test_combat(void) {
     feed(&link, "uh", (KrunkerValue[]) {KRUNKER_V_STR("sockB")}, 1);
     {
         uint16_t len = 0;
-        const uint8_t *body = ext_body(0, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len);
+        const int k = find_ext(NET_EXT_KN_OFFICIAL_CHAT_I18N, 0, &len);
+        const uint8_t *body = k >= 0 ? ext_body(k, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len) : NULL;
         const char *key = body ? (const char *) body + sizeof(NetOfficialChatI18nHeader) + 1 : "";
         CHECK(body && !strcmp(key, "host.transfer") && !strcmp(key + strlen(key) + 1, "acct"), "uh: Host Transfered to acct");
     }
     clear();
     feed(&link, "uh", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_BOOL(1)}, 2);
-    CHECK(find_in(NET_PACKET_PLAYER_INFO, 0) && !find_in(NET_PACKET_EXT, 0), "uh silent: no line");
+    {
+        uint16_t len = 0;
+        CHECK(find_in(NET_PACKET_PLAYER_INFO, 0) && find_ext(NET_EXT_KN_OFFICIAL_CHAT_I18N, 0, &len) < 0, "uh silent: no line");
+    }
     clear();
 }
 

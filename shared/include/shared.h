@@ -1157,8 +1157,8 @@ typedef struct {
 // ENT showBadges: the settings verifiedBadge / premiumBadge / customBadge (v10 ent[22..24]) and rankBadge
 // (v10 ent[33]), deob-10.0.7.js:215052 (defaults on, :213181-213232): what the player lets others see.
 // Absent (shorter ENTs) = all shown, the settings' default. Bit 2 was a "partnerBadge" no v10 build has;
-// it carries rankBadge, which neither v10's own server code (players.js sync: verified / premium /
-// custom only, deob-10.0.7.js:171347, :176753) nor KrunkNative's server reads yet.
+// it carries rankBadge, getPlayerAddData's showBadges.rank gate on rankedRank (deob-10.0.7.js:176753; the sync at
+// :171347 sends verified / premium / custom only). KrunkNative's server gates NET_EXT_KN_PLAYER_RANK_FLAG on it.
 enum {
     PLAYER_SHOW_BADGE_VERIFIED = 1 << 0,
     PLAYER_SHOW_BADGE_PREMIUM = 1 << 1,

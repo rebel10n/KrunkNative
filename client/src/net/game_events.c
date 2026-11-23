@@ -1590,6 +1590,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&notice, body, sizeof(notice));
                 events_ranked_notice(client, &notice);
             }
+            else if (subtype == NET_EXT_KN_PLAYER_RANK_FLAG && body_length == sizeof(NetPlayerRankFlagPacket)) { // ADD_PLAYERS' rankedRank / flagIndex
+                NetPlayerRankFlagPacket rank_flag;
+                memcpy(&rank_flag, body, sizeof(rank_flag));
+                player_accounts_on_rank_flag(&rank_flag);
+            }
             else if (subtype == NET_EXT_KN_CHAT_ACTIONS && body_length == sizeof(NetChatActionsPacket)) { // the last line's actions
                 NetChatActionsPacket actions;
                 memcpy(&actions, body, sizeof(actions));

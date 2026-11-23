@@ -80,6 +80,7 @@ typedef struct {
     int level;                 // 0 guest
     char clan[8];
     int flag;                  // stats.flg: the Country Flag index (client account_flags.h), -1 none (the Strike kill card)
+    int ranked_rank;           // account ranked_rank (v10 setData, deob-10.0.7.js:115141): the running season's tier, 0 Unranked
     unsigned char flags;       // NET_PLAYER_INFO_*
     unsigned char hack:1;      // account.hack: no rewards / stats (game.js)
     unsigned char premium:1;

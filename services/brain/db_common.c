@@ -12,6 +12,8 @@
 #include <string.h>
 
 #include "account_life.h"
+#include "brain_internal.h" /* ranked_season_now: the account's ranked_rank */
+#include "ranked.h"         /* ranked_rank_of, RANKED_PLACEMENT_MATCHES */
 #include "junk.h"
 #include "knsvc/loop.h"
 #include "v10_paint.h"
@@ -545,9 +547,30 @@ static void db_account_trades(Dbx *x, const int64_t id, cJSON *o) {
     cJSON_AddNumberToObject(o, "trades", (double) db_completed_trades(x, id));
 }
 
+/* "ranked_rank": v10's account.rankedRank (setData `ranked_rank || 0`, deob-10.0.7.js:115141), which the game server sends
+ * as ADD_PLAYERS' rankedRank (getPlayerAddData :176753; server/src/accounts.c, NET_EXT_KN_PLAYER_RANK_FLAG). The same row
+ * the profile's rank chip reads (db_social.c, social_profile_rank): the latest season's profile, a placed one and the best
+ * rated first, its tier when that season is the running one, else 0 Unranked. */
+#define DB_RANKED_STR_(x) #x
+#define DB_RANKED_STR(x) DB_RANKED_STR_(x)
+static void db_account_ranked_rank(Dbx *x, const int64_t id, cJSON *o) {
+    if (!o) return;
+    cJSON *ranked = dbx_row(x,
+        SQL(.any = "SELECT season AS season__i, cr AS cr__f, wins + losses + draws AS matches__i FROM ranked_profiles"
+                   " WHERE account_id = $1 ORDER BY season DESC, (wins + losses + draws >= " DB_RANKED_STR(RANKED_PLACEMENT_MATCHES) ") DESC,"
+                   " cr DESC LIMIT 1"),
+        KN_DB_ARGS(I64S(id)));
+    int rank = 0;
+    if (cJSON_IsObject(ranked) && kn_json_int(ranked, "season", -1) == ranked_season_now())
+        rank = ranked_rank_of(kn_json_num(ranked, "cr", 0), (int) kn_json_int(ranked, "matches", 0));
+    cJSON_Delete(ranked);
+    cJSON_DeleteItemFromObjectCaseSensitive(o, "ranked_rank");
+    cJSON_AddNumberToObject(o, "ranked_rank", rank);
+}
+
 /* PostgreSQL's kn_account_json (and the functions that return it, e.g. kn_commit_stats) builds the account in SQL; what
  * the other drivers' C adds is added here: the owned list (the SQL's data[10] counts every unit; painted copies apart,
- * counter skins' m[stat]), reqDel / twitchId / raidStats, chat_banned and trades. Every account a PostgreSQL proc hands out goes
+ * counter skins' m[stat]), reqDel / twitchId / raidStats, chat_banned, trades and ranked_rank. Every account a PostgreSQL proc hands out goes
  * through this (db_accounts.c: session_account, account_json, commit_stats). */
 void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v) {
     if (!v || id <= 0) return;
@@ -558,6 +581,7 @@ void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v) {
     db_account_life_extras(x, id, v); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
     db_account_chat_ban(x, id, v);
     db_account_trades(x, id, v);
+    db_account_ranked_rank(x, id, v);
 }
 
 cJSON *db_account_json(Dbx *x, int64_t id) {
@@ -640,5 +664,6 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     db_account_life_extras(x, id, o); /* v10.0.3 reqDel, twitchId, raidStats (account_life.c, 0359 / 0360) */
     db_account_chat_ban(x, id, o);
     db_account_trades(x, id, o);
+    db_account_ranked_rank(x, id, o);
     return o;
 }

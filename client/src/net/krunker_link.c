@@ -106,6 +106,8 @@ static KrunkerLinkPlayer *player(KrunkerLink *l, const int sid, const int create
     p->sid = sid;
     p->health = 100.0f;
     p->max_health = 100;
+    p->ranked_rank = 0; // until its "0"
+    p->flag = -1;
     return p;
 }
 
@@ -430,10 +432,15 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
 // A player's account fields as v10 keeps them from its "0" entry (players.add :220273-220283): the
 // leaderboard / Tab board / end table / nametags read them through NET_PACKET_PLAYER_INFO. HOST is
 // game.host (init arg 5, "uh") == the player's socket id.
+static void emit_hud_ext(KrunkerLink *l, uint16_t subtype, const void *body, uint16_t length); // below
 static void emit_player_info(KrunkerLink *l, KrunkerLinkPlayer *p) {
     p->info.flags = (uint8_t) ((p->info.flags & ~NET_PLAYER_INFO_HOST) |
                                (l->host_id[0] && p->id[0] && !strcmp(l->host_id, p->id) ? NET_PLAYER_INFO_HOST : 0));
     emit(l, NET_PACKET_PLAYER_INFO, &p->info, sizeof(p->info));
+    // "0" [46] rankedRank / [26] flagIndex (the Tab board's and the end table's icons): right after, as our own server
+    // sends them, since the PLAYER_INFO resets both on the client
+    const NetPlayerRankFlagPacket rank_flag = {.uid = p->info.uid, .ranked_rank = p->ranked_rank, .flag = p->flag};
+    emit_hud_ext(l, NET_EXT_KN_PLAYER_RANK_FLAG, &rank_flag, sizeof(rank_flag));
 }
 
 // ADD_PLAYERS' propID: offset 21 of the 10.0.3 layout (KRUNKER_ADD_PROP_ID_1003, see on_add_players), NULL
@@ -514,6 +521,10 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
                                    (truthy(E(KRB_ADD_IS_HACKER)) ? NET_PLAYER_INFO_HACKER : 0) |
                                    (truthy(E(KRB_ADD_IS_BOT)) ? NET_PLAYER_INFO_BOT : 0) |
                                    (truthy(E(KRB_ADD_CREATOR_BADGE)) ? NET_PLAYER_INFO_CREATOR : 0));
+            // players.add rankedRank = [46] (deob-10.0.7.js:174413), the handler's flagIndex = parseInt([26]) (:227157)
+            const double rank = num(E(KRB_ADD_RANKED_RANK), 0), flag = num(E(KRB_ADD_FLAG_INDEX), -1);
+            p->ranked_rank = rank > 0 ? (int) rank : 0;
+            p->flag = flag > -1 ? (int) flag : -1;
         }
 #undef E
         if (s.is_you) {
