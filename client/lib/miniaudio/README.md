@@ -14,8 +14,9 @@ system libraries to link on Linux/Windows/macOS (backends are loaded at runtime)
 
 - playback backends: PulseAudio/PipeWire/ALSA/JACK, WASAPI/DirectSound, Core Audio, and
   Web Audio under Emscripten (same C code for the web build);
-- the bundled MP3 decoder (dr_mp3) reads Krunker's `assets/sound/*.mp3` directly, so no
-  second decoder (stb_vorbis etc.) is vendored;
+- the bundled MP3 decoder (dr_mp3) reads Krunker's `assets/sound/*.mp3` directly; Ogg Vorbis
+  (the Skin Manager's `.ogg` sounds) goes through stb_vorbis (`client/lib/stb_vorbis`), which
+  miniaudio picks up when `stb_vorbis.c` is included before its implementation;
 - `ma_engine` provides mixing, per-voice pitch (Howler `rate`) and 3D spatialisation with
   `ma_attenuation_model_inverse`, the same formula as Web Audio's `inverse` model.
 

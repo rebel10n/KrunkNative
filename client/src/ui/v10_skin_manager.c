@@ -32,8 +32,8 @@
 // and the preview's wear / paint controls (no Box Office data behind them yet), Shader Studio's node canvas (the graph
 // is the skin's own, or v10's default surface graph; its params, parts, Apply to all parts, Refresh / Clear Preview
 // and Remove Shader are here) and the graph's look: itemConfig.customShader is saved as v10 saves it, but the
-// preview and the game draw the skin without it (the client compiles no node graph; skin_fx has v10's fixed shaders), and an OGG sound (the client has no Vorbis decoder: the brain refuses it). A krunker.io
-// account's skins are krunker.io's: v10_gapi sends no write there (read-only), so its uploads fail as its saves do.
+// preview and the game draw the skin without it (the client compiles no node graph; skin_fx has v10's fixed shaders). An OGG sound plays as
+// MP3 and WAV do (miniaudio with stb_vorbis, client/src/miniaudio.c). A krunker.io account's skins are krunker.io's: v10_gapi sends no write there (read-only), so its uploads fail as its saves do.
 #include <v10_skin_manager.h>
 #include <v10_social.h>
 #include <v10_ui.h>

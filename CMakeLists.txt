@@ -1865,6 +1865,11 @@ else ()
         target_include_directories(audio_distance_test PRIVATE client/include client/lib)
         target_link_libraries(audio_distance_test PRIVATE cJSON freetype glfw Threads::Threads m ${CMAKE_DL_LIBS})
         add_test(NAME audio_distance_test COMMAND audio_distance_test)
+        # audio_ogg_test: Ogg Vorbis through miniaudio + stb_vorbis (client/src/miniaudio.c), the Skin Manager's .ogg sounds
+        add_executable(audio_ogg_test client/tests/audio_ogg_test.c client/src/miniaudio.c)
+        target_include_directories(audio_ogg_test PRIVATE client/include client/lib)
+        target_link_libraries(audio_ogg_test PRIVATE Threads::Threads m ${CMAKE_DL_LIBS})
+        add_test(NAME audio_ogg_test COMMAND audio_ogg_test ${CMAKE_SOURCE_DIR})
     endif ()
 
     # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks

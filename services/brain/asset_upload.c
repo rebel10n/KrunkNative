@@ -372,6 +372,16 @@ static const char *check_sound(const unsigned char *d, const size_t n) {
     return sync && layer && rate != 15 ? NULL : "Invalid Sound (MP3 only)";
 }
 
+static int is_wav(const unsigned char *d, const size_t n) { return n >= 12 && !memcmp(d, "RIFF", 4) && !memcmp(d + 8, "WAVE", 4); }
+
+/* an Ogg stream whose first page holds a Vorbis identification header ("OggS", page header + segment table, then
+ * packet type 1 and "vorbis") */
+static int is_ogg_vorbis(const unsigned char *d, const size_t n) {
+    if (n < 28 || memcmp(d, "OggS", 4) || d[4] != 0) return 0;
+    const size_t body = 27 + (size_t) d[26];
+    return n >= body + 7 && d[body] == 1 && !memcmp(d + body + 1, "vorbis", 6);
+}
+
 static const char *check_video(const unsigned char *d, const size_t n) {
     if (n < 16 || memcmp(d + 4, "ftyp", 4)) return "Invalid Video (MP4 only)";
     const uint32_t box = be32(d);
@@ -523,9 +533,10 @@ static const char *check_file(const Ticket *t, const Part *p) {
         switch (check) {
             case V_IMAGE: err = check_image(d, n); break;
             case V_SOUND:
-                /* a skin's sound may also be a WAV (RIFF....WAVE), which the client's decoder plays as well */
-                err = t->kind == K_SKIN && n >= 12 && !memcmp(d, "RIFF", 4) && !memcmp(d + 8, "WAVE", 4) ? NULL : check_sound(d, n);
-                if (err && t->kind == K_SKIN) err = "Invalid Sound (MP3 or WAV only)";
+                /* a skin's sound may also be a WAV (RIFF....WAVE) or an Ogg Vorbis file, v10's drop zone's .wav / .ogg
+                 * (deob-10.0.7.js:127038), which the client's decoder plays as well (miniaudio + stb_vorbis) */
+                err = t->kind == K_SKIN && (is_wav(d, n) || is_ogg_vorbis(d, n)) ? NULL : check_sound(d, n);
+                if (err && t->kind == K_SKIN) err = "Invalid Sound (MP3, WAV or OGG only)";
                 break;
             case V_VIDEO: err = check_video(d, n); break;
             case V_MODEL: err = check_model(t->ext, d, n); break;
@@ -1122,8 +1133,8 @@ static void commit_start(Commit *c) {
  *   texture    diffuse texture.png, emissive texture_e.png, wear texture_w.png, the paint mask texture_p.png
  *              (category "mask", :126090)
  *   sound      shoot sound.mp3 (uploadSound's default), swap sound_swap.mp3, inspect sound_inspect.mp3: an MP3 or
- *              a WAV (the names stay .mp3 as v10 loads them; the client's decoder reads either by content). v10's
- *              drop zone also takes .ogg: KrunkNative's client has no Vorbis decoder, so an OGG is refused at done
+ *              a WAV or an Ogg Vorbis file, v10's drop zone's three (:127038; the names stay .mp3 as v10 loads them, and the
+ *              client's decoder, miniaudio with stb_vorbis, reads each by content)
  *   thumbnail  thumbnail.png (Capture Thumbnail, :124779; the table's image :124964)
  * The limits are Box Office's (v10 leaves them to its server): the editor's Publish Asset ones (a texture 10 MB, a sound
  * 5 MB, a model 100 MB) and 1 MB for a thumbnail (a 256 px capture). 0 with *code on a refusal. */

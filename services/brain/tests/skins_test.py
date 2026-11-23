@@ -145,7 +145,7 @@ def png(w=2, h=2):
 
 MP3 = b"ID3\x03\0\0\0\0\0\0" + b"\xff\xfb\x90\x00" + b"\0" * 64
 WAV = b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x44\xac\0\0\x88\x58\x01\0\x02\0\x10\0data\0\0\0\0"
-OGG = b"OggS\0\x02" + b"\0" * 58
+NOT_VORBIS = b"OggS\0\x02" + b"\0" * 58  # an Ogg page with no Vorbis header
 OBJ = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n"
 
 
@@ -354,8 +354,16 @@ async def scenario(port):
     check(st == 400 and code(err) == "SKIN_UPLOAD_SIZE", "upload: a thumbnail over 1 MB is refused at the key", (st, err))
     st, body = await upload(a, port, sid, "texture", b"<html>not a png</html>", "diffuse", "x.png")
     check(st == 400, "upload: a texture that is no image fails its check at done", (st, body))
-    st, body = await upload(a, port, sid, "sound", OGG, "inspect", "i.ogg")
-    check(st == 400 and "MP3 or WAV" in json.dumps(body), "upload: an OGG sound is refused at done (no Vorbis decoder)", (st, body))
+    # v10's drop zone takes .ogg (deob-10.0.7.js:127038): an Ogg Vorbis file is stored under sound_inspect.mp3, as v10's
+    # game loads it (the client decodes it by content: miniaudio + stb_vorbis)
+    ogg = open(os.path.join(ROOT, "client", "tests", "data", "tone_440.ogg"), "rb").read()
+    st, body = await upload(a, port, sid, "sound", ogg, "inspect", "i.ogg")
+    st1, got = raw(port, "GET", "/api/user-assets/skins/%d/sound_inspect.mp3" % sid, None)
+    check(st == 200 and (body or {}).get("data", {}).get("asset_path") == "skins/%d/sound_inspect.mp3" % sid and st1 == 200
+          and got == ogg, "upload: an Ogg Vorbis sound is stored as sound_inspect.mp3", (st, body, st1))
+    st, body = await upload(a, port, sid, "sound", NOT_VORBIS, "inspect", "i.ogg")
+    check(st == 400 and "MP3, WAV or OGG" in json.dumps(body), "upload: an Ogg file with no Vorbis stream is refused at done",
+          (st, body))
     st, d, err = await b.gapi("POST", "/skins/%d/upload" % sid, {"asset_type": "thumbnail", "size": 100})
     check(st == 404 and code(err) == "SKIN_NOT_FOUND", "upload: another account's skin is 404", (st, err))
     # the skin deleted between the key and done: nothing is stored
