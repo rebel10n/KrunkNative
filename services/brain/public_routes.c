@@ -231,7 +231,9 @@ static void h_game_info(kn_http_req *req, void *ud) {
 
 /* ---- session token -> account (svc-accounts "token" op), shared by seek/host */
 
-typedef void (*AccountCb)(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx);
+/* acc_type: v10's UTILS.getAccountType of the account (deob-10.0.7.js:24544-24546): 3 featured, 2 premium, 1 any
+ * other account, 0 a guest (no token, or one that did not resolve) */
+typedef void (*AccountCb)(kn_http_req *req, Brain *b, int64_t account_id, const char *name, int acc_type, void *ctx);
 
 typedef struct AccountLookup {
     kn_http_req *req;
@@ -244,12 +246,14 @@ static void on_account(void *ud, const char *err, const cJSON *data) {
     AccountLookup *a = ud;
     int64_t id = 0;
     const char *name = NULL;
+    int acc_type = 0;
     if (!err && data) {
         id = kn_json_int(data, "id", 0);
         name = kn_json_str(data, "username", kn_json_str(data, "name", NULL));
+        acc_type = id <= 0 ? 0 : kn_json_int(data, "featured", 0) > 0 ? 3 : kn_json_int(data, "premium", 0) > 0 ? 2 : 1;
     }
     if (err) KN_DEBUG("routes", "session lookup failed: %s (joining as guest)", err);
-    a->cb(a->req, a->b, id, name, a->ctx);
+    a->cb(a->req, a->b, id, name, acc_type, a->ctx);
     free(a);
 }
 
@@ -260,12 +264,12 @@ static void with_account(kn_http_req *req, Brain *b, AccountCb cb, void *ctx) {
         if (bearer) snprintf(token, sizeof(token), "%s", bearer);
     }
     if (!token[0]) {
-        cb(req, b, 0, NULL, ctx);
+        cb(req, b, 0, NULL, 0, ctx);
         return;
     }
     AccountLookup *a = calloc(1, sizeof(*a));
     if (!a) {
-        cb(req, b, 0, NULL, ctx);
+        cb(req, b, 0, NULL, 0, ctx);
         return;
     }
     a->req = req;
@@ -398,12 +402,14 @@ static void seek_core(kn_http_req *req, Brain *b, int64_t account_id, const char
     cJSON_Delete(reply);
 }
 
-static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
+static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, int acc_type, void *ctx) {
     (void) ctx;
+    (void) acc_type;
     seek_core(req, b, account_id, name, NULL);
 }
 
-static void hot_seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
+static void hot_seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, int acc_type, void *ctx) {
+    (void) acc_type;
     seek_core(req, b, account_id, name, ctx);
     free(ctx);
 }
@@ -576,19 +582,43 @@ typedef struct HostReq {
     char region[64];
     char flavor[16]; /* ?flavor= / body flavor: the node's product flavor pool */
     char guest[33];  /* ?guest=: a guest host's device id (32 lowercase hex); no token */
+    char *captcha;   /* ?captcha= / the body's captcha: checked for a guest host only (host_with_account) */
     cJSON *config;
 } HostReq;
+
+static void host_req_free(HostReq *h) {
+    cJSON_Delete(h->config);
+    free(h->captcha);
+    free(h);
+}
 
 static void on_hosted(void *ud, const char *err, const cJSON *reply) {
     HostReq *h = ud;
     if (err) reply_error(h->req, error_status(err), err);
     else brain_reply_json(h->req, 200, reply);
-    cJSON_Delete(h->config);
-    free(h);
+    host_req_free(h);
 }
 
-static void host_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
+/* config.hostAccType: the host's account type (getAccountType), set here only (a client's own value is replaced), so
+ * the game server clamps the request's numbers as v10's applyConfig(config, accType) does (deob-10.0.7.js:191282:
+ * 3 maxF, 2 maxP, 0 maxG, else max; game_config_host_clamp) */
+static void host_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, int acc_type, void *ctx) {
     HostReq *h = ctx;
+    /* the hosting captcha: v10.0.7 asks it of a guest only (createPrivateRoom: an account sends CUSTOM_SERVER at once,
+     * a guest after requestCaptcha("hosting"), deob-10.0.7.js:204803), whose argument after the config is the solved
+     * ALTCHA. Here ?captcha= (or the body's captcha): the payload of GET /mm/captcha?for=hosting (captcha.h). Refused
+     * only with captcha.enforce on: CaptchaRequired / RecaptchaFailed, v10's matchmaker error names
+     * (deob-10.0.3.js:164975-164976) */
+    if (account_id <= 0) {
+        CaptchaResult cr;
+        if (!captcha_gate(h->captcha && h->captcha[0] ? h->captcha : NULL, "hosting", req->remote_addr, &cr)) {
+            reply_error(req, 400, captcha_refusal_error(cr));
+            host_req_free(h);
+            return;
+        }
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(h->config, "hostAccType");
+    cJSON_AddNumberToObject(h->config, "hostAccType", account_id > 0 ? acc_type : 0);
     brain_host_game(b, h->region, h->config, account_id, name, account_id > 0 ? NULL : h->guest, h->flavor, on_hosted, h);
 }
 
@@ -606,12 +636,11 @@ static void h_host_game(kn_http_req *req, void *ud) {
     }
     h->req = req;
     cJSON *body = req->body_len ? kn_http_body_json(req) : NULL;
-    char *body_captcha = NULL; /* the body's captcha (POST): freed by the captcha check below */
     if (body) {
         snprintf(h->region, sizeof(h->region), "%s", kn_json_str(body, "region", ""));
         snprintf(h->flavor, sizeof(h->flavor), "%s", kn_json_str(body, "flavor", ""));
         const char *bc = kn_json_str(body, "captcha", NULL);
-        if (bc && *bc) body_captcha = strdup(bc);
+        if (bc && *bc) h->captcha = strdup(bc);
         cJSON *cfg = cJSON_DetachItemFromObjectCaseSensitive(body, "config");
         h->config = cfg;
         cJSON_Delete(body);
@@ -628,33 +657,14 @@ static void h_host_game(kn_http_req *req, void *ud) {
     }
     if (!h->config) h->config = cJSON_CreateObject();
     if (!cJSON_IsObject(h->config)) {
-        cJSON_Delete(h->config);
-        free(h);
-        free(body_captcha);
+        host_req_free(h);
         reply_error(req, 400, "BadRequest");
         return;
     }
-    /* the hosting captcha: v10.0.3's rpc("bCpt", "hosting") before "custom", whose argument after the config is the solved ALTCHA
-     * (deob-10.0.3.js:133912-133919, 229992-229998). Here ?captcha= (or the body's captcha): the payload of
-     * GET /mm/captcha?for=hosting (captcha.h). Refused only with captcha.enforce on: CaptchaRequired /
-     * RecaptchaFailed, v10.0.3's matchmaker error names (deob-10.0.3.js:164975-164976) */
-    {
-        char *cap = NULL;
-        if (body_captcha) cap = body_captcha;
-        else {
-            const size_t cap_n = strlen(req->query) + 1;
-            cap = malloc(cap_n);
-            if (cap && kn_http_query_get(req, "captcha", cap, cap_n) <= 0) cap[0] = 0;
-        }
-        CaptchaResult cr;
-        const int pass = captcha_gate(cap && cap[0] ? cap : NULL, "hosting", req->remote_addr, &cr);
-        free(cap);
-        if (!pass) {
-            cJSON_Delete(h->config);
-            free(h);
-            reply_error(req, 400, captcha_refusal_error(cr));
-            return;
-        }
+    if (!h->captcha) { /* the query's captcha, checked once the host is known (host_with_account) */
+        const size_t cap_n = strlen(req->query) + 1;
+        h->captcha = malloc(cap_n);
+        if (h->captcha && kn_http_query_get(req, "captcha", h->captcha, cap_n) <= 0) h->captcha[0] = 0;
     }
     with_account(req, b, host_with_account, h);
 }

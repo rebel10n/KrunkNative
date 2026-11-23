@@ -2373,7 +2373,8 @@ the active backend (`krunker_net_active()`: the official krunker.io connection):
   joins on the reply. A community map is not sent here (krunker.io does not know it).
 - **Box Office servers** (otherwise): the brain hosts the game. The same object goes to
   `GET /mm/host-game?region=R&config=JSON` (`servers_ui_host_game`, section 8.5 of this document), after
-  the hosting captcha (v10's `bCpt` "hosting"): the brain finds a server with capacity, and the client
+  the hosting captcha for a guest (v10's `bCpt` "hosting"; an account sends at once, deob-10.0.7.js:204803): the brain
+  clamps the numbers by the host's account type (`hostAccType`: maxG / max / maxP / maxF) and finds a server with capacity, and the client
   joins. A community map is its `customMap`. Guests host too (`&guest=`, v10). The end screen's raid promo
   opens this window on the Raid type, as v10's does (doc/v10/end-raid.md).
 - **Host it yourself** (always): the server_bin command for the settings (`shared/src/host_command.c`), the

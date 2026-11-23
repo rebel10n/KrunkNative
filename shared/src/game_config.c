@@ -674,6 +674,14 @@ void game_config_defaults(GameConfig *g, const int host_index) {
     game_config_sync_teams(g);
 }
 
+int game_config_host_clamp(const cJSON *request) {
+    const cJSON *type = cJSON_IsObject(request) ? cJSON_GetObjectItemCaseSensitive(request, "hostAccType") : NULL;
+    if (!cJSON_IsNumber(type)) return GAME_CONFIG_CLAMP_HOSTED;
+    const int t = (int) type->valuedouble;
+    // the clamp values are v10's account types (GAME_CONFIG_CLAMP_GUEST 0 .. GAME_CONFIG_CLAMP_HOSTED 3)
+    return t >= GAME_CONFIG_CLAMP_GUEST && t <= GAME_CONFIG_CLAMP_HOSTED ? t : GAME_CONFIG_CLAMP_HOSTED;
+}
+
 void game_config_read(GameConfig *g, const cJSON *cfg, const int clamp, const int host_index) {
     if (!g) return;
     const int comp = gc_host_comp(host_index);
@@ -1667,7 +1675,7 @@ int game_apply_map_config(Game *game, const Map *map) {
     cJSON *cfg = game_config_setup(st->host_index, requested, NULL, 0);
     cJSON_Delete(requested);
     if (!cfg) return 0;
-    game_config_apply(game, cfg, GAME_CONFIG_CLAMP_HOSTED, st->host_index);
+    game_config_apply(game, cfg, game_config_host_clamp(st->request), st->host_index); // the host's account type's max
     cJSON_Delete(cfg);
     return 1;
 }

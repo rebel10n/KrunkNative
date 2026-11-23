@@ -341,6 +341,32 @@ static void test_rosters_and_upgrades(void) {
     cJSON_Delete(cfg);
 }
 
+// v10's applyConfig(config, accType) (deob-10.0.7.js:191282): a hosted game's numbers are clamped by the host's
+// getAccountType (featured 3 maxF, premium 2 maxP, account 1 max, guest 0 maxG), the brain's hostAccType
+static void test_host_clamp(void) {
+    printf("hostAccType clamps...\n");
+    static const struct {
+        const char *request;
+        int clamp, max_players;
+    } cases[] = {
+        {"{\"maxPlayers\":20}", GAME_CONFIG_CLAMP_HOSTED, 20},                    // no hostAccType: a node's own request, maxF
+        {"{\"maxPlayers\":20,\"hostAccType\":3}", GAME_CONFIG_CLAMP_HOSTED, 20}, // featured: maxF 20
+        {"{\"maxPlayers\":20,\"hostAccType\":2}", GAME_CONFIG_CLAMP_PRIVATE, 16}, // premium: maxP 16
+        {"{\"maxPlayers\":20,\"hostAccType\":1}", GAME_CONFIG_CLAMP_PUBLIC, 10}, // an account: max 10
+        {"{\"maxPlayers\":20,\"hostAccType\":0}", GAME_CONFIG_CLAMP_GUEST, 6},   // a guest: maxG 6
+        {"{\"maxPlayers\":20,\"hostAccType\":9}", GAME_CONFIG_CLAMP_HOSTED, 20}, // out of range: maxF
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        cJSON *request = cJSON_Parse(cases[i].request);
+        const int clamp = game_config_host_clamp(request);
+        GameConfig g = g_default_game_config;
+        game_config_read(&g, request, clamp, GAME_HOST_CUSTOM);
+        CHECK(clamp == cases[i].clamp && g.max_players == cases[i].max_players, "%s: clamp %d (want %d), maxPlayers %d (want %d)",
+              cases[i].request, clamp, cases[i].clamp, g.max_players, cases[i].max_players);
+        cJSON_Delete(request);
+    }
+}
+
 static Player *spawn(Game *game, const int uid, const int class_index) {
     Player *p = player_init(game);
     p->uid = uid;
@@ -836,6 +862,7 @@ int main(void) {
     test_validate();
     test_inputs_and_merge();
     test_rosters_and_upgrades();
+    test_host_clamp();
     test_class_overrides(sandstorm);
     test_map_config(sandstorm);
     test_mimic_pubs(sandstorm);

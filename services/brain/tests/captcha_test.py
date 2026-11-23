@@ -220,7 +220,14 @@ def http_auth_checks(port, db_path):
 
 def host_checks(port, token):
     cfg = urllib.parse.quote(json.dumps({"maps": [0], "modes": [0]}))
-    base = "/mm/host-game?region=local&config=%s&token=%s" % (cfg, urllib.parse.quote(token or ""))
+    # v10.0.7 asks the hosting captcha of a guest only (createPrivateRoom, deob-10.0.7.js:204803): an account hosts at once
+    st, body, _ = http(port, "GET", "/mm/host-game?region=local&config=%s&token=%s" % (cfg, urllib.parse.quote(token or "")))
+    check("GET /mm/host-game of an account without a captcha gets past the captcha (no server here: its own answer)",
+          text_error(body) not in ("CaptchaRequired", "RecaptchaFailed"), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body, _ = http(port, "GET", "/mm/host-game?region=local&config=%s&token=bogus" % cfg)
+    check("GET /mm/host-game with a token that is no session is a guest's: 400 CaptchaRequired",
+          st == 400 and text_error(body) == "CaptchaRequired", "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    base = "/mm/host-game?region=local&config=%s" % cfg  # a guest
     st, body, _ = http(port, "GET", base)
     check("GET /mm/host-game without a captcha -> 400 CaptchaRequired (v10.0.3's matchmaker error)",
           st == 400 and text_error(body) == "CaptchaRequired", "HTTP %d %s" % (st, json.dumps(body)[:160]))
@@ -234,7 +241,7 @@ def host_checks(port, token):
     st, body, _ = http(port, "GET", base + "&captcha=" + urllib.parse.quote(pl))
     check("the same hosting payload again -> 400 RecaptchaFailed", st == 400 and text_error(body) == "RecaptchaFailed",
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
-    st, body, _ = http(port, "POST", "/mm/host-game?token=" + urllib.parse.quote(token or ""),
+    st, body, _ = http(port, "POST", "/mm/host-game",
                        {"region": "local", "config": {"maps": [0]}, "captcha": solved(port, "hosting")})
     check("POST /mm/host-game {captcha} gets past the captcha", text_error(body) not in ("CaptchaRequired", "RecaptchaFailed"),
           "HTTP %d %s" % (st, json.dumps(body)[:160]))

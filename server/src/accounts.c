@@ -3647,6 +3647,25 @@ static void acc_handle_host(const cJSON *frame) {
         acc_host_apply(frame, local);
         return;
     }
+    // v10's Raw Game Data (createPrivateRoom's rawMapData, deob-10.0.7.js:204712; the field is on the Custom host window
+    // without a community map, :219951): the pasted game is the one hosted. Here it passes the published maps' checks
+    // first (published_map_verify: v10 prepareGame + validateMap with a creator's limits).
+    const char *raw = acc_str(cJSON_GetObjectItem(config, "rawMapData"), "");
+    if (raw[0]) {
+        cJSON *map = cJSON_Parse(raw);
+        const char *invalid = cJSON_IsObject(map) ? published_map_verify(map) : "Invalid Map";
+        if (invalid) {
+            server_log_error("[brain] raw game data for a hosted game rejected: %s", invalid);
+            acc_host_reply_error(frame, invalid);
+            cJSON_Delete(map);
+            return;
+        }
+        cJSON *previous = g_acc.hosted_map;
+        g_acc.hosted_map = map;
+        acc_host_apply(frame, map);
+        cJSON_Delete(previous); // only referenced by a reverted game (the current one is map)
+        return;
+    }
     acc_host_apply(frame, NULL);
 }
 
@@ -3734,7 +3753,9 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     // Comp (ranked), Zombies and Raid hosts: setupGameConfig's overDat / forceDat / allowedDat
     cJSON *forced = ranked || host_index == GAME_HOST_ZOMBIES || host_index == GAME_HOST_RAID ? game_config_setup(host_index, request, NULL, ranked) : NULL;
     GameConfig game_config = *flavor_default_game_config(); // base: g_default_game_config
-    game_config_read(&game_config, forced ? forced : request, GAME_CONFIG_CLAMP_HOSTED, host_index); // round 1 before its map loads
+    // round 1 before its map loads; numbers clamped by the host's account type (v10 applyConfig(config, accType),
+    // deob-10.0.7.js:191282: the brain's hostAccType, game_config_host_clamp)
+    game_config_read(&game_config, forced ? forced : request, game_config_host_clamp(request), host_index);
 
     // maps: Krunker mapIndexes (the Host Game window's official maps, host_flow_ui.c), or names (this
     // server's own maps first: custom dirs / the command line map), else the public rotation

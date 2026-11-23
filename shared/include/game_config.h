@@ -90,6 +90,11 @@ void game_config_defaults(GameConfig*, int host_index);
 // applyConfig's serverConfig loop: every option from `cfg` (an object of varN values), the
 // default when missing or of the wrong type; numbers clamped to [min, max of `clamp`].
 void game_config_read(GameConfig*, const cJSON *cfg, int clamp, int host_index);
+// The clamp of a hosted game's request: v10's applyConfig(config, accType) clamps by the host's account type
+// (deob-10.0.7.js:191282: 3 maxF, 2 maxP, 0 maxG, 1 max; getAccountType :24544-24546). Box Office's brain sets
+// request.hostAccType (0..3, services/brain/public_routes.c host_with_account); a request without it (the offline
+// sandbox, a node's own request) keeps GAME_CONFIG_CLAMP_HOSTED (maxF).
+int game_config_host_clamp(const cJSON *request);
 // Only the keys present in `cfg` (server.cfg game.<varN>), clamped the same way. Returns how
 // many were applied.
 int game_config_merge(GameConfig*, const cJSON *cfg, int clamp);
