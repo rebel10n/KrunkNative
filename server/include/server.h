@@ -47,6 +47,7 @@ typedef enum {
 #define SERVER_TALLY_MAX 128      // challenge tallies of one round (key x weapon x streak x item)
 #define SERVER_SKIN_PAINT_MAX 256 // painted store indices of one account (one paint per index; more are not sent)
 #define SERVER_SKIN_STYLE_MAX 32  // styled store indices of one account (v10.0.7: two items have styles)
+#define SERVER_CHALLENGES_MAX 64   // active challenges of one account the game server follows mid-match (chal_told bits)
 
 // one painted copy of the account, by store index (a shader paint has color -1, a colour paint shader -1)
 typedef struct {
@@ -135,6 +136,13 @@ typedef struct {
     uint32_t stat_counts[PROGRESSION_STAT_COUNT];
     ServerChallengeTally tallies[SERVER_TALLY_MAX];
     int tally_count;
+    // v10.0.7's mid-match CHALLENGE_COMPLETED (deob-10.0.7.js:180731-180732): the account's activeChallenges as kn_brain
+    // read them at the join and at each round start (cJSON array, owned, NULL none), each one's progVal after the last
+    // event (chal_pv, PV at the read) and the ones already reported this round (chal_told bit i = challenge i)
+    cJSON *challenges;
+    uint32_t chal_rid;                 // the pending "challenges" read, 0 none
+    uint64_t chal_told;
+    double chal_pv[SERVER_CHALLENGES_MAX];
     // KrunkNative live sign-in (NET_EXT_KN_ACCOUNT_AUTH, accounts.c): one verification in flight,
     // a few per minute, nothing changes before it verifies
     uint32_t live_rid;                 // the pending brain / central request, 0 none

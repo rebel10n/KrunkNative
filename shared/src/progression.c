@@ -247,6 +247,21 @@ static int finalize_one(cJSON *c, const double pv, const int set_or_max, cJSON *
     return save;
 }
 
+int challenge_progress(const cJSON *challenge, const cJSON *events, const ChallengeMatch *match, double *pv) {
+    double v = field_num(challenge, "PV", NULL);
+    const int touched = challenge && match ? check_challenge(challenge, events, match, &v) : 0;
+    if (pv) *pv = v;
+    return touched;
+}
+
+int challenge_reached_mid_match(const cJSON *challenge, const double before, const double now) {
+    const cJSON *dat = cJSON_GetObjectItemCaseSensitive(challenge, "DAT");
+    if (!dat || field_num(challenge, "PT", NULL) == 1.0) return 0;
+    const double val = field_num(dat, "val", NULL);
+    // deob-10.0.7.js:180731: 1 != PT && progVal before < DAT.val && (DAT.lesser ? progVal && progVal <= val : progVal >= val)
+    return before < val && reached(dat, now, 1);
+}
+
 // The "chall" filter: a completed challenge of the same type and the meta challenge's filters.
 static int same_field(const cJSON *meta_dat, const cJSON *dat, const char *key) {
     int has = 0;

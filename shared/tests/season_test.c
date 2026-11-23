@@ -271,8 +271,39 @@ static void test_challenge_contexts(void) {
     }
 }
 
+// v10.0.7's mid-match CHALLENGE_COMPLETED (challenges.update, deob-10.0.7.js:180731): the game server runs the commit's
+// rule over the round's tallies so far (challenge_progress) and reports the event that takes progVal from below DAT.val
+// to it (challenge_reached_mid_match), once; a completed (PT 1) challenge never
+static void test_mid_match(void) {
+    cJSON *c = cJSON_Parse("{\"CI\":3,\"T\":\"daily\",\"DAT\":{\"ky\":\"k\",\"val\":5},\"REW\":{\"kr\":5},\"PV\":2,\"PT\":0}");
+    const ChallengeMatch match = {.map_index = 0, .map_id = -1};
+    double before = 2, now = 0;
+    cJSON *events = cJSON_Parse("[[\"k\",2,-1,-1,-1]]");
+    CHECK(challenge_progress(c, events, &match, &now) && now == 4 && !challenge_reached_mid_match(c, before, now),
+          "2 kills of 3 to go: progVal 4, not reached (%g)", now);
+    cJSON_Delete(events);
+    before = now;
+    events = cJSON_Parse("[[\"k\",3,-1,-1,-1]]"); // the round's tally: 3 kills (from PV 2, not from 4)
+    CHECK(challenge_progress(c, events, &match, &now) && now == 5 && challenge_reached_mid_match(c, before, now),
+          "the third kill reaches 5 (%g)", now);
+    before = now;
+    cJSON_Delete(events);
+    events = cJSON_Parse("[[\"k\",4,-1,-1,-1]]");
+    CHECK(challenge_progress(c, events, &match, &now) && now == 6 && !challenge_reached_mid_match(c, before, now),
+          "past the target: reported once (%g)", now);
+    cJSON_ReplaceItemInObject(c, "PT", cJSON_CreateNumber(1));
+    CHECK(!challenge_reached_mid_match(c, 2, 5), "a completed challenge is not reported");
+    cJSON_Delete(events);
+    cJSON_Delete(c);
+    // DAT.lesser: progVal && progVal <= val
+    c = cJSON_Parse("{\"CI\":4,\"T\":\"daily\",\"DAT\":{\"ky\":\"d\",\"val\":2,\"lesser\":1},\"REW\":{},\"PV\":0,\"PT\":0}");
+    CHECK(!challenge_reached_mid_match(c, 0, 0) && challenge_reached_mid_match(c, 0, 1), "lesser: 0 is not reached, 1 is");
+    cJSON_Delete(c);
+}
+
 int main(void) {
     setup_pass();
+    test_mid_match();
     test_items();
     test_levels();
     test_cap();

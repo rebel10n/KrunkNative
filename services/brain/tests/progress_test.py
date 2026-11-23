@@ -16,6 +16,13 @@ duplicate commit and a partial (left mid-match) commit change nothing, the Nucle
 auto-awarded and can be selected, claims are refused, the medal counts add up, and the account
 object (social "a", internal "get") carries "badges" and v7's levelProg. The Country Flag ("flg" with
 an index) is stored in stats.flg, refused past the list, and a name still goes to the staff flag.
+
+v10.0.7's mid-match CHALLENGE_COMPLETED: the game server reads the account's list ("challenges", the chgL order) and
+on a target reached mid-match ("challenge_reached" {id, ci}) kn_brain pushes ["chgC", index, true, REW]; a completed
+challenge pushes nothing. v10.0.7's World KrunkCup (0399_krunkcup, db_krunkcup.c): commits played in the KrunkCup
+Jerseys ("kcJersey") credit the team of the jerseys' style (none: style 0), others nothing; the leaderboards' KrunkCup
+routes (teams, a team's contributors, the top players) and the Participation Band (GET /krunkcup/wristband, POST
+/krunkcup/wristband/claim) follow.
 """
 import asyncio
 import json
@@ -27,6 +34,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 
 try:
     import websockets
@@ -61,20 +70,21 @@ def check(cond, what):
 
 
 def exec_sql(sql):
-    """A write the test makes itself (challenge 2's reward, before kn_brain starts)."""
+    """A statement the test runs itself (challenge 2's reward, before kn_brain starts; the KrunkCup rows): the rows'
+    text, a line per row."""
     if DRIVER == "sqlite":
         con = sqlite3.connect(DBQ["path"], timeout=30)
         try:
-            con.execute(sql)
+            rows = con.execute(sql).fetchall()
             con.commit()
         finally:
             con.close()
-        return
+        return "\n".join("|".join(str(v) for v in r) for r in rows)
     if DRIVER == "mysql":
-        subprocess.run(DBQ["mysql"] + ["-e", sql], env=DBQ["env"], capture_output=True, text=True, check=True)
-        return
-    subprocess.run(DBQ["psql"] + ["-c", "SET search_path TO %s; %s" % (SCHEMA, sql)], env=DBQ["env"], capture_output=True,
-                   text=True, check=True)
+        return subprocess.run(DBQ["mysql"] + ["-N", "-B", "-e", sql], env=DBQ["env"], capture_output=True, text=True,
+                              check=True).stdout
+    return subprocess.run(DBQ["psql"] + ["-c", "SET search_path TO %s; %s" % (SCHEMA, sql)], env=DBQ["env"],
+                          capture_output=True, text=True, check=True).stdout
 
 
 def bound_port(log_path, proc):
@@ -169,6 +179,21 @@ async def register(sock, name):
     r = await sock.call("a", "a", 0, [name, "progresspass1", 0], "captcha")
     assert r[1] is None, r
     return r[2], r[5], r
+
+
+def http(port, method, path, token=None, body=None):
+    """(status, json) of a brain HTTP route."""
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), method=method,
+                                 data=json.dumps(body).encode() if body is not None else None)
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"null")
 
 
 def by_ci(rows, ci):
@@ -328,6 +353,69 @@ async def scenario(port):
                     break
                 await asyncio.sleep(0.1)
             check(r[1].get("Headshot") == 4, "medal counts add up: %s" % r[1])
+
+            print("== v10.0.7 mid-match CHALLENGE_COMPLETED (challenges / challenge_reached)")
+            menu = (await s.call("chgL", "chg"))[1]
+            err, data = await n.op("challenges", id=alice_id)
+            check(err is None and [c["CI"] for c in data or []] == [c["CI"] for c in menu],
+                  "the game server reads the menu's list: %s" % err)
+            idx9 = [c["CI"] for c in menu].index(9)
+            err, data = await n.op("challenge_reached", id=alice_id, ci=9)
+            check(err is None and data == {"index": idx9}, "challenge 9 reached: index %s: %s %s" % (idx9, err, data))
+            await s.drain(1.0)
+            f = s.take("chgC")
+            check(f == ["chgC", idx9, True, by_ci(menu, 9)["REW"]], "chgC [index, true, REW] pushed: %s" % f)
+            err, data = await n.op("challenge_reached", id=alice_id, ci=1)
+            await s.drain(0.5)
+            check(err is None and data == {"index": -1} and s.take("chgC") is None, "a completed one: no push: %s" % data)
+            err, _ = await n.op("challenges", id=0)
+            check(err == "Account not found.", "no account: %s" % err)
+
+            print("== v10.0.7 World KrunkCup (0399_krunkcup)")
+            # alice owns the KrunkCup Jerseys (given above); no style row: style 0 (Algeria)
+            kc = dict(player, prog=[], stats={}, medals={}, kcJersey=True, kills=7, score=900, games=1)
+            await n.commit("kc1", True, kc)
+            exec_sql("INSERT INTO item_styles (account_id, skin_id, copy_id, style) VALUES (%d, 7794, 0, 5)" % alice_id)
+            await n.commit("kc2", True, dict(kc, kills=11, score=1500))
+            await n.commit("kc3", True, dict(kc, kills=3, score=200))
+            await n.commit("kc4", True, dict(kc, kcJersey=False, kills=50, score=9000))  # not worn: no team
+            await asyncio.sleep(0.5)  # the progress work runs after the commit reply
+            st, body = http(port, "GET", "/api/leaderboards/krunkcup/teams")
+            teams = (body or {}).get("data")
+            check(st == 200 and teams == [{"id": 5, "total_score": 1700, "total_kills": 14, "total_games": 2},
+                                          {"id": 0, "total_score": 900, "total_kills": 7, "total_games": 1}],
+                  "teams by score: %s %s" % (st, body))
+            st, body = http(port, "GET", "/leaderboards/krunkcup/teams/5/contributors")
+            rows = (body or {}).get("data") or []
+            check(st == 200 and len(rows) == 1 and rows[0].get("player_name") == alice and rows[0].get("kills") == 14
+                  and rows[0].get("score") == 1700 and rows[0].get("games") == 2 and "player_clan" in rows[0],
+                  "team 5's contributors: %s" % body)
+            st, body = http(port, "GET", "/api/leaderboards/krunkcup/teams/7/contributors")
+            check(st == 200 and body == {"data": []}, "a team nobody played: %s" % body)
+            st, body = http(port, "GET", "/api/leaderboards/krunkcup/players?limit=5")
+            rows = (body or {}).get("data") or []
+            check(st == 200 and len(rows) == 1 and rows[0].get("team") == 5 and rows[0].get("score") == 2600
+                  and rows[0].get("games") == 3, "the top players: %s" % body)
+
+            print("== the KrunkCup Participation Band (/krunkcup/wristband)")
+            st, body = http(port, "GET", "/krunkcup/wristband")
+            check(st == 401, "the band needs a session: %s %s" % (st, body))
+            st, body = http(port, "GET", "/krunkcup/wristband", token)
+            check(st == 200 and body.get("data") == {"claimed": False, "eligible": True, "team": 5, "item_id": 7803},
+                  "status before the claim: %s %s" % (st, body))
+            st, body = http(port, "POST", "/krunkcup/wristband/claim", token, {"team": 7})
+            check(st == 400 and (body.get("error") or {}).get("message") == "Play a match for that team in its KrunkCup jersey first.",
+                  "a team not played for is refused: %s %s" % (st, body))
+            st, body = http(port, "POST", "/krunkcup/wristband/claim", token, {"team": 0})
+            check(st == 200 and body.get("data") == {"claimed": True, "eligible": True, "team": 0, "item_id": 7803},
+                  "claim team 0: %s %s" % (st, body))
+            st, body = http(port, "POST", "/krunkcup/wristband/claim", token, {})
+            check(st == 400 and (body.get("error") or {}).get("message") == "You already claimed your KrunkCup Participation Band.",
+                  "once: %s %s" % (st, body))
+            check(exec_sql("SELECT count FROM inventory WHERE account_id = %d AND skin_id = 7803" % alice_id).strip() == "1",
+                  "the band is in the inventory")
+            check(exec_sql("SELECT count(*) FROM item_styles WHERE account_id = %d AND skin_id = 7803" % alice_id).strip() == "0",
+                  "team 0 is the band's default style (no style row)")
 
     async with Social(social) as g:
         r = await g.call("po", "chg")

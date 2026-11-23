@@ -11,9 +11,12 @@
 // checkChallenge on every event (players.js / kills.js / game.js call sites), then finalize() at
 // the match end. KrunkNative's game server never holds the challenge rows: it tallies the
 // events per (key, weapon, streak) (server/src/accounts.c) and commits the tallies with the
-// match stats; kn_brain runs challenges_finalize() on them (services/brain/db_progress.c). The
-// result is the same except that a challenge completes at the commit (the end of the match),
-// so v7's in-match "Finish the game to complete" chat line is not sent.
+// match stats; kn_brain runs challenges_finalize() on them (services/brain/db_progress.c), so a
+// challenge is credited at the commit. Since v10.0.7's mid-match form the game server also reads
+// the account's active challenges from kn_brain at the join and each round, runs
+// challenge_progress() on its tallies after every event and, when one reaches its target, has
+// kn_brain send CHALLENGE_COMPLETED [index, true, REW] ("Finish the game to complete: [N]
+// challenge"); kn_brain stays the authority that credits it at the commit.
 #include <stddef.h>
 #include <cJSON.h>
 #include <season.h>
@@ -89,6 +92,15 @@ typedef struct {
 // Returns the number of challenges whose progress changed.
 int challenges_finalize(cJSON *active, const cJSON *events, const ChallengeMatch *match, cJSON *results, cJSON *completed,
                         cJSON *reward);
+
+// checkChallenge of one challenge over a round's tallies (the events of challenges_finalize): 1 when a tally touches
+// it; *pv = its progVal (PV plus the round), PV when none does. The game server's mid-match check (accounts.c).
+int challenge_progress(const cJSON *challenge, const cJSON *events, const ChallengeMatch *match, double *pv);
+
+// v10.0.7's mid-match completion (challenges.update, deob-10.0.7.js:180731-180732): not PT, progVal `before` the event
+// below DAT.val, and `now` reaching it (DAT.lesser: non-zero and at most DAT.val). The game server then sends
+// CHALLENGE_COMPLETED [index, true, REW]; the commit (challenges_finalize) still decides and credits it.
+int challenge_reached_mid_match(const cJSON *challenge, double before, double now);
 
 // challenges.updateNames(): a challenge without a name N gets i18n "chall.name.<ky>"
 // ("Get {val} headshots {with <weapon>}"); the weapon part only for "daily" challenges with a

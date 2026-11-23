@@ -92,6 +92,7 @@ set(KN_BRAIN_SOURCES
     # player-viewer WP-E part 2c: badges, v7 challenges, medal counts (0107_progression); the
     # challenge / badge rules are the game's (shared/src/progression.c, badges.c)
     db_progress.c
+    db_krunkcup.c                   # v10.0.7 World KrunkCup: team contributions, the Participation Band (0399_krunkcup)
     progress.c
     ../../shared/src/progression.c
     ../../shared/src/badges.c

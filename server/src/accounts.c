@@ -597,6 +597,132 @@ int accounts_reward(const Player *player) {
 
 // ------------------------------------------------------------------ WP-E part 2c: progression
 
+// ------------------------------------------------------------------ v10.0.7 mid-match challenges
+//
+// v10's game server holds account.activeChallenges and runs challenges.update on every event; the event that brings a
+// challenge to its target sends CHALLENGE_COMPLETED [index, true, REW] (players.challengeCompleted,
+// deob-10.0.7.js:176746-176748, from :180731-180732): the player's "Finish the game to complete: [N] challenge" chat
+// line and REW's junk and skins in the match summary (io_challengeCompleted, :225216-225229). The match end's
+// finalize still completes and pays it. KrunkNative: the game server reads the account's active challenges from
+// kn_brain ("challenges", the list its menu shows) at the join and at each round start, runs the commit's own rule
+// (challenge_progress, shared/src/progression.c) over this round's tallies after every event, and on a target reached
+// asks kn_brain ("challenge_reached" {id, ci}) to push the frame to the account's sockets. kn_brain stays the
+// authority: P_PROGRESS decides and credits the challenge at the commit (services/brain/db_progress.c).
+
+static void acc_challenges_drop(ServerAccount *a) {
+    cJSON_Delete(a->challenges);
+    a->challenges = NULL;
+    a->chal_rid = 0;
+    a->chal_told = 0;
+}
+
+// the account's activeChallenges again (the join, a new round): what was reported mid-match is forgotten
+static void acc_challenges_fetch(ClientConnection *client) {
+    ServerAccount *a = &client->acct;
+    acc_challenges_drop(a);
+    if (!g_acc.brain || !brain_linked() || a->account_id <= 0 || a->hack) return;
+    const uint32_t rid = brain_next_rid();
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", "challenges");
+    cJSON_AddNumberToObject(cJSON_AddObjectToObject(frame, "args"), "id", a->account_id);
+    if (brain_post(frame, 0) != 0) return; // brain_post consumed the frame
+    a->chal_rid = rid;
+}
+
+// the "challenges" reply: the list, each challenge's progVal starting at its PV
+static int acc_handle_challenges_reply(const cJSON *frame) {
+    const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
+    if (!cJSON_IsNumber(rid) || !rid->valuedouble) return 0;
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ServerAccount *a = &g_server->clients[i].acct;
+        if (!a->chal_rid || a->chal_rid != (uint32_t) rid->valuedouble) continue;
+        a->chal_rid = 0;
+        const cJSON *data = cJSON_GetObjectItem(frame, "data");
+        if (!cJSON_IsArray(data)) return 1; // refused (an unknown account): nothing to follow
+        a->challenges = cJSON_Duplicate(data, 1);
+        a->chal_told = 0;
+        int k = 0;
+        const cJSON *c;
+        cJSON_ArrayForEach(c, a->challenges) {
+            if (k >= SERVER_CHALLENGES_MAX) break;
+            const cJSON *pv = cJSON_GetObjectItem(c, "PV");
+            a->chal_pv[k++] = cJSON_IsNumber(pv) ? pv->valuedouble : 0.0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int acc_challenge_key_is(const cJSON *challenge, const char *key) {
+    const cJSON *dat = cJSON_GetObjectItem(challenge, "DAT");
+    const char *ky = cJSON_GetStringValue(cJSON_GetObjectItem(dat, "ky"));
+    return ky && key && !strcmp(ky, key);
+}
+
+// challenges.update's completion check after the tally of `key` moved (the commit's gates: acc_player_stats `counts`,
+// the match fields of acc_add_progress)
+static void acc_challenges_update(ClientConnection *client, const Player *player, const char *key) {
+    ServerAccount *a = &client->acct;
+    if (!cJSON_IsArray(a->challenges) || !a->tally_count || !brain_linked()) return;
+    const Game *game = &g_server->game;
+    const GameModeConfig *mode = mode_config(game_mode_id(game));
+    if (g_acc.custom || (mode && mode->no_reward)) return; // updateAccounts: no challenges (nothing is committed)
+    int any = 0, k = 0;
+    const cJSON *c;
+    cJSON_ArrayForEach(c, a->challenges) {
+        if (k >= SERVER_CHALLENGES_MAX) break;
+        any |= !(a->chal_told >> k & 1u) && acc_challenge_key_is(c, key);
+        k++;
+    }
+    if (!any) return;
+    cJSON *events = cJSON_CreateArray();
+    for (int i = 0; i < a->tally_count; i++) {
+        const ServerChallengeTally *t = &a->tallies[i];
+        cJSON *row = cJSON_CreateArray();
+        cJSON_AddItemToArray(row, cJSON_CreateString(t->key));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->value));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->weapon));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->streak));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber(t->item));
+        cJSON_AddItemToArray(events, row);
+    }
+    const ChallengeMatch match = {
+        .map_index = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
+                         ? map_catalog_map_index_of_json(game->maps[game->current_map_index]) : -1,
+        .map_id = -1, // as the commit (no mapId)
+        .mode = game_mode_id(game),
+        .class_index = player ? player->class_index : client->class_index,
+        .ranked = game->config.comp,
+        .lt_off = g_rk.active || (mode && mode->no_profile_stats),
+        .quit = 0,
+    };
+    k = 0;
+    cJSON_ArrayForEach(c, a->challenges) {
+        if (k >= SERVER_CHALLENGES_MAX) break;
+        if (!(a->chal_told >> k & 1u) && acc_challenge_key_is(c, key)) {
+            double pv = a->chal_pv[k];
+            challenge_progress(c, events, &match, &pv);
+            if (challenge_reached_mid_match(c, a->chal_pv[k], pv)) {
+                a->chal_told |= 1ull << k;
+                cJSON *frame = cJSON_CreateObject();
+                cJSON_AddStringToObject(frame, "type", "acct");
+                cJSON_AddNumberToObject(frame, "rid", brain_next_rid());
+                cJSON_AddStringToObject(frame, "op", "challenge_reached");
+                cJSON *args = cJSON_AddObjectToObject(frame, "args");
+                cJSON_AddNumberToObject(args, "id", a->account_id);
+                cJSON_AddNumberToObject(args, "ci", cJSON_GetNumberValue(cJSON_GetObjectItem(c, "CI")));
+                brain_post(frame, 0);
+                server_log("[accounts] %s: challenge %g reached mid-match", client->name, cJSON_GetNumberValue(cJSON_GetObjectItem(c, "CI")));
+            }
+            a->chal_pv[k] = pv;
+        }
+        k++;
+    }
+    cJSON_Delete(events);
+}
+
 // GameHooks.progress: game.incStat / challenges.update of an account's player, tallied for the
 // stats commit (doc/backend.md 8.4). Guests and hack-flagged accounts keep nothing.
 void accounts_progress(const Player *player, const int stat, const char *key, const int value, const int weapon, const int streak,
@@ -629,6 +755,7 @@ void accounts_progress(const Player *player, const int stat, const char *key, co
     if (kind == CHALLENGE_KEY_ADD) t->value += value;
     else if (kind == CHALLENGE_KEY_MAX || !strcmp(key, "kstk")) t->value = value > t->value ? value : t->value;
     else t->value = value; // SET
+    acc_challenges_update(client, player, key); // v10.0.7's mid-match CHALLENGE_COMPLETED
 }
 
 // ------------------------------------------------------------------ season-system: found skins
@@ -1341,6 +1468,8 @@ static void acc_add_kill_items(cJSON *p, const ClientConnection *client) {
     }
 }
 
+#define ACC_KRUNKCUP_JERSEY 7794 // config.krunkCupJersey (deob-10.0.7.js:19788): KrunkCup Jerseys, 48 team styles
+
 // Not const: skin_counters_take drains the client's pending skin counters into the frame.
 static cJSON *acc_player_stats(ClientConnection *client, const int final) {
     const Player *player = client->player;
@@ -1371,6 +1500,10 @@ static cJSON *acc_player_stats(ClientConnection *client, const int final) {
     const int class_index = rules_ranked_no_class_xp(&g_server->game) ? -1 : player ? player->class_index : client->class_index;
     cJSON_AddNumberToObject(p, "classIndex", class_index);
     if (counts) acc_add_progress(p, client, player, final, won); // WP-E part 2c (v7 updateAccounts / checkChallenges)
+    // v10.0.7's KrunkCup (the Leaderboards' KrunkCup, deob-10.0.7.js:140281-140298: "Equip a KrunkCup jersey with a team
+    // style and play!"): the match's kills, score and game count for the team of the KrunkCup Jerseys the player wears
+    // (body slot, store 7794, config.krunkCupJersey :19788); kn_brain reads the style (the team) itself (db_krunkcup.c)
+    if (profile && player && player->cosmetics.body == ACC_KRUNKCUP_JERSEY) cJSON_AddBoolToObject(p, "kcJersey", 1);
     if (final) acc_add_kill_items(p, client); // v10.0.3 event kill pools
     // v10.0.4 takeSkinStats (deob-10.0.4.js:191561-191585): the counter skins' counts, saved for an account (not a
     // hacker, not a K.P.D game) in a public-type game; endGame (:191612) and a leave (saveSkinStats) take them
@@ -1807,6 +1940,7 @@ void accounts_round_changed(void) {
         a->round_result = -1;
         a->committed = 0;
         acc_progress_clear(a); // WP-E part 2c: a new round's tallies
+        if (a->account_id > 0) acc_challenges_fetch(&g_server->clients[i]); // the committed round's progress (PV / PT)
     }
     acc_queue_push();
 
@@ -3085,6 +3219,7 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
         client->acct.class_stats[i] = cJSON_IsNumber(c) && c->valuedouble > 0.0 ? (int) c->valuedouble : 0;
     }
     for (int i = 0; i < PLAYER_CARD_STAT_COUNT; i++) player_card_stat_format(i, account, client->acct.pc_stats[i], sizeof(client->acct.pc_stats[i]));
+    acc_challenges_fetch(client); // v10.0.7's mid-match challenges: this account's list (another account's goes)
 }
 
 void accounts_player_card(const ClientConnection *client, Player *player) {
@@ -3176,6 +3311,7 @@ static void acc_revert_custom(const char *why);
 
 void accounts_on_disconnect(ClientConnection *client) {
     server_events_forget_client(client->id); // tempEggs belong to this connection, not to a later one with the same id
+    acc_challenges_drop(&client->acct);
     if (!g_acc.brain) return;
     if (client->acct.join_state == SERVER_JOIN_READY) acc_resume_note(client->acct.ticket_jti, 0);
     acc_ranked_on_leave(client);
@@ -4063,6 +4199,8 @@ static void acc_handle_frame(cJSON *frame) {
         server_log("[brain] assignment %s for lobby %s", jti ? jti : "?", acc_str(cJSON_GetObjectItem(frame, "lobbyId"), "?"));
     } else if (!strcmp(type, "acct-r") && acc_handle_skin_reply(frame)) {
         // season-system: give_skin replies (found skins)
+    } else if (!strcmp(type, "acct-r") && acc_handle_challenges_reply(frame)) {
+        // the account's active challenges (v10.0.7's mid-match CHALLENGE_COMPLETED)
     } else if (!strcmp(type, "acct-r") && acc_handle_owned_reply(frame)) {
         // owned_skins: the inventory again after a strip (an item from mid-session)
     } else if (!strcmp(type, "acct-r") && acc_handle_junk_reply(frame)) {

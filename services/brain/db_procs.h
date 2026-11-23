@@ -172,6 +172,10 @@ extern const kn_proc P_EGG_FOUND; /* db_eggs.c: the egg hunt (doc/v10/events.md)
 
 /* ---- player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c) */
 extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_MEDALS, P_STAFF_BADGE, P_COUNTRY_FLAG, P_HIDE_STATUS;
+/* ---- v10.0.7's World KrunkCup (db_krunkcup.c, 0399_krunkcup): a committed match played in the KrunkCup Jerseys
+ * (the P_PROGRESS payload's "kcJersey") credits the team of their style; the Participation Band's status and claim */
+void db_krunkcup_credit(Dbx *x, int64_t id, const cJSON *progress);
+extern const kn_proc P_KC_WRISTBAND, P_KC_WRISTBAND_CLAIM;
 
 /* ---- Krunker v10.0.2 ranked (db_ranked.c, 0205_ranked_v10) */
 extern const kn_proc P_RK_JOIN, P_RK_POLL, P_RK_EXPIRE, P_RK_MATCH_RUN, P_RK_MATCH_READY,

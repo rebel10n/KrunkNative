@@ -260,6 +260,10 @@ def is_none(d):
     return d is None
 
 
+def is_band_unplayed(d):
+    return d == {"claimed": False, "eligible": False, "team": None, "item_id": 7803}
+
+
 def change_body(old_endpoint):
     """a v10 subscriptionChange body (v10.js 145274): the PushSubscription JSON of each side"""
     return lambda: {"old_subscription": {"endpoint": old_endpoint, "keys": SAMPLE_KEYS},
@@ -351,11 +355,14 @@ ROUTES = [
     ("POST", "/spins/execute", {"index": 0, "ticket": -1, "multi": False}, None, "SIGNEDOUT", None,
      "row 187: signed out (decoded 5160)"),
 
-    # ---- KrunkCup wristband: KrunkNative has no wristband (decoded 4919, 4105; v10.js 27309, 27314)
-    ("GET", "/krunkcup/wristband", None, None, "NONE", is_none,
-     "row 188: no wristband in KrunkNative: the v10 none value (decoded 4919; v10.js 27309)"),
-    ("POST", "/krunkcup/wristband/claim", {}, "alice", "REFUSAL", None,
-     "row 189: a wristband claim KrunkNative cannot do (decoded 4105; v10.js 27314)"),
+    # ---- the KrunkCup Participation Band (db_krunkcup.c, 0399_krunkcup; decoded 4919, 4105; v10.js 27309, 27314):
+    # alice played no KrunkCup match, so she is not eligible and her claim is refused (progress_test.py claims one)
+    ("GET", "/krunkcup/wristband", None, "alice", "DATA", is_band_unplayed,
+     "row 188: the caller's band status (decoded 4919; v10.js 27309)"),
+    ("GET", "/krunkcup/wristband", None, None, "SIGNEDOUT", None, "row 188: signed out"),
+    ("POST", "/krunkcup/wristband/claim", {}, "alice", "BAD", None,
+     "row 189: no team played for: refused (decoded 4105; v10.js 27314)"),
+    ("POST", "/krunkcup/wristband/claim", {"team": 3}, None, "SIGNEDOUT", None, "row 189: signed out"),
 ]
 
 

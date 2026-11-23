@@ -541,6 +541,8 @@ static void challenge_completed(const cJSON *list, const cJSON *frame) {
     if (cJSON_IsTrue(mid) || (cJSON_IsNumber(mid) && mid->valuedouble != 0.0)) {
         hud_ui_challenge_mid_game(name);
         chal_reward_skins(cJSON_GetArrayItem(frame, 3));
+        // its skins are in matchRewardSummary now: the match end's KrunkNative form adds only its card
+        if (!cJSON_GetObjectItemCaseSensitive(c, "knMid")) cJSON_AddTrueToObject((cJSON *) c, "knMid");
     } else {
         const cJSON *ic = cJSON_GetObjectItemCaseSensitive(c, "IC");
         hud_ui_end_challenge_completed(cJSON_IsNumber(ic) ? ic->valueint : 0, name);
@@ -1613,6 +1615,9 @@ static void account_response(const cJSON *frame) {
     rerender_windows();
     menu_update_class_box(); // dJ()
     avatar_ui_refresh();     // the profile picture's review status (after the token is saved above)
+    // v10's account carries activeChallenges from the login on (deob-10.0.7.js:225216): the mid-match
+    // CHALLENGE_COMPLETED [index, ...] the game server has kn_brain send indexes into it
+    account_challenges_request();
     if (!had) promo_after_login(); // getPreference and the opt-in popup (deob-10.0.7.js:216865-216873)
 }
 
@@ -4420,10 +4425,11 @@ static int progress_frame(const char *label, const cJSON *frame) {
             char name[160];
             chal_name(c, name, sizeof(name));
             hud_ui_end_challenge_completed((int) cnum(c, "IC"), name);
-            const cJSON *sk = cJSON_GetObjectItem(cJSON_GetObjectItem(c, "REW"), "sk"), *it; // matchRewardSummary.skins
-            if (cJSON_IsNumber(sk)) hud_ui_add_reward_skin(sk->valueint);
-            cJSON_ArrayForEach(it, (cJSON_IsArray(sk) ? sk : NULL)) if (cJSON_IsNumber(it)) hud_ui_add_reward_skin(it->valueint);
             cJSON *mine = chal_by_ci(cnum(c, "CI"));
+            const int told = mine && cJSON_GetObjectItemCaseSensitive(mine, "knMid"); // its skins came mid-match
+            const cJSON *sk = cJSON_GetObjectItem(cJSON_GetObjectItem(c, "REW"), "sk"), *it; // matchRewardSummary.skins
+            if (!told && cJSON_IsNumber(sk)) hud_ui_add_reward_skin(sk->valueint);
+            cJSON_ArrayForEach(it, (!told && cJSON_IsArray(sk) ? sk : NULL)) if (cJSON_IsNumber(it)) hud_ui_add_reward_skin(it->valueint);
             if (mine) chal_set(mine, "PT", 1);
         }
     } else if (!strcmp(label, "chlR")) { // UPDATE_CHALLENGE_REWARDS [skins, funds, junk, jnk, kr, titles, rp, rankedPoints]

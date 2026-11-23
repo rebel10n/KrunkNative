@@ -1189,6 +1189,44 @@ static void progress_run(int64_t id, const char *payload) {
                KN_DB_ARGS(payload, acct_itoa(now, (int64_t) time(NULL)), acct_itoa(season, acct_current_season())), progress_done, c);
 }
 
+/* v10.0.7's mid-match CHALLENGE_COMPLETED (players.challengeCompleted, deob-10.0.7.js:176746-176748, sent by
+ * challenges.update at :180731-180732): the game server saw a challenge of the account reach its target during the
+ * match (server/src/accounts.c acc_challenges_update) and names it by CI. kn_brain reads the list the account's menu
+ * shows (P_CHALLENGES, the "chgL" order) and pushes ["chgC", index, true, REW] to its social sockets: the client's
+ * "Finish the game to complete: [N] challenge" chat line and REW's junk and skins in the match summary (v10's
+ * io_challengeCompleted, :225216-225229). Nothing is credited here: the commit's P_PROGRESS decides and pays. */
+static void challenge_reached_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (!kn_db_ok(res)) {
+        op_reply(o, acct_db_error(res, o->what), NULL);
+        return;
+    }
+    cJSON *list = acct_db_json(res);
+    const int64_t ci = (int64_t) strtoll(o->match, NULL, 10);
+    int index = -1, i = 0;
+    const cJSON *c, *found = NULL;
+    cJSON_ArrayForEach(c, list) {
+        if (index < 0 && kn_json_int(c, "CI", -1) == ci && kn_json_int(c, "PT", 0) != 1) {
+            index = i;
+            found = c;
+        }
+        i++;
+    }
+    if (found) {
+        const cJSON *rew = cJSON_GetObjectItemCaseSensitive(found, "REW");
+        cJSON *f = social_frame("chgC");
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(index));
+        cJSON_AddItemToArray(f, cJSON_CreateTrue());
+        cJSON_AddItemToArray(f, rew ? cJSON_Duplicate(rew, 1) : cJSON_CreateObject());
+        social_push_account(o->id, f);
+    }
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddNumberToObject(out, "index", index);
+    cJSON_Delete(list);
+    op_reply(o, NULL, out);
+    cJSON_Delete(out);
+}
+
 /* The P_PROGRESS payload of a commit from a v7 game server ("prog" / "medals" present), NULL else. */
 static char *progress_payload(const cJSON *a) {
     const cJSON *prog = cJSON_GetObjectItemCaseSensitive(a, "prog"), *medals = cJSON_GetObjectItemCaseSensitive(a, "medals");
@@ -1196,8 +1234,9 @@ static char *progress_payload(const cJSON *a) {
     cJSON *p = cJSON_CreateObject();
     cJSON_AddNumberToObject(p, "id", (double) kn_json_int(a, "id", 0));
     /* + the season part (db_season.c): the match BPP and the season_stats totals */
+    /* + kcJersey: the KrunkCup Jerseys worn in the match (db_krunkcup.c credits its team, 0399_krunkcup) */
     const char *keys[] = {"prog", "medals", "mapIndex", "mapId", "mode", "classIndex", "ranked", "ltOff", "final", "match",
-                          "bpp", "kills", "deaths", "score", "won", "games", "timePlayed"};
+                          "bpp", "kills", "deaths", "score", "won", "games", "timePlayed", "kcJersey"};
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(a, keys[i]);
         if (v) cJSON_AddItemToObject(p, keys[i], cJSON_Duplicate(v, 1));
@@ -1562,6 +1601,22 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         if (!o) return -1;
         kn_db_query_sql(g_acct_brain->db, sql, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, kn_json_int(args, "elo", 0))),
                     op_empty_done, o);
+        return 0;
+    }
+    /* v10.0.7 mid-match challenges (server/src/accounts.c): the account's activeChallenges as its menu reads them
+     * (P_CHALLENGES), and challenge_reached {id, ci}: the mid-match CHALLENGE_COMPLETED push (challenge_reached_done) */
+    if (!strcmp(op, "challenges") || !strcmp(op, "challenge_reached")) {
+        if (id <= 0) {
+            cb(ud, "Account not found.", NULL);
+            return 0;
+        }
+        const int reached = !strcmp(op, "challenge_reached");
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        o->id = id;
+        snprintf(o->match, sizeof o->match, "%lld", (long long) kn_json_int(args, "ci", -1));
+        kn_db_call(g_acct_brain->db, &P_CHALLENGES, KN_DB_ARGS(acct_itoa(ids, id), acct_itoa(v1, (int64_t) time(NULL))),
+                   reached ? challenge_reached_done : op_json_done, o);
         return 0;
     }
     if (!strcmp(op, "challenge")) {

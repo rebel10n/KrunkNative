@@ -162,11 +162,19 @@ Against `~/jails/kru/src/Krunker_v10.0.7/deob/game.deob.js` (deob-10.0.7.js):
   with its "Title unlocked!" card, the ranked points when points were won.
 - **Box Office.** kn_brain's challenge finalize (`db_progress.c`, v10's 180855-180902) now credits `REW.jnk` (the
   Junk wallet), `REW.title` (`player_titles`, source `challenge`) and `REW.rp` (`ranked_points`) besides KR, skins
-  and `REW.bpp`, and `chlR` carries all eight fields (`accounts.c`). The game server only tallies a match's
-  events and kn_brain completes challenges at the commit, so Box Office sends `chgC` at the match end only (its
-  list form); the mid-match `chgC` is handled for krunker.io servers. Migration 0397 gives the daily rows
+  and `REW.bpp`, and `chlR` carries all eight fields (`accounts.c`). Mid-match, as v10's `challenges.update`
+  (180731-180732): server_bin reads the account's active list from kn_brain (internal op `challenges`, the menu's
+  `chgL` order) at the join and at each round start, runs the commit's rule over the round's tallies after every
+  event (`challenge_progress`, `challenge_reached_mid_match`, shared/src/progression.c) and, when one reaches its
+  target, sends `challenge_reached {id, ci}`; kn_brain pushes `["chgC", index, true, REW]` to the account's social
+  sockets (the chat line and REW's skins in the match summary). kn_brain still decides and pays at the commit
+  (`db_progress.c`), whose `chgC` (the list form) gives the "Completed!" cards; the client adds a challenge's
+  skins once (the mid-match ones are marked, `account_ui.c`) and requests the list at the login, as v10's account
+  carries `activeChallenges`. Migration 0397 gives the daily rows
   (15-22) a `REW.bpp` (50; the spray and assist rows 25): no official capture of the dailies is in the repo, so
-  the values follow the offline v10 sandbox's daily rows (`tools/uidiff/scenarios/rewards-bp-chal.json`).
+  the values follow the offline v10 sandbox's daily rows (`tools/uidiff/scenarios/rewards-bp-chal.json`). The
+  v10.0.7 bundle (its challenge defaults carry `bpp: 0`) and the kru tree (bundles of v10.0.3-v10.0.7, no
+  account captures) have no official daily values either, so 0397 stands (checked 2026-11-23).
 - **Weekly.** v10.0.7's Battle Pass Challenges tab draws the dailies only; KrunkNative keeps its weekly section
   there, since Box Office's weekly rows (23-26) are drawn nowhere else.
 

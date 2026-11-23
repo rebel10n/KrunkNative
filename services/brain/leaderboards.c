@@ -279,14 +279,17 @@ static void player_page(SocialSession *s, const LeaderQuery *q, int64_t region, 
  *   GET /api/leaderboards/raids/<map>[?sort=completions], /raids/<map>/monthly?month=YYYY-MM
  *   GET /api/leaderboards/krunkcup/teams, /krunkcup/teams/<id>/contributors, /krunkcup/players
  * The raid pages are the raid record's (raids.c, 0360_raid_stats). skinvalue ranks the inventories at the market's
- * sale estimates and eventcount the event finds (event_eggs). KrunkNative keeps no KrunkCup teams: those answer an
- * empty list (the popup then says "No data available."). Pages are cached
- * accounts.leaderboard_cache_s per path, like the socket's. */
+ * sale estimates and eventcount the event finds (event_eggs). The KrunkCup pages (v10.0.7's KrunkCup view,
+ * deob-10.0.7.js:140940-141145) are the teams' contributions (0399_krunkcup, db_krunkcup.c): a team is a style of the
+ * KrunkCup Jerseys (its id the style index) with {id, total_score, total_kills, total_games}; a team's contributors
+ * {player_name, player_clan, kills, score, games}; the top players {player_name, player_clan, team, kills, score,
+ * games} (?limit). Pages are cached accounts.leaderboard_cache_s per path, like the socket's. */
 
 typedef struct HttpBoard {
     kn_http_req *req;
     char key[96];
-    int clans;
+    int clans; /* clan rows: no player_clan fix */
+    int teams; /* KrunkCup team rows: no position, no player_clan */
 } HttpBoard;
 
 #define HTTP_CACHE_SLOTS 32
@@ -345,6 +348,7 @@ static void on_http_board(kn_db_result *res, void *ud) {
     int pos = 0;
     cJSON *r;
     cJSON_ArrayForEach(r, rows) {
+        if (h->teams) continue; /* v10 numbers the KrunkCup tables itself (rank: true) */
         cJSON_AddNumberToObject(r, "position", ++pos);
         if (!h->clans && !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(r, "player_clan"))) {
             cJSON_DeleteItemFromObjectCaseSensitive(r, "player_clan");
@@ -461,9 +465,75 @@ static void h_http_board(kn_http_req *req, void *ud) {
     http_reply(req, NULL);
 }
 
-static void h_http_empty(kn_http_req *req, void *ud) {
-    (void) ud;
-    http_reply(req, NULL);
+/* ---- v10.0.7's KrunkCup (leaderboards.getKrunkCupTeams / getKrunkCupContributors / getKrunkCupTopPlayers,
+ * deob-10.0.7.js:27142-27158; the view 140940-141145 sorts by Score itself and reads only these fields). A team's
+ * totals sum its contributors' rows; hack-flagged accounts are left out, like the player boards. */
+static int kc_board(kn_http_req *req, Brain *b, const char *key, HttpBoard **out) {
+    const cJSON *hit = http_cached(key);
+    if (hit) {
+        http_reply(req, hit);
+        return 0;
+    }
+    if (!b->db) {
+        http_reply(req, NULL);
+        return 0;
+    }
+    HttpBoard *h = calloc(1, sizeof *h);
+    if (!h) {
+        http_reply(req, NULL);
+        return 0;
+    }
+    h->req = req;
+    h->teams = 1;
+    snprintf(h->key, sizeof h->key, "%s", key);
+    *out = h;
+    return 1;
+}
+
+static void h_kc_teams(kn_http_req *req, void *ud) {
+    HttpBoard *h = NULL;
+    if (!kc_board(req, ud, "krunkcup|teams", &h)) return;
+    static const kn_sql q = {.any = "SELECT k.team AS id, sum(k.score) AS total_score__i, sum(k.kills) AS total_kills__i, sum(k.games) AS total_games__i"
+                                    " FROM krunkcup_contributions k JOIN player_rows r ON r.player_id = k.account_id WHERE r.player_hack = 0"
+                                    " GROUP BY k.team HAVING sum(k.games) > 0 ORDER BY sum(k.score) DESC, k.team"};
+    kn_db_query_sql(((Brain *) ud)->db, &q, 0, NULL, on_http_board, h);
+}
+
+static void h_kc_contributors(kn_http_req *req, void *ud) {
+    const char *id = kn_http_param(req, "id");
+    char *end = NULL;
+    const long team = id ? strtol(id, &end, 10) : -1;
+    if (!id || !*id || *end || team < 0 || team > 1000) return http_reply(req, NULL); /* no such team: none */
+    char key[96], t[16], lim[16];
+    snprintf(key, sizeof key, "krunkcup|team|%ld", team);
+    snprintf(t, sizeof t, "%ld", team);
+    snprintf(lim, sizeof lim, "%d", s_http_limit);
+    HttpBoard *h = NULL;
+    if (!kc_board(req, ud, key, &h)) return;
+    static const kn_sql q = {.any = "SELECT r.player_name, r.player_clan, k.kills, k.score, k.games FROM krunkcup_contributions k"
+                                    " JOIN player_rows r ON r.player_id = k.account_id WHERE k.team = {int:$1} AND k.games > 0 AND r.player_hack = 0"
+                                    " ORDER BY k.score DESC, k.account_id LIMIT {int:$2}"};
+    kn_db_query_sql(((Brain *) ud)->db, &q, KN_DB_ARGS(t, lim), on_http_board, h);
+}
+
+static void h_kc_players(kn_http_req *req, void *ud) {
+    char limit[16] = "";
+    kn_http_query_get(req, "limit", limit, sizeof limit);
+    long n = limit[0] ? strtol(limit, NULL, 10) : s_http_limit;
+    if (n <= 0 || n > s_http_limit) n = s_http_limit;
+    char key[96], lim[16];
+    snprintf(key, sizeof key, "krunkcup|players|%ld", n);
+    snprintf(lim, sizeof lim, "%ld", n);
+    HttpBoard *h = NULL;
+    if (!kc_board(req, ud, key, &h)) return;
+    /* each player once, for the team it played the most for (its score there), with its KrunkCup totals */
+    static const kn_sql q = {
+        .any = "SELECT r.player_name, r.player_clan, (SELECT k2.team FROM krunkcup_contributions k2 WHERE k2.account_id = k.account_id"
+               " ORDER BY k2.score DESC, k2.games DESC, k2.team LIMIT 1) AS team__i, sum(k.kills) AS kills__i, sum(k.score) AS score__i,"
+               " sum(k.games) AS games__i FROM krunkcup_contributions k JOIN player_rows r ON r.player_id = k.account_id"
+               " WHERE r.player_hack = 0 GROUP BY k.account_id, r.player_name, r.player_clan HAVING sum(k.games) > 0"
+               " ORDER BY sum(k.score) DESC, k.account_id LIMIT {int:$1}"};
+    kn_db_query_sql(((Brain *) ud)->db, &q, KN_DB_ARGS(lim), on_http_board, h);
 }
 
 /* v10.0.3 getRaidLeaderboard / getMonthlyRaidLeaderboard (deob-10.0.3.js:31026-31047): the raid record's pages
@@ -499,16 +569,16 @@ int leaderboards_http_init(Brain *b) {
     if (s_http_limit <= 0 || s_http_limit > 500) s_http_limit = 100;
     kn_http_route(b->http, "GET", "/api/leaderboards/raids/:map", h_http_raids, b);
     kn_http_route(b->http, "GET", "/api/leaderboards/raids/:map/monthly", h_http_raids_monthly, b);
-    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams", h_http_empty, b);
-    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams/:id/contributors", h_http_empty, b);
-    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/players", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams", h_kc_teams, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams/:id/contributors", h_kc_contributors, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/players", h_kc_players, b);
     kn_http_route(b->http, "GET", "/api/leaderboards/:type", h_http_board, b);
-    /* the v10 root paths (v10.js 26995-27040): the stubs before the :type route, as above */
+    /* the v10 root paths (v10.js 26995-27040): the fixed routes before the :type route, as above */
     kn_http_route(b->http, "GET", "/leaderboards/raids/:map", h_http_raids, b);
     kn_http_route(b->http, "GET", "/leaderboards/raids/:map/monthly", h_http_raids_monthly, b);
-    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/teams", h_http_empty, b);
-    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/teams/:id/contributors", h_http_empty, b);
-    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/players", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/teams", h_kc_teams, b);
+    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/teams/:id/contributors", h_kc_contributors, b);
+    kn_http_route(b->http, "GET", "/leaderboards/krunkcup/players", h_kc_players, b);
     kn_http_route(b->http, "GET", "/leaderboards/:type", h_http_board, b);
     return 0;
 }

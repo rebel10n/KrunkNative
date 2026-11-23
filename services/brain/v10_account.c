@@ -17,11 +17,13 @@
  *   GET  /player/wallet                                  decoded 4527 (v10.js 26317; no caller): {funds, junk}
  *   POST /webpush/status, /webpush/subscription-change   decoded 62, 3323 (v10.js 26408, 26414): push.c
  *   GET  /ipinfo                                         decoded 117 (v10.js 16440; no reader): {ip} of the peer
- *   GET  /krunkcup/wristband                             decoded 4919 (v10.js 27309; no caller): data null, no wristband
+ *   GET  /krunkcup/wristband                             decoded 4919 (v10.js 27309; no caller): the caller's KrunkCup
+ *        Participation Band (db_krunkcup.c, 0399_krunkcup): {claimed, eligible, team, item_id}
+ *   POST /krunkcup/wristband/claim {team}                v10.js 27314 (no caller): the band in the team's style, once;
+ *        a refusal (claimed, no team played) answers 400 KRUNKCUP_REFUSED with its text
  * REFUSAL (403 NOT_IMPLEMENTED: a real write Box Office cannot do):
  *   payments, no payment backend: /shop/cancel-subscription 26006, /iap/checkout 26018, /iap/claim 26024,
  *   /my-api/create-payment/:id 209123, /my-api/execute-payment/:id 209131 (decoded 5160, 3546, 2704, 3576).
- *   /krunkcup/wristband/claim 27314: Box Office has no wristband to claim.
  * A route that needs the caller answers 401 LOGIN_REQUIRED without a session.
  */
 #include "v10_account.h"
@@ -32,13 +34,13 @@
 
 #include "acct_internal.h"
 #include "accounts.h"
+#include "db_procs.h"
 #include "push.h"
 #include "v10_api.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
 
 #define WHY_PAYMENT "Box Office has no payment backend"
-#define WHY_WRISTBAND "Box Office has no wristband to claim"
 
 static Brain *s_brain;
 
@@ -132,10 +134,48 @@ static void h_ipinfo(kn_http_req *req, void *ud) {
     v10_reply_data(req, 200, d);
 }
 
-/* GET /krunkcup/wristband: Box Office has no wristband, so no status (data null, the v10 none value) */
+/* ---- the KrunkCup Participation Band (db_krunkcup.c): GET /krunkcup/wristband, POST /krunkcup/wristband/claim */
+
+static void wristband_done(kn_db_result *res, void *ud) {
+    kn_http_req *req = ud;
+    cJSON *v = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (v) {
+        v10_reply_data(req, 200, v);
+        return;
+    }
+    const char *err = acct_db_error(res, "krunkcup wristband");
+    if (!strcmp(err, "Server error.")) v10_reply_error(req, 500, "internal", err);
+    else v10_reply_error(req, 400, "KRUNKCUP_REFUSED", err);
+}
+
+static void wristband_call(kn_http_req *req, const kn_proc *proc, int64_t account, int64_t team) {
+    if (!s_brain || !s_brain->db) {
+        v10_reply_error(req, 503, "KrunkCupUnavailable", "Box Office has no database for the KrunkCup");
+        return;
+    }
+    char id[24], t[24];
+    acct_itoa(id, account);
+    acct_itoa(t, team);
+    if (kn_db_call(s_brain->db, proc, proc == &P_KC_WRISTBAND ? 1 : 2, (const char *const[]) {id, t}, wristband_done, req) != 0)
+        v10_reply_error(req, 503, "KrunkCupUnavailable", "Box Office could not reach the KrunkCup");
+}
+
+static void wristband_account(kn_http_req *req, const cJSON *acc, void *ud) {
+    (void) ud;
+    wristband_call(req, &P_KC_WRISTBAND, kn_json_int(acc, "id", 0), -1);
+}
+
 static void h_wristband(kn_http_req *req, void *ud) {
     (void) ud;
-    v10_reply_data(req, 200, NULL);
+    with_signed_in(req, wristband_account, NULL, NULL);
+}
+
+/* {team}: a style index of the jerseys the caller played for; none (or not a number) = the one it played the most for */
+static void wristband_claim_account(kn_http_req *req, const cJSON *acc, void *ud) {
+    cJSON *body = ud;
+    const cJSON *team = body ? cJSON_GetObjectItemCaseSensitive(body, "team") : NULL;
+    wristband_call(req, &P_KC_WRISTBAND_CLAIM, kn_json_int(acc, "id", 0), cJSON_IsNumber(team) ? (int64_t) team->valuedouble : -1);
+    cJSON_Delete(body);
 }
 
 /* ---- ranked and daily spin: the caller's own reads */
@@ -199,6 +239,11 @@ static void h_spin(kn_http_req *req, void *ud) {
     with_signed_in(req, spin_account, kn_http_body_json(req), drop_json);
 }
 
+static void h_wristband_claim(kn_http_req *req, void *ud) {
+    (void) ud;
+    with_signed_in(req, wristband_claim_account, kn_http_body_json(req), drop_json);
+}
+
 /* ---- web push (push.c): the caller's own rows */
 
 static void h_webpush_status(kn_http_req *req, void *ud) {
@@ -248,7 +293,7 @@ static const AccountRoute k_routes[] = {
     {"POST", "/webpush/subscription-change", h_webpush_change, NULL},
     {"POST", "/spins/execute", h_spin, NULL},
     {"GET", "/krunkcup/wristband", h_wristband, NULL},
-    {"POST", "/krunkcup/wristband/claim", h_refuse, (void *) WHY_WRISTBAND},
+    {"POST", "/krunkcup/wristband/claim", h_wristband_claim, NULL},
 };
 
 int v10_account_init(Brain *b) {

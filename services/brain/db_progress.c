@@ -300,6 +300,9 @@ static kn_db_result *run_progress(kn_dbconn *c, int n, const char *const *p) {
                  KN_DB_ARGS(I64S(id), m->string, I64S((int64_t) m->valuedouble)));
     }
 
+    /* v10.0.7's KrunkCup: the match's kills, score and game for the team of the jerseys worn (db_krunkcup.c) */
+    db_krunkcup_credit(&x, id, in);
+
     /* checkBadges (public matches, not hack-flagged: the game server only commits those) */
     cJSON *stats = stats_object(&x, id);
     cJSON_AddItemToObject(out, "newBadges", db_season_check_badges(&x, id, season, now_s, stats));
