@@ -20,6 +20,8 @@ Covers:
   unbox          a store spin and a Free KR spin of an account in a game: {accountId, item, kr, rarity} to its node; an
                  account in no game (or after its player-leave) sends nothing
   raffle-win     a lottery draw's prizes to the winner's node {accountId, lotteryId, drawId, prize {type, ref, quantity}}
+  dead-host      a hello whose publicHost has no DNS record (a retired site's ams-2.krunk.io) is kicked and closed
+                 4004, never welcomed, and none of its lobbies reach /mm/game-list
 Every balance equals its ledger.
 """
 import asyncio
@@ -378,7 +380,32 @@ async def unboxes(db, port, node, a, b, sock_a, sock_b, b_tok):
           % (len(wins), len(paid)))
 
 
+async def dead_host(port):
+    """A retired site's server still heartbeating under a name whose record is gone (2026-11-23: AMS2:hnzpx on
+    ams-2.krunk.io, "native tcp error: ENOTFOUND" for every player sent there): the brain refuses the hello."""
+    url = "ws://127.0.0.1:%d/mm/internal/ws" % port
+    ws = await websockets.connect(url, additional_headers={"Authorization": "Bearer " + SECRET})
+    await ws.send(json.dumps({"type": "hello", "nodeId": "KNDEAD", "region": "local", "publicHost": "kn-gone.invalid",
+                              "publicPort": 1, "version": "test", "maxPlayers": 8}))
+    await ws.send(json.dumps({"type": "snapshot", "lobbies": [["KNDEAD:aaaaa", "local", 0, 8, {"i": "Burg"}]]}))
+    frames, code = [], None
+    try:
+        while True:
+            frames.append(json.loads(await asyncio.wait_for(ws.recv(), 10)))
+    except websockets.ConnectionClosed as e:
+        code = e.rcvd.code if e.rcvd else None
+    check(code == 4004, "dead-host: the hello is closed 4004 (%r)" % code)
+    check(not any(f.get("type") == "welcome" for f in frames), "dead-host: never welcomed")
+    check(any(f.get("type") == "kick" and "resolve" in f.get("reason", "") for f in frames),
+          "dead-host: kicked \"publicHost does not resolve\" (%r)" % frames)
+    with urllib.request.urlopen("http://127.0.0.1:%d/mm/game-list" % port, timeout=10) as r:
+        games = json.loads(r.read())
+    games = games.get("games", games) if isinstance(games, dict) else games
+    check(not any(str(g[0]).startswith("KNDEAD") for g in games), "dead-host: none of its lobbies are listed")
+
+
 async def scenario(port, db):
+    await dead_host(port)
     social = "ws://127.0.0.1:%d/social/ws" % port
     async with Social(social) as sock_a, Social(social) as sock_b, Social(social) as sock_o:
         a, _ = await sock_a.register("nea" + STAMP)

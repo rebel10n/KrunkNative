@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <netdb.h>
+#include <sys/socket.h>
 
 #include "ai.h"
 #include "brain_internal.h"
@@ -531,6 +533,35 @@ static void on_bot_banter_done(void *ud, const char *err, const cJSON *reply) {
 
 /* ---- frames */
 
+/* A node whose publicHost is a name nobody can resolve (its DNS record was removed when the
+ * site was retired, 2026-11-23: ams-1..3.krunk.io kept heartbeating after kn-ams went) would
+ * hand every player it is matched to "native tcp error: ENOTFOUND". It is refused like an
+ * invalid hello; its reconnect backoff re-asks, so restoring the record brings it back. An
+ * address literal, "localhost" and an empty host (old builds) are not looked up. */
+static int public_host_resolves(const char *host) {
+    if (!host || !*host || !strcmp(host, "localhost")) return 1;
+    struct addrinfo hints = {0}, *res = NULL;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_NUMERICHOST;
+    if (getaddrinfo(host, NULL, &hints, &res) == 0) {
+        freeaddrinfo(res);
+        return 1;
+    }
+    hints.ai_flags = 0;
+    int rc = getaddrinfo(host, NULL, &hints, &res);
+    if (rc == 0) {
+        freeaddrinfo(res);
+        return 1;
+    }
+    /* only a definite "no such name" refuses; a resolver hiccup (EAI_AGAIN) must not empty the pool */
+    return !(rc == EAI_NONAME
+#ifdef EAI_NODATA
+             || rc == EAI_NODATA
+#endif
+    );
+}
+
 static void handle_hello(NodeConn *c, const cJSON *frame) {
     Brain *b = c->b;
     if (c->helloed) {
@@ -541,6 +572,14 @@ static void handle_hello(NodeConn *c, const cJSON *frame) {
     if (!registry_valid_node_id(node_id)) {
         send_simple(c, "kick", "reason", "missing or invalid nodeId");
         kn_ws_close(c->ws, 4002, "missing nodeId");
+        return;
+    }
+    const char *public_host = kn_json_str(frame, "publicHost", "");
+    if (!public_host_resolves(public_host)) {
+        KN_WARN("internal", "node \"%s\" refused: publicHost %s does not resolve (from %s)", node_id, public_host,
+                c->remote);
+        send_simple(c, "kick", "reason", "publicHost does not resolve");
+        kn_ws_close(c->ws, 4004, "publicHost does not resolve");
         return;
     }
     NodeConn *old = conn_by_node(node_id);
