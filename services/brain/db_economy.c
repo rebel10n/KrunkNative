@@ -269,23 +269,25 @@ const kn_proc P_GIFT = {"gift", NULL, run_gift};
 
 /* ------------------------------------------------------------------ market */
 
-/* A listed copy keeps its paint, wear and serial on its listing (0353, 0398): they come back with the copy. */
+/* A listed copy keeps its paint, wear, serial and name tag on its listing (0353, 0398, 0402): they come back with the
+ * copy. */
 static void listing_keep_copy(Dbx *x, const int64_t listing, const CopyPaint *meta) {
     const char *color, *shader, *wear, *serial;
     char buf[3][32];
     copy_meta_params(meta, &color, &shader, &wear, &serial, buf);
-    dbx_exec(x, SQL(.any = "UPDATE market_listings SET paint_color = $2, paint_shader = $3, wear = $4, serial = $5 WHERE id = $1"),
-             KN_DB_ARGS(I64S(listing), color, shader, wear, serial));
+    dbx_exec(x, SQL(.any = "UPDATE market_listings SET paint_color = $2, paint_shader = $3, wear = $4, serial = $5, name_tag = $6"
+                           " WHERE id = $1"),
+             KN_DB_ARGS(I64S(listing), color, shader, wear, serial, copy_meta_name(meta)));
 }
 
-/* An offer's copy row (trade_copies) with its paint, wear and serial (0353, 0398). */
+/* An offer's copy row (trade_copies) with its paint, wear, serial and name tag (0353, 0398, 0402). */
 static void trade_keep_copy(Dbx *x, const int64_t trade, const char *side, const int64_t copy, const int64_t skin, const CopyPaint *meta) {
     const char *color, *shader, *wear, *serial;
     char buf[3][32];
     copy_meta_params(meta, &color, &shader, &wear, &serial, buf);
-    dbx_exec(x, SQL(.any = "INSERT INTO trade_copies (trade_id, side, copy_id, skin_id, paint_color, paint_shader, wear, serial)"
-                           " VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"),
-             KN_DB_ARGS(I64S(trade), side, I64S(copy), I64S(skin), color, shader, wear, serial));
+    dbx_exec(x, SQL(.any = "INSERT INTO trade_copies (trade_id, side, copy_id, skin_id, " COPY_META_COLS ")"
+                           " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"),
+             KN_DB_ARGS(I64S(trade), side, I64S(copy), I64S(skin), color, shader, wear, serial, copy_meta_name(meta)));
 }
 
 /* $4 skin, $5 price, $6 fee %, $7 fee bypass, $8 sale max, $9 max listings, $10 min level, $11 the copy id (0 for a
@@ -488,7 +490,7 @@ static kn_db_result *run_item_paint(kn_dbconn *c, int n, const char *const *p) {
     /* m: the copy's metadata as the owned list has it (a minted copy keeps its wear and serial, 0398) */
     CopyPaint meta;
     copy_meta_none(&meta);
-    kn_db_result *mr = dbx_q(&x, SQL(.any = "SELECT paint_color, paint_shader, wear, serial FROM skin_copies WHERE copy_id = $1"),
+    kn_db_result *mr = dbx_q(&x, SQL(.any = "SELECT " COPY_META_COLS " FROM skin_copies WHERE copy_id = $1"),
                              KN_DB_ARGS(I64S(copy_id)));
     if (!mr) return dbx_finish(&x, NULL);
     if (kn_db_rows(mr) > 0) copy_meta_read(mr, 0, 0, &meta);
@@ -549,12 +551,30 @@ static kn_db_result *run_item_style(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_ITEM_STYLE = {"item_style", NULL, run_item_style};
 
+/* (copy id, name tag | NULL) -> {copy_id, name | null}: an operator names a copy (skin_copies.name_tag, 0402; the
+ * tag was checked by copy_name_tag_valid). A copy on the market or in a trade offer is not a skin_copies row: "No such
+ * copy." */
+static kn_db_result *run_copy_nametag(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t copy = PI(0);
+    if (!dbx_exists(&x, SQL(.any = "SELECT 1 FROM skin_copies WHERE copy_id = $1 {for_update}"), KN_DB_ARGS(I64S(copy))))
+        return dbx_finish(&x, dbx_failed(&x) ? NULL : kn_db_result_user_error("No such copy."));
+    if (dbx_exec(&x, SQL(.any = "UPDATE skin_copies SET name_tag = $2 WHERE copy_id = $1"), KN_DB_ARGS(I64S(copy), P(1))) < 0)
+        return dbx_finish(&x, NULL);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "copy_id", (double) copy);
+    if (P(1) && P(1)[0]) cJSON_AddStringToObject(o, "name", P(1));
+    else cJSON_AddNullToObject(o, "name");
+    return dbx_json(&x, "nametag", o);
+}
+const kn_proc P_COPY_NAMETAG = {"copy_nametag", NULL, run_copy_nametag};
+
 /* $4 listing -> {r: "SUCCESS" | "SOLD", i: skin} */
 static kn_db_result *run_market_unlist(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     ECON_OPEN("unlist", "kn_market_unlist");
     kn_db_result *l = dbx_q(&x, SQL(.any = "SELECT skin_id, sold_at IS NOT NULL AS sold__b, cancelled_at IS NOT NULL AS gone__b,"
-                                           " paint_color, paint_shader, wear, serial FROM market_listings WHERE id = $2 AND seller_id = $1 {for_update}"),
+                                           " " COPY_META_COLS " FROM market_listings WHERE id = $2 AND seller_id = $1 {for_update}"),
                             KN_DB_ARGS(P(0), P(4)));
     if (!l) return dbx_finish(&x, NULL);
     const int found = kn_db_rows(l) > 0;
@@ -601,7 +621,7 @@ static kn_db_result *run_market_buy(kn_dbconn *c, int n, const char *const *p) {
     const int64_t buyer = PI(0);
     /* the listing row is the lock every buyer of it contends for: one wins, the rest see it sold */
     kn_db_result *l = dbx_q(&x, SQL(.any = "SELECT seller_id, skin_id, price, sold_at IS NULL AND cancelled_at IS NULL AS open__b,"
-                                           " created_at > {ago:$2} AS fresh__b, paint_color, paint_shader, wear, serial"
+                                           " created_at > {ago:$2} AS fresh__b, " COPY_META_COLS
                                            " FROM market_listings WHERE id = $1 {for_update}"),
                             KN_DB_ARGS(P(4), I64S(PI(6) > 0 ? PI(6) : 0)));
     if (!l) return dbx_finish(&x, NULL);
@@ -960,7 +980,8 @@ const kn_proc P_MARKET_ITEM = {"market_item", NULL, run_market_item};
 
 /* the painted copies of one side as the trade rows' units: {sid: copy id, i: skin, paint_color, paint_shader} */
 static cJSON *trade_copy_rows(Dbx *x, int64_t trade, const char *side) {
-    cJSON *a = dbx_rows(x, SQL(.any = "SELECT copy_id AS sid, skin_id AS i, paint_color, paint_shader, wear, serial FROM trade_copies"
+    cJSON *a = dbx_rows(x, SQL(.any = "SELECT copy_id AS sid, skin_id AS i, paint_color, paint_shader, wear, serial,"
+                                     " name_tag AS nametag FROM trade_copies"
                                      " WHERE trade_id = $1 AND side = $2 ORDER BY copy_id"),
                         KN_DB_ARGS(I64S(trade), side));
     return a ? a : cJSON_CreateArray();
@@ -1046,7 +1067,8 @@ static cJSON *inventory_items(Dbx *x, const char *id) {
                    " FROM skin_copies c WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) ORDER BY i.skin_id"),
         KN_DB_ARGS(id));
     cJSON *k = dbx_rows(x,
-        SQL(.any = "SELECT skin_id AS i, 1 AS c, copy_id AS sid, paint_color, paint_shader, wear, serial FROM skin_copies"
+        SQL(.any = "SELECT skin_id AS i, 1 AS c, copy_id AS sid, paint_color, paint_shader, wear, serial, name_tag AS nametag"
+                   " FROM skin_copies"
                    " WHERE account_id = $1 ORDER BY skin_id, copy_id"),
         KN_DB_ARGS(id));
     if (!a) a = cJSON_CreateArray();
@@ -1150,7 +1172,7 @@ static int load_side(Dbx *x, int64_t trade, const char *side, Counted *out) {
 
 /* The painted copies of one side of an offer (trade_copies). */
 static int load_copies(Dbx *x, int64_t trade, const char *side, TradeCopy *out) {
-    kn_db_result *r = dbx_q(x, SQL(.any = "SELECT copy_id, skin_id, paint_color, paint_shader, wear, serial FROM trade_copies"
+    kn_db_result *r = dbx_q(x, SQL(.any = "SELECT copy_id, skin_id, " COPY_META_COLS " FROM trade_copies"
                                           " WHERE trade_id = $1 AND side = $2 ORDER BY copy_id"),
                             KN_DB_ARGS(I64S(trade), side));
     int k = 0;
@@ -1316,7 +1338,7 @@ static kn_db_result *run_trade_create(kn_dbconn *c, int n, const char *const *p)
     }
     for (int i = 0; i < kt && !dbx_failed(&x); i++) {
         if (!take[i].copy) continue;
-        kn_db_result *r = dbx_q(&x, SQL(.any = "SELECT paint_color, paint_shader, wear, serial FROM skin_copies WHERE copy_id = $1"
+        kn_db_result *r = dbx_q(&x, SQL(.any = "SELECT " COPY_META_COLS " FROM skin_copies WHERE copy_id = $1"
                                                " AND account_id = $2"),
                                 KN_DB_ARGS(I64S(take[i].copy), I64S(receiver)));
         if (!r) break;
@@ -1532,7 +1554,7 @@ const kn_proc P_KR_HISTORY = {"kr_history", NULL, run_kr_history};
     "SELECT l.skin_id AS i, l.skin_id AS s, l.skin_id AS sk, l.id AS m, l.id AS id, l.price AS f, l.price AS kr," \
     " {epoch_ms:l.created_at} AS ms, {epoch_ms:l.created_at} AS ss, a.username AS p, 1 AS c,"                \
     " l.paint_color AS paint_color, l.paint_shader AS paint_shader, l.wear AS wear, l.serial AS serial,"      \
-    " l.seller_id AS seller_id"                                                                               \
+    " l.name_tag AS nametag, l.seller_id AS seller_id"                                                        \
     " FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
 /* (player) -> the player's open listings (v7.1.4 "uml" -> "ul": {sk, skid, kr, c, ms, id}) */

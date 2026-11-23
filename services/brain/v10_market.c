@@ -41,7 +41,8 @@
  *   items (26957-26980)
  *     GET  /items/:id/view             {stats, owners, sales, listings, stackable, wearable} (128558)
  *     GET  /items/:id/sales?range=     daily [{d, f, t}] (economy "st", range index) (129914)
- *     GET  /items/:id/instances?sort=  [] : KrunkNative keeps no per-copy instances (128573)
+ *     GET  /items/:id/instances?sort=  the item's minted copies [{nm, wear, serial}] (owned, and listed on the market),
+ *                                      sort mint (serial) or wear (deob-10.0.7.js:27078-27082, 109015, 109740-109768)
  *     POST /items/:id/paint            {item_id, paint_item_id}: paints an owned copy (or an unpainted unit of the item,
  *                                      which becomes a copy); 400 for a non-paint (128724; doc/v10/paint-copy.md)
  *     POST /items/:id/style            {item_id, style}: the style of an owned copy or of the item's stack (item_styles,
@@ -75,6 +76,8 @@
 #include <strings.h>
 
 #include "acct_internal.h"
+#include "brain_internal.h"
+#include "db_procs.h"
 #include "knsvc/json.h"
 #include "v10_api.h"
 #include "v10_paint.h"
@@ -1236,10 +1239,118 @@ static void h_market_item_stats(kn_http_req *req, void *ud) {
     route_begin(req, 0, 0, step_item_graph, reply_item_graph, &a, NULL);
 }
 
+/* ---- GET /items/:id/instances?sort=mint|wear (v10.0.7's items.getInstances, deob-10.0.7.js:27078-27082): the item
+ * page's Mints and Wear tabs (109727-109733, the fetches 109740-109768) list the item's instances, one row
+ * {nm, wear, serial} each: the owner's name (a click opens the profile, 109495), the wear ("toFixed(4)" in the tier's
+ * color, '—' for none) and the serial ("#n", '—' for none) (109578-109600). Box Office's instances are the minted
+ * copies (skin_copies with a wear or a serial, 0398), the ones on the market under their seller. sort=mint is the
+ * serial order, sort=wear the wear leaderboard (the lowest wear first: Flawless, :16478-16494). 100 rows at most. */
+#define INSTANCE_ROWS                                                                                                  \
+    "SELECT * FROM (SELECT a.username AS nm, c.wear AS wear, c.serial AS serial FROM skin_copies c"                    \
+    " JOIN accounts a ON a.id = c.account_id WHERE c.skin_id = {int:$1} AND (c.wear IS NOT NULL OR c.serial IS NOT NULL)" \
+    " UNION ALL SELECT a.username AS nm, l.wear AS wear, l.serial AS serial FROM market_listings l"                     \
+    " JOIN accounts a ON a.id = l.seller_id WHERE l.skin_id = {int:$1} AND l.sold_at IS NULL AND l.cancelled_at IS NULL" \
+    " AND (l.wear IS NOT NULL OR l.serial IS NOT NULL)) t "
+static const kn_sql q_instances_mint = {.any = INSTANCE_ROWS "ORDER BY (t.serial IS NULL), t.serial, t.nm LIMIT 100"};
+static const kn_sql q_instances_wear = {
+    .any = INSTANCE_ROWS "WHERE t.wear IS NOT NULL ORDER BY t.wear, (t.serial IS NULL), t.serial LIMIT 100"};
+
+static void step_instances(Op *op) {
+    char item[24];
+    snprintf(item, sizeof item, "%lld", (long long) op->a.id);
+    const char *p[1] = {item};
+    if (op_query(op, op->a.num ? &q_instances_wear : &q_instances_mint, 1, p) != 0) op_fail(op, 500, "INTERNAL", "Server error");
+}
+
+/* a column as a number, or null (the drivers may hand a double back as text) */
+static cJSON *num_or_null(const cJSON *row, const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(row, key);
+    if (cJSON_IsNumber(v)) return cJSON_CreateNumber(v->valuedouble);
+    if (cJSON_IsString(v) && v->valuestring[0]) return cJSON_CreateNumber(strtod(v->valuestring, NULL));
+    return cJSON_CreateNull();
+}
+
+static void reply_instances(Op *op) {
+    if (op_failed(op)) return;
+    if (!op->dbok) {
+        op_fail(op, 500, "INTERNAL", "Server error");
+        op_failed(op);
+        return;
+    }
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *row;
+    cJSON_ArrayForEach(row, op->rows) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "nm", kn_json_str(row, "nm", ""));
+        cJSON_AddItemToObject(o, "wear", num_or_null(row, "wear"));
+        cJSON *serial = num_or_null(row, "serial");
+        if (cJSON_IsNumber(serial) && serial->valuedouble <= 0) {
+            cJSON_Delete(serial);
+            serial = cJSON_CreateNull();
+        }
+        cJSON_AddItemToObject(o, "serial", serial);
+        cJSON_AddItemToArray(out, o);
+    }
+    v10_reply_data(op->req, 200, out);
+}
+
 static void h_item_instances(kn_http_req *req, void *ud) {
     (void) ud;
     if (!item_known(req)) return;
-    v10_reply_data(req, 200, cJSON_CreateArray()); /* KrunkNative keeps no per-copy instances: none */
+    Args a;
+    memset(&a, 0, sizeof a);
+    a.id = (int64_t) strtoll(kn_http_param(req, "id"), NULL, 10);
+    char sort[16];
+    query_text(req, "sort", sort, sizeof sort);
+    a.num = !strcmp(sort, "wear"); /* 0x0 mint (the default, 109014), 1 wear */
+    route_begin(req, 0, 0, step_instances, reply_instances, &a, NULL);
+}
+
+/* ---- POST /mm/admin/items/:copy/nametag {name} (Bearer brain.internal_secret): an operator sets or clears (name ""
+ * or null) the name tag of copy :copy (skin_copies.name_tag, 0402; P_COPY_NAMETAG). v10.0.7 shows a copy's m.name
+ * wherever a copy is drawn (the market card's itemNametag, deob-10.0.7.js:110763-110767; the listing's
+ * listing-nametag, :136680-136685; the item page's Name Tag row, :109889-109894; the trade tooltip, :221822-221824;
+ * the HUD's weapNametag, :176440) but its client has no route that names one (the items API, :27065-27108, has none),
+ * so Box Office's tag is an operator's. The tag goes with the copy (listings, trades: copy_take / copy_give) and
+ * reaches the game with the owner's next owned list. -> {copy_id, name | null}; 400 an invalid tag, 404 no copy. */
+static void nametag_done(kn_db_result *res, void *ud) {
+    kn_http_req *req = ud;
+    const char *refusal = kn_db_user_message(res);
+    if (refusal) {
+        v10_reply_error(req, 404, "ITEMS_INVALID_ID", refusal);
+        return;
+    }
+    if (!kn_db_ok(res) || kn_db_rows(res) < 1) {
+        v10_reply_error(req, 500, "INTERNAL", "Server error");
+        return;
+    }
+    cJSON *o = cJSON_Parse(kn_db_get(res, 0, 0));
+    v10_reply_data(req, 200, o ? o : cJSON_CreateObject());
+}
+
+static void h_admin_nametag(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (!mm_internal_authorized(req, "admin nametag")) return; /* rate limit, secret, dev default (brain_util.c) */
+    char *end = NULL;
+    const char *id = kn_http_param(req, "copy");
+    const long long copy = id ? strtoll(id, &end, 10) : 0;
+    if (!id || !end || *end || copy <= 0) {
+        v10_reply_error(req, 404, "ITEMS_INVALID_ID", "No such copy.");
+        return;
+    }
+    cJSON *body = body_of(req);
+    const cJSON *n = cJSON_GetObjectItemCaseSensitive(body, "name");
+    char tag[32] = "";
+    const int bad = cJSON_IsString(n) && n->valuestring[0] && !copy_name_tag_valid(n->valuestring, tag, sizeof tag);
+    cJSON_Delete(body);
+    if (bad) {
+        v10_reply_error(req, 400, "NAMETAG_INVALID", "A name tag is 1 to 20 characters, without quotes or angle brackets.");
+        return;
+    }
+    char cid[24];
+    snprintf(cid, sizeof cid, "%lld", copy);
+    if (kn_db_call(s_brain->db, &P_COPY_NAMETAG, KN_DB_ARGS(cid, tag[0] ? tag : NULL), nametag_done, req) != 0)
+        v10_reply_error(req, 500, "INTERNAL", "Server error");
 }
 
 /* ---- POST /items/:id/paint (v10.0.3's items.setPaint, body {item_id, paint_item_id}): the {id} is the owned copy's
@@ -1420,11 +1531,11 @@ static void step_view_listings(Op *op) {
     op_call(op, sh_market_filter, f);
 }
 
-/* {stats, owners, sales, listings, stackable, wearable}: the view's four parts. stackable true: KrunkNative keeps
- * every item as a stack (inventory counts; a painted copy is a copy of a stacked item, not a mint), and 10.0.3 adds
- * its Mints (and Wear) tabs only for stackable === false, a per-copy minted item whose instances it lists
- * (deob-10.0.3.js:123271-123281, 123335); KrunkNative has no instances (/items/:id/instances is []). wearable false:
- * the skins file has no wear. */
+/* {stats, owners, sales, listings, stackable, wearable}: the view's four parts. v10.0.7 adds the Mints tab for
+ * stackable === false and the Wear tab when also wearable (deob-10.0.7.js:109727-109733); both list the item's
+ * instances (/items/:id/instances). A wearable item (the skins file's itemConfig.wearable, store.c) is the one a spin
+ * mints per copy with a wear and a serial (0398), so it is not stackable and is wearable; every other item is a stack
+ * (inventory counts; a painted copy is a copy of a stacked item, not a mint). */
 static void reply_view(Op *op) {
     if (op_failed(op)) return;
     const cJSON *info = op_arg(op, "0", 3);
@@ -1443,8 +1554,10 @@ static void reply_view(Op *op) {
         }
     }
     cJSON_AddItemToObject(o, "listings", listings);
-    cJSON_AddTrueToObject(o, "stackable");
-    cJSON_AddFalseToObject(o, "wearable");
+    const SkinInfo *k = acct_skin(op->a.id);
+    const int wearable = k && k->wearable;
+    cJSON_AddBoolToObject(o, "stackable", !wearable);
+    cJSON_AddBoolToObject(o, "wearable", wearable);
     v10_reply_data(op->req, 200, o);
 }
 
@@ -1806,6 +1919,7 @@ int v10_market_init(Brain *b) {
     kn_http_route(b->http, "GET", "/items/:id/instances", h_item_instances, NULL);
     kn_http_route(b->http, "POST", "/items/:id/paint", h_item_paint, NULL);
     kn_http_route(b->http, "POST", "/items/:id/style", h_item_style, NULL);
+    kn_http_route(b->http, "POST", "/mm/admin/items/:copy/nametag", h_admin_nametag, NULL);
 
     /* trades */
     kn_http_route(b->http, "GET", "/trades/history", h_trades_history, NULL);

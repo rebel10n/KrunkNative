@@ -74,25 +74,36 @@ int db_active_ban(Dbx *x, int64_t account_id, const char *ip, char *reason, size
 int db_add_funds(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref, int64_t *funds);
 int db_add_skin(Dbx *x, int64_t id, int64_t skin, int64_t delta, const char *source, const char *ref, int64_t *count);
 /* The metadata of a copy (skin_copies, doc/v10/paint-copy.md): its paint, color "#rrggbb" (color[0] set) or shader n
- * (-1 none), and its v10.0.7 instance values (0398): wear (has_wear) and its mint serial (0 none). */
+ * (-1 none), its v10.0.7 instance values (0398): wear (has_wear) and its mint serial (0 none), and its name tag (0401:
+ * m.name, name[0] set). */
 typedef struct CopyPaint {
     char color[24];
     int64_t shader;
     int has_wear;
     double wear;
     int64_t serial;
+    char name[96];
 } CopyPaint;
-/* no paint, wear or serial */
+/* no paint, wear, serial or name tag */
 void copy_meta_none(CopyPaint *p);
-/* 1 when the copy carries a paint, a wear or a serial (a row of a copy, not of a stack) */
+/* 1 when the copy carries a paint, a wear, a serial or a name tag (a row of a copy, not of a stack) */
 int copy_meta_any(const CopyPaint *p);
-/* the four copy columns paint_color, paint_shader, wear, serial of a result row, from column col */
+/* the five copy columns paint_color, paint_shader, wear, serial, name_tag of a result row, from column col
+ * (skin_copies, market_listings and trade_copies all have them: COPY_META_COLS) */
+#define COPY_META_COLS "paint_color, paint_shader, wear, serial, name_tag"
 void copy_meta_read(const kn_db_result *r, int row, int col, CopyPaint *p);
-/* the four columns as statement parameters (NULL for none); buf holds the numbers' text */
+/* the first four columns as statement parameters (NULL for none); buf holds the numbers' text; the name tag is
+ * copy_meta_name */
 void copy_meta_params(const CopyPaint *p, const char **color, const char **shader, const char **wear, const char **serial,
                       char buf[3][32]);
-/* the owned entry's m of the copy: {paint | paintShader, wear, serial}, NULL for none */
+/* the name_tag column as a statement parameter (NULL none) */
+const char *copy_meta_name(const CopyPaint *p);
+/* the owned entry's m of the copy: {paint | paintShader, wear, serial, name}, NULL for none */
 cJSON *copy_meta_json(const CopyPaint *p);
+/* A name tag as kn_brain stores it (skin_copies.name_tag, 0401): 1..20 characters of UTF-8 after trimming the
+ * spaces around it, no control characters, quotes, backslash, backquote or angle brackets, at most 23 bytes (the game
+ * protocol's NET_SKIN_META_NAME). 1 and the tag in out (out_size >= 24), else 0. */
+int copy_name_tag_valid(const char *in, char *out, size_t out_size);
 /* v10.0.7's spin instance: a new copy of `skin` for the account with wear `wear` and the item's next mint serial
  * (item_mints), its unit added through db_add_skin (the audit row); its copy id and serial in *copy_id / *serial. */
 int copy_mint(Dbx *x, int64_t acc, int64_t skin, double wear, const char *source, const char *ref, int64_t *copy_id, int64_t *serial);
@@ -151,7 +162,7 @@ extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE, P_KPD_STATS
 /* ---- the economy (db_economy.c, 0111_economy): KR gifts, the market, trade offers, KR history */
 extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_QUICK_SELL_BULK, P_MARKET_LIST_BULK, P_ITEM_LOCKS, P_ITEM_LOCK, P_MARKET_ITEM, P_TRADE_PAGE,
     P_TRADE_INVENTORIES, P_TRADE_CREATE, P_TRADE_ACCEPT, P_TRADE_CLOSE, P_TRADE_CLEAR, P_TRADE_EXPIRE, P_KR_HISTORY,
-    P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY, P_ITEM_PAINT, P_ITEM_STYLE;
+    P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY, P_ITEM_PAINT, P_ITEM_STYLE, P_COPY_NAMETAG;
 /* the live trade of Trade mode (db_economy.c, 0357_live_trades; doc/v10/trade.md): the game server's window and settle */
 extern const kn_proc P_LIVE_TRADE_OPEN, P_LIVE_TRADE;
 

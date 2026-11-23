@@ -52,6 +52,10 @@ PAINTER = "mkt_painter"
 PAINT_OTHER = "mkt_paint_oth"  # at most 14 characters: a new name's cap (v10.0.3 maxNameLength, deob-10.0.3.js:22725)
 TRADE_A = "mkt_pt_a"
 TRADE_B = "mkt_pt_b"
+TAG_A = "mkt_tag_a"
+TAG_B = "mkt_tag_b"
+# a v10.0.7 wearable item (assets/skins.json "wearable": a spin mints it per copy with a wear and a serial, 0398)
+WEAR_ITEM = 7582
 PASSWORD = "marketpass1"
 # any player name: the account-bound routes refuse without looking it up
 PLAYER = "kn_test_player"
@@ -476,15 +480,15 @@ def market_scenario(port, path):
                 lambda d: isinstance(d, dict) and isinstance(d.get("stats"), dict) and is_int(d["stats"].get("onS"))
                 and any(o.get("nm") == BUYER for o in d.get("owners") or []) and isinstance(d.get("sales"), list)
                 and isinstance(d.get("listings"), list) and d.get("stackable") is True and d.get("wearable") is False,
-                "{stats, owners, sales, listings, stackable true (no Mints tab: 10.0.3 adds it for stackable === false, deob-10.0.3.js:123271), wearable}")
+                "{stats, owners, sales, listings, stackable true (a stack: no Mints tab, deob-10.0.7.js:109727), wearable false}")
     st, r = http(port, "GET", "/items/%d/view" % NO_ITEM)
     expect_not_found("140 GET /items/{id}/view (unknown)", st, r, "ITEMS_INVALID_ID")
     st, r = http(port, "GET", "/items/%d/sales?range=0" % ITEM)
     expect_data("141 GET /items/{id}/sales?range=0", st, r,
                 lambda d: isinstance(d, list) and sum(int(x.get("t", 0)) for x in d) >= 1, "[{d, f, t}] (v10.js 129914)")
     st, r = http(port, "GET", "/items/%d/instances?sort=mint" % ITEM)
-    expect_data("142 GET /items/{id}/instances?sort=mint (no per-copy instances)", st, r, lambda d: d == [],
-                "[] (v10.0.3 5160; v10.js 128573)")
+    expect_data("142 GET /items/{id}/instances?sort=mint (an item with no minted copy)", st, r, lambda d: d == [],
+                "[] (deob-10.0.7.js:109015: data || [])")
     st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": 2}, s_tok)
     expect_error("143 POST /items/{id}/paint (not a paint)", st, r, "ITEM_PAINT_INVALID", 400, "That item is not a paint.")
     st, r = http(port, "POST", "/items/%d/style" % ITEM, {"item_id": ITEM, "style": 1}, s_tok)
@@ -816,10 +820,109 @@ def paint_trade_scenario(port, path):
           and any(v == (ITEM, None, 1) for v in copies(b_id).values()), "HTTP %d %s" % (st, json.dumps(r)[:200]))
 
 
+def copy_meta_scenario(port, path):
+    """v10.0.7's item instances on kn_brain (0398 wear / serial, 0402 name tags): a wearable item's view (stackable false,
+    wearable true: the Mints and Wear tabs, deob-10.0.7.js:109727-109733), its instances (sort=mint by serial, sort=wear
+    by wear, {nm, wear, serial}: :109578-109600), an operator's name tag (POST /mm/admin/items/:copy/nametag), and the
+    tag going with the copy through the inventory's m, a listing (its m), a purchase and a trade offer."""
+    a_tok = register(port, TAG_A)
+    b_tok = register(port, TAG_B)
+    if not a_tok or not b_tok:
+        return
+    a_id, b_id = account_id(path, TAG_A), account_id(path, TAG_B)
+    seed(path, [
+        ("UPDATE players SET player_score = 200000, player_funds = 2000 WHERE player_id = ?", (a_id,)),
+        ("UPDATE players SET player_score = 200000, player_funds = 2000 WHERE player_id = ?", (b_id,)),
+        # A: two minted copies of the wearable item (serial 2 at 0.45, serial 1 at 0.05) and one of ITEM (serial 9)
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (a_id, WEAR_ITEM)),
+        ("INSERT INTO skin_copies (account_id, skin_id, wear, serial) VALUES (?, ?, 0.45, 2)", (a_id, WEAR_ITEM)),
+        ("INSERT INTO skin_copies (account_id, skin_id, wear, serial) VALUES (?, ?, 0.05, 1)", (a_id, WEAR_ITEM)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (a_id, ITEM)),
+        ("INSERT INTO skin_copies (account_id, skin_id, wear, serial) VALUES (?, ?, 0.3, 9)", (a_id, ITEM)),
+        # B: serial 3 of the wearable item on the market (0.02: the best wear), named "Shiny"
+        ("INSERT INTO market_listings (seller_id, skin_id, price, wear, serial, name_tag) VALUES (?, ?, 500, 0.02, 3, 'Shiny')",
+         (b_id, WEAR_ITEM)),
+    ])
+
+    st, r = http(port, "GET", "/items/%d/view" % WEAR_ITEM)
+    d = data_of(r) or {}
+    check("copies: a wearable item's view is stackable false, wearable true (the Mints and Wear tabs)",
+          st == 200 and d.get("stackable") is False and d.get("wearable") is True, "HTTP %d %s" % (st, json.dumps(d)[:200]))
+    listed = next((x for x in d.get("listings") or [] if x.get("seller_name") == TAG_B), None)
+    check("copies: the view's listing carries the copy's m {wear, serial, name}",
+          listed is not None and listed.get("m") == {"wear": 0.02, "serial": 3, "name": "Shiny"}, json.dumps(listed)[:200])
+    st, r = http(port, "GET", "/items/%d/instances?sort=mint" % WEAR_ITEM)
+    rows = data_of(r) or []
+    check("copies: instances?sort=mint lists the minted copies by serial, owned and listed ({nm, wear, serial})",
+          st == 200 and [x.get("serial") for x in rows] == [1, 2, 3] and [x.get("nm") for x in rows] == [TAG_A, TAG_A, TAG_B]
+          and abs(rows[0].get("wear", -1) - 0.05) < 1e-9, "HTTP %d %s" % (st, json.dumps(rows)[:300]))
+    st, r = http(port, "GET", "/items/%d/instances?sort=wear" % WEAR_ITEM)
+    rows = data_of(r) or []
+    check("copies: instances?sort=wear is the wear leaderboard (the lowest wear first)",
+          st == 200 and [x.get("serial") for x in rows] == [3, 1, 2], "HTTP %d %s" % (st, json.dumps(rows)[:300]))
+
+    copy = query(path, "SELECT copy_id FROM skin_copies WHERE account_id = ? AND skin_id = ?", (a_id, ITEM))[0][0]
+    st, r = http(port, "POST", "/mm/admin/items/%d/nametag" % copy, {"name": "Lucky"})
+    check("name tag: the operator route refuses a caller without the internal secret (401)", st == 401, "HTTP %d" % st)
+    st, r = http(port, "POST", "/mm/admin/items/%d/nametag" % copy, {"name": "Lucky"}, a_tok)
+    check("name tag: a player's token is not the internal secret (401)", st == 401, "HTTP %d" % st)
+    for bad in ("<b>x</b>", "a" * 21, "\"quoted\"", "line\nbreak"):
+        st, r = http(port, "POST", "/mm/admin/items/%d/nametag" % copy, {"name": bad}, SECRET)
+        check("name tag: %r is refused (400 NAMETAG_INVALID)" % bad[:12], st == 400 and err_of(r).get("code") == "NAMETAG_INVALID",
+              "HTTP %d %s" % (st, json.dumps(r)[:160]))
+    st, r = http(port, "POST", "/mm/admin/items/999999999/nametag", {"name": "Lucky"}, SECRET)
+    check("name tag: an unknown copy is 404", st == 404, "HTTP %d %s" % (st, json.dumps(r)[:160]))
+    st, r = http(port, "POST", "/mm/admin/items/%d/nametag" % copy, {"name": "  Lucky Ünïcode  "}, SECRET)
+    check("name tag: the operator names the copy (trimmed, UTF-8) -> {copy_id, name}",
+          st == 200 and data_of(r) == {"copy_id": copy, "name": "Lucky Ünïcode"}
+          and query(path, "SELECT name_tag FROM skin_copies WHERE copy_id = ?", (copy,))[0][0] == "Lucky Ünïcode",
+          "HTTP %d %s" % (st, json.dumps(r)[:160]))
+
+    st, r = http(port, "GET", "/market/inventory", None, a_tok)
+    row = next((x for x in (data_of(r) or []) if x.get("sid") == copy), None)
+    check("name tag: the inventory's copy row carries m {wear, serial, name}",
+          row is not None and row.get("m") == {"wear": 0.3, "serial": 9, "name": "Lucky Ünïcode"}, json.dumps(row)[:200])
+
+    # the tag goes with the copy: listed (the listing keeps it), bought (the buyer's copy has it)
+    st, r = http(port, "POST", "/market/list", {"item_id": ITEM, "skin_id": copy, "price": 300}, a_tok)
+    lid = (data_of(r) or {}).get("listingId")
+    keep = query(path, "SELECT name_tag, wear, serial FROM market_listings WHERE id = ?", (lid or 0,))
+    check("name tag: the listing keeps the copy's name tag, wear and serial",
+          st == 200 and keep and keep[0] == ("Lucky Ünïcode", 0.3, 9), "HTTP %d %s %r" % (st, json.dumps(r)[:160], keep))
+    st, r = http(port, "GET", "/market/sales", None, a_tok)
+    mine = next((x for x in (data_of(r) or []) if x.get("marketid") == lid), None)
+    check("name tag: the sale row's m names the copy", mine is not None and (mine.get("m") or {}).get("name") == "Lucky Ünïcode",
+          json.dumps(mine)[:200])
+    seed(path, [("UPDATE market_listings SET created_at = ? WHERE id = ?", (OLD, lid))])
+    st, r = http(port, "POST", "/market/purchase", {"market_id": lid}, b_tok)
+    got = query(path, "SELECT copy_id, name_tag, wear, serial FROM skin_copies WHERE account_id = ? AND skin_id = ?", (b_id, ITEM))
+    check("name tag: the buyer's copy has the name tag, wear and serial",
+          st == 200 and got and got[0][1:] == ("Lucky Ünïcode", 0.3, 9), "HTTP %d %s %r" % (st, json.dumps(r)[:160], got))
+
+    # a trade offer: B offers the named copy back; escrowed with its tag, it arrives at A with it
+    b_copy = got[0][0] if got else 0
+    st, r = http(port, "POST", "/trades/create", {"target_player_id": a_id, "my_offer": [{"i": ITEM, "c": 1, "iids": [b_copy]}],
+                                                  "their_offer": [], "message": "tag"}, b_tok)
+    trid = (data_of(r) or {}).get("trid")
+    esc = query(path, "SELECT name_tag FROM trade_copies WHERE trade_id = ?", (trid or 0,))
+    check("name tag: the offered copy is escrowed with its name tag (trade_copies)", st == 200 and esc == [("Lucky Ünïcode",)],
+          "HTTP %d %s %r" % (st, json.dumps(r)[:160], esc))
+    st, r = http(port, "POST", "/trades/%d/accept" % (trid or 0), None, a_tok)
+    back = query(path, "SELECT name_tag FROM skin_copies WHERE account_id = ? AND skin_id = ?", (a_id, ITEM))
+    check("name tag: the accepted offer gives the receiver the copy with its name tag", st == 200 and back == [("Lucky Ünïcode",)],
+          "HTTP %d %s %r" % (st, json.dumps(r)[:160], back))
+    st, r = http(port, "POST", "/mm/admin/items/%d/nametag" % query(path, "SELECT copy_id FROM skin_copies WHERE account_id = ? AND skin_id = ?",
+                                                                    (a_id, ITEM))[0][0], {"name": ""}, SECRET)
+    check("name tag: an empty name clears the tag", st == 200 and (data_of(r) or {}).get("name") is None
+          and query(path, "SELECT name_tag FROM skin_copies WHERE account_id = ? AND skin_id = ?", (a_id, ITEM)) == [(None,)],
+          "HTTP %d %s" % (st, json.dumps(r)[:160]))
+
+
 def run_all(port, path):
     market_scenario(port, path)
     paint_scenario(port, path)
     paint_trade_scenario(port, path)
+    copy_meta_scenario(port, path)
 
 
 def stop(proc):

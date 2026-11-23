@@ -263,7 +263,9 @@ void copy_meta_none(CopyPaint *p) {
     p->shader = -1;
 }
 
-int copy_meta_any(const CopyPaint *p) { return p->color[0] != '\0' || p->shader >= 0 || p->has_wear || p->serial > 0; }
+int copy_meta_any(const CopyPaint *p) {
+    return p->color[0] != '\0' || p->shader >= 0 || p->has_wear || p->serial > 0 || p->name[0] != '\0';
+}
 
 void copy_meta_read(const kn_db_result *r, const int row, const int col, CopyPaint *p) {
     copy_meta_none(p);
@@ -274,6 +276,33 @@ void copy_meta_read(const kn_db_result *r, const int row, const int col, CopyPai
         p->wear = kn_db_get_double(r, row, col + 2, 0.0);
     }
     if (!kn_db_isnull(r, row, col + 3)) p->serial = kn_db_get_int64(r, row, col + 3, 0);
+    if (!kn_db_isnull(r, row, col + 4)) snprintf(p->name, sizeof p->name, "%s", kn_db_get(r, row, col + 4));
+}
+
+const char *copy_meta_name(const CopyPaint *p) { return p->name[0] ? p->name : NULL; }
+
+int copy_name_tag_valid(const char *in, char *out, const size_t out_size) {
+    if (!in || !out || out_size < 24) return 0;
+    while (*in == ' ') in++;
+    size_t n = strlen(in);
+    while (n && in[n - 1] == ' ') n--;
+    if (!n || n > 23) return 0;
+    int chars = 0;
+    for (size_t i = 0; i < n;) {
+        const unsigned char c = (unsigned char) in[i];
+        const int len = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 0;
+        if (!len || i + (size_t) len > n) return 0;
+        for (int k = 1; k < len; k++)
+            if (((unsigned char) in[i + k] & 0xC0) != 0x80) return 0;
+        if (len == 1 && (c < 0x20 || c == 0x7F || c == '"' || c == '\'' || c == '<' || c == '>' || c == '\\' || c == '`'))
+            return 0;
+        i += (size_t) len;
+        chars++;
+    }
+    if (chars > 20) return 0;
+    memcpy(out, in, n);
+    out[n] = '\0';
+    return 1;
 }
 
 void copy_meta_params(const CopyPaint *p, const char **color, const char **shader, const char **wear, const char **serial,
@@ -298,17 +327,18 @@ void copy_meta_params(const CopyPaint *p, const char **color, const char **shade
 
 cJSON *copy_meta_json(const CopyPaint *p) {
     cJSON *m = v10_paint_meta(p->color, p->color[0] ? -1 : (int) p->shader);
-    if (!p->has_wear && p->serial <= 0) return m;
+    if (!p->has_wear && p->serial <= 0 && !p->name[0]) return m;
     if (!m) m = cJSON_CreateObject();
     if (!m) return NULL;
     if (p->has_wear) cJSON_AddNumberToObject(m, "wear", p->wear);
     if (p->serial > 0) cJSON_AddNumberToObject(m, "serial", (double) p->serial);
+    if (p->name[0]) cJSON_AddStringToObject(m, "name", p->name);
     return m;
 }
 
 int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint, const char *source, const char *ref) {
     kn_db_result *r = dbx_q(x,
-        SQL(.any = "SELECT paint_color, paint_shader, wear, serial FROM skin_copies WHERE copy_id = $1 AND account_id = $2"
+        SQL(.any = "SELECT " COPY_META_COLS " FROM skin_copies WHERE copy_id = $1 AND account_id = $2"
                    " AND skin_id = $3 {for_update}"),
         KN_DB_ARGS(I64S(copy), I64S(acc), I64S(skin)));
     if (!r) return -1;
@@ -321,6 +351,10 @@ int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint,
     kn_db_result_free(r);
     /* the copy row goes first: db_add_skin's guard then sees one painted unit fewer */
     if (dbx_exec(x, SQL(.any = "DELETE FROM skin_copies WHERE copy_id = $1"), KN_DB_ARGS(I64S(copy))) < 0) return -1;
+    /* a style set on the copy (item_styles, 0393) does not outlive it */
+    if (dbx_exec(x, SQL(.any = "DELETE FROM item_styles WHERE account_id = $1 AND skin_id = $2 AND copy_id = $3"),
+                 KN_DB_ARGS(I64S(acc), I64S(skin), I64S(copy))) < 0)
+        return -1;
     if (db_add_skin(x, acc, skin, -1, source, ref, NULL) < 0) return -1;
     if (paint) *paint = p;
     return 0;
@@ -332,13 +366,13 @@ int copy_give(Dbx *x, int64_t acc, int64_t skin, const CopyPaint *paint, const c
     char buf[3][32];
     copy_meta_params(paint, &color, &shader, &wear, &serial, buf);
     const int64_t id = dbx_insert_id(x,
-        SQL(.pg = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader, wear, serial)"
-                  " VALUES ($1::int, $2::int, $3, $4::int, $5::double precision, $6::int) RETURNING copy_id",
-            .sqlite = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader, wear, serial)"
-                      " VALUES ($1, $2, $3, $4, $5, $6) RETURNING copy_id",
-            .mysql = "INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader, wear, serial)"
-                     " VALUES ($1, $2, $3, $4, $5, $6)"),
-        KN_DB_ARGS(I64S(acc), I64S(skin), color, shader, wear, serial));
+        SQL(.pg = "INSERT INTO skin_copies (account_id, skin_id, " COPY_META_COLS ")"
+                  " VALUES ($1::int, $2::int, $3, $4::int, $5::double precision, $6::int, $7) RETURNING copy_id",
+            .sqlite = "INSERT INTO skin_copies (account_id, skin_id, " COPY_META_COLS ")"
+                      " VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING copy_id",
+            .mysql = "INSERT INTO skin_copies (account_id, skin_id, " COPY_META_COLS ")"
+                     " VALUES ($1, $2, $3, $4, $5, $6, $7)"),
+        KN_DB_ARGS(I64S(acc), I64S(skin), color, shader, wear, serial, copy_meta_name(paint)));
     if (id < 0) return -1;
     if (copy_id) *copy_id = id;
     return 0;
@@ -437,8 +471,8 @@ cJSON *db_owned_skins(Dbx *x, int64_t id) {
         return NULL;
     }
     cJSON *copies = dbx_rows(x,
-        SQL(.any = "SELECT copy_id AS id, skin_id AS ind, paint_color, paint_shader, wear, serial FROM skin_copies"
-                   " WHERE account_id = $1 ORDER BY copy_id"),
+        SQL(.any = "SELECT copy_id AS id, skin_id AS ind, paint_color, paint_shader, wear, serial, name_tag AS nametag"
+                   " FROM skin_copies WHERE account_id = $1 ORDER BY copy_id"),
         KN_DB_ARGS(I64S(id)));
     if (dbx_failed(x)) {
         cJSON_Delete(rows);
@@ -454,7 +488,7 @@ cJSON *db_owned_skins(Dbx *x, int64_t id) {
         cJSON_AddNumberToObject(c, "cnt", 1);
         cJSON_AddNumberToObject(c, "st", 0); /* a copy is st 0 (addSkin / setSkin, deob-10.0.3.js:129099-129105) */
         cJSON_AddNumberToObject(c, "id", (double) kn_json_int(row, "id", 0));
-        cJSON *m = v10_copy_meta_row(row); /* {paint | paintShader, wear, serial} (0352, 0398) */
+        cJSON *m = v10_copy_meta_row(row); /* {paint | paintShader, wear, serial, name} (0352, 0398, 0401) */
         if (m) cJSON_AddItemToObject(c, "m", m);
         cJSON_AddItemToArray(rows, c);
     }

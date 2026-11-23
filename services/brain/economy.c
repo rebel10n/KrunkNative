@@ -427,7 +427,7 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
 #define LISTING_ROWS \
     "SELECT l.skin_id AS i, l.skin_id AS s, l.price AS f, l.id AS m, {epoch_ms:l.created_at} AS ss, {epoch_ms:l.created_at} AS ms," \
     " a.username AS p, 1 AS c, l.paint_color AS paint_color, l.paint_shader AS paint_shader, l.wear AS wear,"         \
-    " l.serial AS serial, l.seller_id AS seller_id"                                                                     \
+    " l.serial AS serial, l.name_tag AS nametag, l.seller_id AS seller_id"                                              \
     " FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
 /* A refused query (the db will not take it) gets its reply anyway: the page's own reply with no data, so the
@@ -454,11 +454,13 @@ static void market_query(SocialSession *s, MarketCtx *c) {
          * the copy id, paint_color / paint_shader set: doc/v10/paint-copy.md). A stack row has no paint. */
         rc = social_query(s, SQL(.any = "SELECT i.skin_id AS i, i.skin_id AS s, i.count - (SELECT count(*) FROM skin_copies c"
                                    " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) AS c, i.skin_id AS sid,"
-                                   " NULL AS paint_color, NULL AS paint_shader, NULL AS wear, NULL AS serial FROM inventory i"
+                                   " NULL AS paint_color, NULL AS paint_shader, NULL AS wear, NULL AS serial, NULL AS nametag"
+                                   " FROM inventory i"
                                    " WHERE i.account_id = $1 AND i.count > (SELECT count(*) FROM skin_copies c"
                                    " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id)"
                                    " UNION ALL SELECT k.skin_id AS i, k.skin_id AS s, 1 AS c, k.copy_id AS sid,"
-                                   " k.paint_color, k.paint_shader, k.wear, k.serial FROM skin_copies k WHERE k.account_id = $1"
+                                   " k.paint_color, k.paint_shader, k.wear, k.serial, k.name_tag AS nametag FROM skin_copies k"
+                                   " WHERE k.account_id = $1"
                                    " ORDER BY i, sid"),
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "sales")) {

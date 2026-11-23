@@ -23,10 +23,10 @@ int v10_paint_of(int64_t index, const char **color, int *shader);
 /* the owned entry's paint metadata: {paint: color} for a colour, {paintShader: n} for a shader; NULL for neither */
 cJSON *v10_paint_meta(const char *color, int shader);
 
-/* A copy row's metadata from its columns paint_color, paint_shader, wear, serial (skin_copies, market_listings,
- * trade_copies; 0352, 0353, 0398): the owned entry's m, {paint | paintShader} with a minted copy's {wear, serial}
- * (v10.0.7's instances), NULL for none. v10_copy_row: 1 when the row carries any of them (a copy, not a stack);
- * v10_copy_row_strip drops the four columns. */
+/* A copy row's metadata from its columns paint_color, paint_shader, wear, serial and nametag (the name_tag column;
+ * skin_copies, market_listings, trade_copies; 0352, 0353, 0398, 0402): the owned entry's m, {paint | paintShader} with
+ * a minted copy's {wear, serial} and a name tag's {name} (v10.0.7's instances), NULL for none. v10_copy_row: 1 when
+ * the row carries any of them (a copy, not a stack); v10_copy_row_strip drops the five columns. */
 cJSON *v10_copy_meta_row(const cJSON *row);
 int v10_copy_row(const cJSON *row);
 void v10_copy_row_strip(cJSON *row);
