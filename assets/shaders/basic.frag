@@ -58,6 +58,10 @@ uniform float shadow_bias;
 uniform float shadow_normal_bias; // v10 shadowNB: world units along the normal (0 = v7: the vertex shadow_coord)
 uniform mat4 shadow_matrix;       // world -> [0,1] shadow coords (also in basic.vert)
 uniform sampler2D shadow_map;
+// softShad: renderer.shadowMap.type = PCFShadowMap (deob-10.0.7.js:205957-205959). three r18x's PCFShadowFilter: 5
+// Vogel-disk taps (radius 1 texel) turned by the interleaved gradient noise of the pixel, each a linear-filtered
+// depth compare (the PCF map is LinearFilter with TEXTURE_COMPARE, :69625), averaged (:69443-69458). Off: Basic.
+uniform bool shadow_soft;
 // Box Office ray tracing (client/include/rt.h, rt_pass.c): rt_effects bits RT_EFFECT_* (0 = Krunker's
 // own path, the default), rt_result the denoised trace of this frame at RT resolution (R sun
 // visibility, G ambient occlusion) read at this fragment: gl_FragCoord * rt_inv_viewport.
@@ -545,7 +549,24 @@ float krunker_shadow_mask(vec3 normal) {
     coord.z += shadow_bias;
     bool in_frustum = coord.x >= 0.0 && coord.x <= 1.0 && coord.y >= 0.0 && coord.y <= 1.0 && coord.z <= 1.0;
     if (!in_frustum) return 1.0;
-    return step(coord.z, texture(shadow_map, coord.xy).r);
+    if (!shadow_soft) return step(coord.z, texture(shadow_map, coord.xy).r);
+    ivec2 size = textureSize(shadow_map, 0);
+    vec2 texel = 1.0 / vec2(size);
+    float phi = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.28318530718;
+    float lit = 0.0;
+    for (int i = 0; i < 5; i++) {
+        float r = sqrt((float(i) + 0.5) / 5.0), theta = float(i) * 2.399963229728653 + phi;
+        vec2 st = (coord.xy + vec2(cos(theta), sin(theta)) * r * texel) * vec2(size) - 0.5;
+        ivec2 base = ivec2(floor(st));
+        vec2 f = fract(st);
+        ivec2 hi = size - 1;
+        float a = step(coord.z, texelFetch(shadow_map, clamp(base, ivec2(0), hi), 0).r);
+        float b = step(coord.z, texelFetch(shadow_map, clamp(base + ivec2(1, 0), ivec2(0), hi), 0).r);
+        float c = step(coord.z, texelFetch(shadow_map, clamp(base + ivec2(0, 1), ivec2(0), hi), 0).r);
+        float d = step(coord.z, texelFetch(shadow_map, clamp(base + ivec2(1, 1), ivec2(0), hi), 0).r);
+        lit += mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+    return lit * 0.2;
 }
 
 vec3 f_schlick(vec3 f0, float f90, float dot_vh) {

@@ -15,8 +15,11 @@
 //   compare (shadowCoord.z + bias <= depth), lit outside the camera frustum.
 // Casters render their back faces (three.js shadowSide[FrontSide] = BackSide).
 // Settings (render_settings.h): "shadows" off clears the map to fully lit (toggleShadowMap),
-// "highResShad" uses a 4096 map; "softShad" (PCFSoftShadowMap) and "shadowsDynamic"
-// (players casting, per-frame updates) are not ported and render as their defaults (off).
+// "highResShad" uses a 4096 map; "softShad" is toggleShadQual's PCFShadowMap (deob-10.0.7.js:205957-205959;
+// basic.frag krunker_shadow_mask: three r18x's 5-tap Vogel PCF); "shadowsDynamic" is toggleShadowAuto
+// (:205966-205971): skyLight.shadow.autoUpdate, the map re-rendered every frame, with the players' head, body and
+// legs casting (genHead / genBody / genLeg castShadow = dynamicShadows, :206746, :206770, :206791) through
+// shadow_dynamic_caster.
 #include <gl.h>
 #include <client.h>
 #include <shadow.h>
@@ -58,6 +61,22 @@ typedef struct {
 } ShadowState;
 
 static ShadowState shadow;
+
+// shadowsDynamic: this frame's extra casters (shadow_dynamic_caster), drawn by shadow_update and then forgotten
+static Mesh **g_dynamic_casters;
+static size_t g_dynamic_count, g_dynamic_capacity;
+
+void shadow_dynamic_caster(Mesh *mesh) {
+    if (!mesh || !shadow.enabled) return;
+    if (g_dynamic_count == g_dynamic_capacity) {
+        const size_t capacity = g_dynamic_capacity ? g_dynamic_capacity * 2 : 128;
+        Mesh **grown = realloc(g_dynamic_casters, capacity * sizeof(Mesh *));
+        if (!grown) return;
+        g_dynamic_casters = grown;
+        g_dynamic_capacity = capacity;
+    }
+    g_dynamic_casters[g_dynamic_count++] = mesh;
+}
 
 static float json_number_or(const cJSON *json, const float fallback) {
     return cJSON_IsNumber(json) ? (float) cJSON_GetNumberValue(json) : fallback;
@@ -426,8 +445,60 @@ static float shadow_determinant3(const float m[16]) {
          + m[2] * (m[4] * m[9] - m[5] * m[8]);
 }
 
+static void shadow_draw_caster(Mesh *mesh, const int double_sided, const int transform) {
+    if (!mesh->visible || !mesh->geometry) return;
+    mesh_update_transform_matrix(mesh);
+    if (double_sided) {
+        glDisable(GL_CULL_FACE);
+    } else {
+        // Native geometry is counter-clockwise outward; draw only back faces, and keep
+        // that true for mirrored (negative-determinant) transforms.
+        glEnable(GL_CULL_FACE);
+        glFrontFace(shadow_determinant3(mesh->transform_matrix) < 0.0f ? GL_CW : GL_CCW);
+        glCullFace(GL_FRONT);
+    }
+    glUniformMatrix4fv(transform, 1, GL_TRUE, mesh->transform_matrix);
+    glBindVertexArray(mesh->geometry->vao);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);
+    glDrawElements(GL_TRIANGLES, mesh->geometry->index_count, GL_UNSIGNED_INT, NULL);
+}
+
+static void shadow_color_cube_casters(const ColorCube *cube) {
+    for (size_t i = 0; cube && i < cube->mesh_count; i++) shadow_dynamic_caster(cube->meshes[i]);
+}
+
+void shadow_player_casters(const Client *client) {
+    const ClientRenderSettings *settings = client_render_settings();
+    if (!shadow.enabled || !settings->dynamic_shadows || !settings->shadows || !client) return;
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        const Player *player = client->game.players[i];
+        const PlayerMesh *pm = player && player->active ? player->mesh : NULL;
+        if (!pm) continue;
+        shadow_color_cube_casters(pm->head);
+        shadow_color_cube_casters(pm->body);
+        for (int k = 0; k < 2; k++) {
+            shadow_color_cube_casters(pm->legs[k]);
+            const PlayerCrouchedLeg *leg = pm->crouched_legs[k];
+            if (!leg) continue;
+            shadow_dynamic_caster(leg->upper);
+            shadow_dynamic_caster(leg->joint);
+            shadow_color_cube_casters(leg->lower);
+        }
+    }
+}
+
 void shadow_update(void) {
-    if (!shadow.enabled || !shadow.dirty) return;
+    // shadowsDynamic: skyLight.shadow.autoUpdate, a render every frame (deob-10.0.7.js:205969); toggleShadowAuto
+    // also asks for one render when it changes (updateShadowMap, :205970)
+    static int last_dynamic = -1;
+    const ClientRenderSettings *settings = client_render_settings();
+    const int dynamic = settings->dynamic_shadows && settings->shadows;
+    if (shadow.enabled && (dynamic || (last_dynamic >= 0 && last_dynamic != dynamic))) shadow.dirty = 1;
+    last_dynamic = dynamic;
+    if (!shadow.enabled || !shadow.dirty) {
+        g_dynamic_count = 0;
+        return;
+    }
     shadow.dirty = 0;
     if (!shadow_ensure_target()) {
         shadow.enabled = 0;
@@ -461,27 +532,9 @@ void shadow_update(void) {
     const int transform = glGetUniformLocation(shadow.program, "transform");
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
-    for (size_t i = 0; i < shadow.caster_count; i++) {
-        Mesh *mesh = shadow.casters[i];
-        if (!mesh->visible || !mesh->geometry) continue;
-
-        mesh_update_transform_matrix(mesh);
-
-        if (shadow.caster_double_sided[i]) {
-            glDisable(GL_CULL_FACE);
-        } else {
-            // Native geometry is counter-clockwise outward; draw only back faces, and keep
-            // that true for mirrored (negative-determinant) transforms.
-            glEnable(GL_CULL_FACE);
-            glFrontFace(shadow_determinant3(mesh->transform_matrix) < 0.0f ? GL_CW : GL_CCW);
-            glCullFace(GL_FRONT);
-        }
-
-        glUniformMatrix4fv(transform, 1, GL_TRUE, mesh->transform_matrix);
-        glBindVertexArray(mesh->geometry->vao);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->geometry->ebo);
-        glDrawElements(GL_TRIANGLES, mesh->geometry->index_count, GL_UNSIGNED_INT, NULL);
-    }
+    for (size_t i = 0; i < shadow.caster_count; i++) shadow_draw_caster(shadow.casters[i], shadow.caster_double_sided[i], transform);
+    for (size_t i = 0; i < g_dynamic_count; i++) shadow_draw_caster(g_dynamic_casters[i], 0, transform);
+    g_dynamic_count = 0;
 
     glDisable(GL_CULL_FACE);
     glFrontFace(GL_CCW);
@@ -510,6 +563,7 @@ static GlUniform u_shadow_matrix = GL_UNIFORM_INIT("shadow_matrix");
 static GlUniform u_shadow_bias = GL_UNIFORM_INIT("shadow_bias");
 static GlUniform u_shadow_normal_bias = GL_UNIFORM_INIT("shadow_normal_bias");
 static GlUniform u_shadow_map = GL_UNIFORM_INIT("shadow_map");
+static GlUniform u_shadow_soft = GL_UNIFORM_INIT("shadow_soft");
 
 void shadow_apply_mesh_uniforms(const Mesh *mesh) {
     const unsigned int program = mesh->material->program;
@@ -522,6 +576,7 @@ void shadow_apply_mesh_uniforms(const Mesh *mesh) {
     gl_uniform_mat4(&u_shadow_matrix, program, GL_TRUE, shadow.shadow_matrix);
     gl_uniform_1f(&u_shadow_bias, program, SHADOW_BIAS);
     gl_uniform_1f(&u_shadow_normal_bias, program, g_shadow_normal_bias);
+    gl_uniform_1i(&u_shadow_soft, program, client_render_settings()->soft_shadows); // softShad: PCFShadowMap
     gl_uniform_1i(&u_shadow_map, program, SHADOW_TEXTURE_UNIT);
 }
 

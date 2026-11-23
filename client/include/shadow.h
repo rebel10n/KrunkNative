@@ -22,7 +22,12 @@ void shadow_environment(int shadow_r, int shadow_d, float light_d);
 // v10 skyLight.shadow.normalBias (map "shadowNB" 0..5, world units along the surface normal;
 // 0 = v7, which has none). shadow_load_map sets the map's; environment zones set theirs (0).
 void shadow_set_normal_bias(float normal_bias);
-// Renders the shadow map if it is out of date. Restores framebuffer, viewport,
+// shadowsDynamic: a caster for this frame's shadow map only (a player's head / body / legs); call before
+// shadow_update, which draws them after the map's casters and forgets them.
+void shadow_dynamic_caster(Mesh *mesh);
+// shadowsDynamic: every active player's head, body and leg meshes as this frame's casters (no-op when off)
+void shadow_player_casters(const Client *client);
+// Renders the shadow map if it is out of date (every frame with shadowsDynamic). Restores framebuffer, viewport,
 // program, VAO, cull/depth/blend state.
 void shadow_update(void);
 // Brackets the world scene draw: only meshes drawn in between receive shadows

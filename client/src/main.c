@@ -2885,7 +2885,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
         zombies_render_frame(client, delta * 1000.0f); // WP-H: mystery box / krum weapons, beams, airdrops (zombies_render.c)
         prize_wheel_render_frame(client); // map prize wheels: a new updateSpinners paint (prize_wheel_render.c)
         wars_banners_frame(client);       // Turf Wars banners: (re)built after a warsClan, the clan logo (wars_banners.c)
-        shadow_update(); // static sun shadow map, re-rendered after a map load (shadow.c)
+        shadow_player_casters(client); // shadowsDynamic: the players' head / body / legs cast (shadow.c)
+        shadow_update(); // sun shadow map, re-rendered after a map load or every frame with shadowsDynamic (shadow.c)
         ocean_update(client->scene, &client->camera, delta * 1000.0f); // v7 ocean: time + mirror reflection pass (ocean.c)
         sky_tick(delta * 1000.0f);
         gpu_timer_mark(GPU_PASS_PRE);
