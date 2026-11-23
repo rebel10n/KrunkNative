@@ -414,6 +414,9 @@ void hud_ui_damage_number(Client*, float x, float y, float z, double value, int 
 // One #chatList row (Krunker gB/gy): name+msg = player line, else color = server line
 // (type 2), else a plain game line (type 1).
 void hud_ui_add_chat(const char *name, const char *msg, const char *color);
+void hud_ui_chat_actions(const uint8_t *ids, int count); // NET_EXT_KN_CHAT_ACTIONS: the last chat row's v10 actions ([Join Queue])
+int  hud_ui_chat_last_row(void);                         // the last chat row's N (#chatMsg_N), -1 once its actions were given
+void hud_ui_chat_actions_row(int seq, const uint8_t *ids, int count); // those actions on row N (a render scenario's replay)
 void hud_ui_add_server_line(const char *msg, const char *color); // a server line already shown (its names by uid, Hide player names)
 // The live trade of Trade mode (trade_ui.c, doc/v10/trade.md): v10's windows[36] (showWindow(37)), its packets
 // (NET_EXT_TRADE_*), the request line, the player list's requestTrade and the in-world prompt (interact type 5).

@@ -456,6 +456,8 @@ static void hud_game_info_html(const char *mode, const char *map, char *out, con
 // (fixStr(name) + ": " + message), else a `color` makes a server line (type 2), else a
 // plain game line (type 1, .chatMsg default color). chatTextOutline / chatBGOp style the
 // .chatItem like v7's (v12018 / v12017).
+static int g_chat_actions_row = -1; // the row NET_EXT_KN_CHAT_ACTIONS applies to: the last one added, -1 once used
+
 static void hud_chat_row_html(const char *name, const char *msg, const char *color, char *out, const size_t size) {
     const ClientRenderSettings *rs = client_render_settings();
     size_t len = 0;
@@ -2265,6 +2267,7 @@ static void hud_feed_insert(const int chat, const char *html, double age_ms) {
     while (ui->feed_count >= FEED_MAX) hud_feed_drop(0, 1);
 
     char id[32];
+    if (chat) g_chat_actions_row = ui->chat_seq;
     if (chat) snprintf(id, sizeof(id), "chatMsg_%d", ui->chat_seq++);
     else snprintf(id, sizeof(id), "feed_%d", ui->feed_seq++);
 
@@ -2442,6 +2445,7 @@ static void hud_add_chat_row_shown(const char *name, const char *msg, const char
 
     hud_feed_evict(list, CHAT_LIST_LENGTH);
     char id[32], html[1024];
+    g_chat_actions_row = g_hud_ui.chat_seq;
     snprintf(id, sizeof(id), "chatMsg_%d", g_hud_ui.chat_seq++);
     hud_chat_row_html(name, msg, color, html, sizeof(html));
 
@@ -2577,6 +2581,34 @@ static void hud_add_server_chat(const char *msg, const char *color) {
     hud_add_chat_row(NULL, msg, color);
 }
 
+// NET_EXT_KN_CHAT_ACTIONS: addChat's actions of a kind-2 line (deob-10.0.7.js:228050): after the row's .chatMsg, one
+// <span class="chatMsgAction" onclick="handleChatMsgAction(this, id)" style="color: C;"> [label]</span> for each action
+// whose req passes. v10.0.7 defines one, 0 "Join Queue" (#5ce05a, :228042-228048); an unknown id shows nothing.
+void hud_ui_chat_actions(const uint8_t *ids, const int count) {
+    const int seq = g_chat_actions_row;
+    g_chat_actions_row = -1;
+    hud_ui_chat_actions_row(seq, ids, count);
+}
+
+int hud_ui_chat_last_row(void) { return g_chat_actions_row; }
+
+void hud_ui_chat_actions_row(const int seq, const uint8_t *ids, const int count) {
+    if (!html_ui_available() || !html_ui_is_ready() || seq < 0 || !ids) return;
+    char id[32];
+    snprintf(id, sizeof(id), "chatMsg_%d", seq);
+    const HtmlElem row = html_dom_by_id(id);
+    const HtmlElem msg = row ? html_dom_query(row, ".chatMsg") : 0;
+    if (!msg) return;
+    char html[512] = "";
+    size_t len = 0;
+    for (int i = 0; i < count; i++)
+        if (ids[i] == NET_CHAT_ACTION_JOIN_QUEUE && ranked_ui_chat_join_shown() && len + 128 < sizeof(html))
+            len += (size_t) snprintf(html + len, sizeof(html) - len,
+                                     "<span class=\"chatMsgAction\" onclick=\"handleChatMsgAction(this, %d)\" style=\"color: #5ce05a;\"> [Join Queue]</span>",
+                                     ids[i]);
+    if (html[0]) html_dom_insert_html(msg, HTML_INSERT_AFTER_END, html);
+}
+
 void hud_ui_add_chat(const char *name, const char *msg, const char *color) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     hud_add_chat_row(name, msg, color); // a system line (name NULL) or a scenario's named line: never gated
@@ -2598,6 +2630,7 @@ static void hud_add_chat_markup(const char *markup) {
     char id[32], html[1024];
     size_t len = 0;
     html[0] = 0;
+    g_chat_actions_row = g_hud_ui.chat_seq;
     snprintf(id, sizeof(id), "chatMsg_%d", g_hud_ui.chat_seq++);
     hb_append(html, sizeof(html), &len, "<div class='chatItem%s'", rs->chat_text_outline ? " chatTextOutline" : "");
     if (fabsf(rs->chat_bg_opacity - CHAT_BG_OPACITY_DEFAULT) > 1e-4f)
@@ -5260,6 +5293,20 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
     if (!name) return -1;
     if (!strcmp(name, "switchChat")) { // #chatSwitch
         hud_switch_chat();
+        return 1;
+    }
+    if (!strcmp(name, "handleChatMsgAction")) { // a chat line's action (deob-10.0.7.js:228059-228061); 0 Join Queue
+        const HtmlElem el = ev ? ev->target : 0; // this (events.c leaves HTML_ARG_THIS unresolved)
+        const int action = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : -1;
+        if (action != NET_CHAT_ACTION_JOIN_QUEUE || !el) return 1;
+        if (ranked_ui_chat_join()) { // Idle: startMatchmaking($rankedAllRegions), then the link is spent
+            html_dom_set_html(el, " [Joined Queue]");
+            html_dom_remove_attr(el, "onclick");
+            html_dom_set_style(el, "color", "#b7b7b7");
+            html_dom_set_class(el, "chatMsgAction", 0);
+        } else {
+            html_dom_set_html(el, " [Queued]");
+        }
         return 1;
     }
     if (!strcmp(name, "windows.22.searchPlayers")) { // Player List search box

@@ -1019,6 +1019,17 @@ static void apply_net_state(void) {
     menu_update_instructions();
 }
 
+#define SCENARIO_CHAT_ACTION_ROWS 16
+typedef struct { int seq, count; uint8_t ids[NET_CHAT_ACTIONS_MAX]; } ScenarioChatActions;
+static ScenarioChatActions g_chat_actions[SCENARIO_CHAT_ACTION_ROWS];
+static int g_chat_action_rows;
+
+// the chat rows' actions, once state.account is in (hud_ui_chat_actions_row)
+static void apply_chat_actions(void) {
+    for (int i = 0; i < g_chat_action_rows; i++) hud_ui_chat_actions_row(g_chat_actions[i].seq, g_chat_actions[i].ids, g_chat_actions[i].count);
+    g_chat_action_rows = 0;
+}
+
 static void apply_chat(void) {
     const cJSON *chat = st("chat");
     if (!cJSON_IsArray(chat)) return;
@@ -1051,6 +1062,16 @@ static void apply_chat(void) {
         const int plain = !color || !strcasecmp(color, "#ffffff") || !strcasecmp(color, "#fff");
         hud_ui_add_chat(NULL, text ? text : "", plain ? NULL : color);
         ui_console_on_chat(NULL, text ? text : "", NET_CHAT_SERVER);
+        // "actions": [id, ...]: the line's extra.actions (NET_EXT_KN_CHAT_ACTIONS), given once state.account is signed
+        // in (apply_chat_actions): an action's req reads the account
+        const cJSON *actions = cJSON_GetObjectItemCaseSensitive(row, "actions");
+        if (cJSON_IsArray(actions) && g_chat_action_rows < SCENARIO_CHAT_ACTION_ROWS) {
+            ScenarioChatActions *r = &g_chat_actions[g_chat_action_rows++];
+            r->seq = hud_ui_chat_last_row();
+            r->count = 0;
+            const cJSON *a;
+            cJSON_ArrayForEach(a, actions) if (r->count < NET_CHAT_ACTIONS_MAX && cJSON_IsNumber(a)) r->ids[r->count++] = (uint8_t) a->valueint;
+        }
     }
 }
 
@@ -1278,6 +1299,7 @@ static int ui_scenario_apply(Client *client) {
     if (st_bool("officialSession", 0)) v10_menu_scenario_official(1);
     if (st_bool("sandbox", 0)) v10_menu_set_sandbox(1); // v10's sandbox menu (capture-v10.js's custMap storage)
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
+    apply_chat_actions();               // state.chat's actions read that account
     v10_rewards_guest_earned_scenario(st("guestEarned")); // a guest's unclaimed KR / score (v10_rewards.c)
     alt_manager_ui_scenario(st("altAccounts")); // the Account Manager's rows (alt_manager_ui.c): stand-in accounts
     kio_store_scenario(st("kioStore"));  // krunker.io's shop answers (kio_store.c), without krunker.io

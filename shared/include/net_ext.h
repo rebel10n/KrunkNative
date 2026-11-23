@@ -193,6 +193,7 @@ typedef enum {
     NET_EXT_KN_GUEST_ID = 0x8140,     // C -> S NetGuestIdPacket: the menu's guest id, sent while signed out, once per connection
     NET_EXT_KN_GUEST_EARNED = 0x8141, // S -> C, no body: v10's "ger" (GUEST_EARNED_REWARDS): this guest's balance changed, fetch it again
     NET_EXT_KN_RANKED_NOTICE = 0x8142, // S -> C NetRankedNoticePacket: the brain's "queued for ranked" line, the player apart from the text
+    NET_EXT_KN_CHAT_ACTIONS = 0x8143,  // S -> C NetChatActionsPacket: the chat line just before carries v10's chat actions ([Join Queue])
     // 0x8150 v10.0.3 event kill pools (shared/include/kill_pools.h, doc/v10/kill-pools.md): the END's otherData.items
     NET_EXT_KN_END_ITEM = 0x8150, // S -> C NetEndItemPacket, one per item the match paid, right after the END
     // 0x8160 v10.0.4 counter skins (client/include/skin_counter.h, server/src/skin_counters_server.c)
@@ -474,7 +475,7 @@ typedef struct {
 // NET_EXT_KN_OFFICIAL_CHAT: Krunker "ch" ADD_CHAT [team, name, text, kind, color, nameColor, senderAccountId,
 // extra] (iíïíííï, game.deob.js:221172): the line on its chat tab (data-tab = team || 0; -1 outside team modes),
 // a kind-2 line in `color` (default #fc03ec), a player line's name in nameColor. Followed by the sender's name and
-// the text, NUL-terminated. Not carried: extra.actions (v10's only one, "Join Queue", needs its ranked queue).
+// the text, NUL-terminated. extra.actions follows as NET_EXT_KN_CHAT_ACTIONS.
 typedef struct {
     int8_t channel;      // team arg: 0 global, 1 team, -1 every tab
     uint8_t kind;        // NetChatKind (Krunker 0 player, 2 server, 1 / 4 game)
@@ -822,6 +823,18 @@ typedef struct {
     char name[32];   // PLAYER_NAME_SIZE: the queued player's name, NUL-terminated ("" for no name)
     char text[288];  // NET_CHAT_TEXT_SIZE: the template, NUL-terminated
 } NetRankedNoticePacket;
+
+// NET_EXT_KN_CHAT_ACTIONS (S -> C, EXT peers; also the krunker.io link's "ch" / "chi" extra.actions): the chat line the
+// peer received just before this packet carries v10's chat actions, extra.actions [[id], ...] (deob-10.0.7.js:228050):
+// a kind-2 line gets " [label]" spans whose req passes, and a click runs handleChatMsgAction(this, id) (:228059-228061).
+// The only id v10.0.7 defines is 0, "Join Queue" (#5ce05a, an account of level 10 or more, :228042-228048). A separate
+// packet so a client that does not know it still shows the line (NetRankedNoticePacket's size is fixed).
+#define NET_CHAT_ACTIONS_MAX 8
+#define NET_CHAT_ACTION_JOIN_QUEUE 0
+typedef struct {
+    uint8_t count;                      // ids in use
+    uint8_t ids[NET_CHAT_ACTIONS_MAX];  // v10's action ids
+} NetChatActionsPacket;
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)

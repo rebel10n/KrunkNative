@@ -333,6 +333,8 @@ int  ranked_ui_escape(void);          // Escape: the open popup's overlay takes 
 void ranked_ui_account_changed(void); // $account changed: a Login Required popup hides (v10:111598-111600)
 int  ranked_ui_queue_action_state(void); // the announcement card's ranked-queue action: 0 on, 1 In Queue, 2 Requires Level 10
 void ranked_ui_queue_action(void);    // its click (v10 'ranked-queue': the search, or the login for a guest)
+int  ranked_ui_chat_join_shown(void); // a chat line's [Join Queue] action is shown (an account of level 10 or more)
+int  ranked_ui_chat_join(void);       // its click: 1 the search started (Idle), 0 already searching ([Queued])
 void ranked_ui_on_init(Client *client); // INIT (client_apply_init): a joined ranked match sends NET_EXT "joinedRank" (v10 JOINED_RANK)
 int  ranked_ui_home_ready(void);      // the signed-in home loaded: the rejoin check (v10:209847); 0 = ask again
 // --render-scenario: state.ranked {open, tab, profile, board, history, shop, ...} stands in for the brain

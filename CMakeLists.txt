@@ -1626,6 +1626,10 @@ else ()
             add_test(NAME store_bundle_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/store_bundle_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(store_bundle_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # chat_actions_e2e: a chat line's v10 actions ([Join Queue], NET_EXT_KN_CHAT_ACTIONS) in the rendered document
+            add_test(NAME chat_actions_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chat_actions_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(chat_actions_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # chal_card_e2e: v10.0.7's challenge cards (title / RP tiles, DAT.bits progress, the capped bar) on the
             # Challenges window and the Battle Pass Challenges tab (client/tests/chal_card_e2e.py)
             add_test(NAME chal_card_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chal_card_e2e.py

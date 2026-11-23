@@ -972,6 +972,19 @@ int ranked_ui_queue_action_state(void) {
     if (ranked_active_backend() != RANKED_BACKEND_NONE && active_level() < 10) return 2;
     return 0;
 }
+// A chat line's "Join Queue" action (deob-10.0.7.js:228042-228048): its req is `account && account.level >= 10`.
+int ranked_ui_chat_join_shown(void) {
+    const int signed_in = ranked_active_backend() == RANKED_BACKEND_KRUNKER ? krunker_account_signed_in() : acc() != NULL;
+    return signed_in && active_level() >= 10;
+}
+// handleChatMsgAction(el, 0) (:228059-228061): getMatchmakingStatus().state Idle starts the search with
+// $rankedAllRegions (start_matchmaking reads the stored setting) and the link reads [Joined Queue]; otherwise [Queued].
+int ranked_ui_chat_join(void) {
+    if (R.state != MM_IDLE) return 0;
+    if (!R.busy && ranked_active_backend() != RANKED_BACKEND_NONE) start_matchmaking();
+    return 1;
+}
+
 // the click (v10:116880-116882): a signed-in account that is not queued starts the search (startMatchmaking with
 // the region); a guest gets v10's login. KrunkNative starts one request at a time (R.busy); v10 has no such guard.
 void ranked_ui_queue_action(void) {

@@ -301,7 +301,9 @@ static void net_send_creation_info(ClientConnection *client) {
 
 // The brain's ranked notice ("ranked-notice"): a line for every player of this game server. An EXT peer gets
 // NET_EXT_KN_RANKED_NOTICE (the queued player apart from the template, so its client shows the name as Hide player names
-// does); an older peer the composed NET_CHAT_RANKED line with the name, as before.
+// does), then NET_EXT_KN_CHAT_ACTIONS with v10's [Join Queue] action (deob-10.0.7.js:228042-228061: the line's
+// extra.actions [[0]]; a client that does not know the packet ignores it); an older peer the composed NET_CHAT_RANKED
+// line with the name, as before.
 void net_broadcast_ranked_notice(const char *name, const char *template) {
     NetRankedNoticePacket body;
     memset(&body, 0, sizeof(body));
@@ -314,10 +316,17 @@ void net_broadcast_ranked_notice(const char *name, const char *template) {
 
     uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
     const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_RANKED_NOTICE, &body, sizeof(body));
+    NetChatActionsPacket actions;
+    memset(&actions, 0, sizeof(actions));
+    actions.count = 1;
+    actions.ids[0] = NET_CHAT_ACTION_JOIN_QUEUE;
+    uint8_t abuf[NET_EXT_HEADER_SIZE + sizeof(actions)];
+    const uint16_t an = net_ext_pack(abuf, sizeof(abuf), NET_EXT_KN_CHAT_ACTIONS, &actions, sizeof(actions));
     for (size_t i = 0; i < g_server->client_count; i++) {
         ClientConnection *client = &g_server->clients[i];
         if (client->peer_minor >= NET_PROTOCOL_MINOR_EXT) {
             if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+            if (n && an) net_send_packet(client->fd, NET_PACKET_EXT, abuf, an);
         } else {
             net_send_chat_to(client, -1, NET_CHAT_RANKED, NULL, text);
         }

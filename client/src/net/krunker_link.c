@@ -855,8 +855,24 @@ static void on_health(KrunkerLink *l, const KrunkerFrame *f) {
 // "ch" ADD_CHAT [team, name, text, kind, color, nameColor, senderAccountId, extra] (game.deob.js:221172):
 // kind 0 player line, 1 / 4 game line, 2 server line (color), 3 trade request (text = the sender's sid,
 // not shown). Every line goes out as NET_EXT_KN_OFFICIAL_CHAT: its tab (arg 0), a server line's colour,
-// a player name's nameColor and the sender's account (the mute list). Not carried: extra.actions.
+// a player name's nameColor and the sender's account (the mute list); extra.actions follows it as
+// NET_EXT_KN_CHAT_ACTIONS (emit_chat_actions).
 static void emit_hud_ext(KrunkerLink *l, uint16_t subtype, const void *body, uint16_t length); // below
+
+// extra.actions [[id, ...], ...] of a "ch" / "chi" line (deob-10.0.7.js:228050: each action's [0] is its id) as
+// NET_EXT_KN_CHAT_ACTIONS, right after the line; nothing without actions
+static void emit_chat_actions(KrunkerLink *l, const KrunkerValue *extra) {
+    const KrunkerValue *list = krunker_get(extra, "actions");
+    if (!krunker_is(list, KRUNKER_ARRAY) || !list->len) return;
+    NetChatActionsPacket a;
+    memset(&a, 0, sizeof(a));
+    for (uint32_t i = 0; i < list->len && a.count < NET_CHAT_ACTIONS_MAX; i++) {
+        const KrunkerValue *act = krunker_at(list, i);
+        const double id = num(krunker_is(act, KRUNKER_ARRAY) ? krunker_at(act, 0) : act, -1);
+        if (id >= 0 && id < 256) a.ids[a.count++] = (uint8_t) id;
+    }
+    if (a.count) emit_hud_ext(l, NET_EXT_KN_CHAT_ACTIONS, &a, sizeof(a));
+}
 
 // addChat's tab (iíïíííï: `team || 0`, -1 outside team modes, which the HUD applies): 1 team, -1 every tab, else 0
 static int8_t chat_channel(const KrunkerValue *team) {
@@ -892,6 +908,7 @@ static void on_chat(KrunkerLink *l, const KrunkerFrame *f) {
     memcpy(body + sizeof(h) + nl, text, tl);
     body[sizeof(h) + nl + tl - 1] = 0;
     emit_hud_ext(l, NET_EXT_KN_OFFICIAL_CHAT, body, (uint16_t) (sizeof(h) + nl + tl));
+    emit_chat_actions(l, arg(f, 7));
 }
 
 static void emit_ext(KrunkerLink *l, const uint16_t subtype, const void *body, const uint16_t length); // below
@@ -1499,6 +1516,7 @@ static void on_chat_i18n(KrunkerLink *l, const KrunkerFrame *f) {
         args[n] = store[n];
     }
     emit_chat_i18n(l, chat_channel(arg(f, 0)), kind, krunker_str(arg(f, 1)), ks, args, n, krunker_str(arg(f, 4)), krunker_str(arg(f, 5)));
+    emit_chat_actions(l, arg(f, 6)); // chi's extra is ch's (iîïiììí passes it on, :228019-228022)
 }
 
 // "uh" UPDATE_HOST [hostSocketId | null, silent] (iíîíïìï :219273): game.host (the player list's star:

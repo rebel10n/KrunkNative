@@ -1513,6 +1513,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&notice, body, sizeof(notice));
                 events_ranked_notice(client, &notice);
             }
+            else if (subtype == NET_EXT_KN_CHAT_ACTIONS && body_length == sizeof(NetChatActionsPacket)) { // the last line's actions
+                NetChatActionsPacket actions;
+                memcpy(&actions, body, sizeof(actions));
+                hud_ui_chat_actions(actions.ids, actions.count < NET_CHAT_ACTIONS_MAX ? actions.count : NET_CHAT_ACTIONS_MAX);
+            }
             else if (subtype == NET_EXT_KN_CREATION_INFO && body_length == sizeof(NetCreationInfoPacket)) { // the hosted community map
                 NetCreationInfoPacket info;
                 memcpy(&info, body, sizeof(info));
