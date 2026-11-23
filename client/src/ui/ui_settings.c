@@ -714,6 +714,7 @@ static void customize_import(const cJSON *c) {
         if (json_truthy(list)) storage_set_json(LISTS[i].key, list);
     }
     if (json_truthy(cJSON_GetObjectItem(c, "images"))) image_collection_reload(); // the popup reads storage again
+    if (json_truthy(cJSON_GetObjectItem(c, "favorites"))) ui_loadout_fav_reload(); // updateFavList(favorites)
 }
 
 char *ui_settings_export_text(void) {

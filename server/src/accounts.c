@@ -7,6 +7,7 @@
 #include <server_captcha.h> // the in-game captcha: the welcome's flag, the brain's "captcha-r"
 #include <server_brain_events.h> // v10.0.3 warsClan, map prize wheels, unb / lotWin, monetized studio games (brain_events.c)
 #include <server_log.h>
+#include <social_v7.h> // store_item_free: the free items everyone may wear
 #include <director_gate.h> // Krunker Strike director tickets
 #include <brain.h>
 #include <bot_banter.h>
@@ -2269,6 +2270,7 @@ static int acc_skins_enforced(void) {
 
 int accounts_owns_skin(const ClientConnection *client, const int skin) {
     if (skin < 0 || !acc_skins_enforced()) return 1;
+    if (store_item_free(skin)) return 1; // getSkins(account, true): the free items are everyone's, guests' too
     if (!client->acct.account_id || !client->acct.skins_known || skin >= ACC_SKIN_MAX) return 0;
     return (client->acct.skins_owned[skin >> 3] >> (skin & 7)) & 1;
 }

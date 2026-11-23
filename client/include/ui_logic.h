@@ -773,6 +773,7 @@ int  ui_loadout_streak(int slot);                // streakIndex1..3 (data/streak
 int  ui_loadout_skin_color(void);                // selected skin colour as 0xRRGGBB, -1 = class colour
 void ui_loadout_select_skin_color_hex(const char *hex); // selectSkinColor("#rrggbb") from the premium picker
 int  ui_loadout_hex_color_ok(const char *s);     // v10's /^#([0-9A-F]{3}){1,2}$/i
+void ui_loadout_fav_reload(void);                // krk_favList was replaced (customize import): read it again
 int  ui_loadout_saved_hex(const char *key, char out[8]); // a hex string saved under key: 0xRRGGBB (out "#.."), -1 none
 // What a player of `class_index` wears, from the Change Loadout picks: the one source of the ENT
 // (main.c, for_ent 1) and the menu's class preview (class_preview.c, for_ent 0), so the preview

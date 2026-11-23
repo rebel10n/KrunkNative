@@ -320,13 +320,19 @@ int ui_loadout_skin_color(void) {
 
 static int random_owned_skin(int weapon, int type);
 static int weapon_skin(int weapon);
+static const cJSON *skin_json(int index);
+
+// store.skins[ind].attachBypass: the skin takes an attachment on a weapon without one (Vince Mastery)
+static int skin_attach_bypass(const int ind) {
+    return ind >= 0 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(skin_json(ind), "attachBypass"));
+}
 static int has_inventory(void);
 
 // A store item pick as worn: -1 none (also v7's explicit None, -3); Random (-2) is getRandomOwnedSkin
 // (`weapon` 1-based for a weapon skin, else store `type`) when resolve_random (the ENT), none for the
 // preview (`== -2 ? -1`). Nothing without an inventory, as the tabs show it.
 static int32_t worn(const int pick, const int resolve_random, const int weapon, const int type) {
-    if (!has_inventory()) return -1;
+    if (!has_inventory() && !(pick >= 0 && store_item_free(pick))) return -1; // a guest wears the free items
     if (pick == -2) return resolve_random ? random_owned_skin(weapon, type) : -1;
     return pick >= 0 ? pick : -1;
 }
@@ -594,8 +600,49 @@ static int secondary_req_ok(const Client *client, const Weapon *weapon, const Ac
 // The loadout may show and wear store skins: signed in (acc.skins) or offline mode (all of them).
 static int has_inventory(void) { return active_account() || all_skins_unlocked(); }
 
-// acc.skins ({ind, cnt} entries, account data slot 10), sorted; NULL (count 0) for a guest.
-// Offline mode: one of every skin. Caller frees.
+static const cJSON *skin_json(int index);
+
+// item.creators / item.streamers hold lower-case names
+static int json_list_has_lower(const cJSON *list, const char *name) {
+    if (!cJSON_IsArray(list) || !name || !name[0]) return 0;
+    char low[64];
+    size_t n = 0;
+    for (; name[n] && n + 1 < sizeof(low); n++) low[n] = (char) tolower((unsigned char) name[n]);
+    low[n] = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, list) if (cJSON_IsString(e) && !strcmp(e->valuestring, low)) return 1;
+    return 0;
+}
+
+// getSkins(account, true) (deob-10.0.7.js:217752-217795): everyone's list also has the store's free, unblocked
+// items, and the items the account made (item.creators has its name) or, for a moderator, the K.P.D's (kpd).
+// The free sprays stay out: Select Spray, the spray wheel and Random add them themselves. A streamer's items
+// (item.streamers vs the account's Twitch) and a skin maker's are left out: KrunkNative's account has neither.
+static void owned_add_free(OwnedSkin **list, int *count, const AccountInfo *acc) {
+    for (int i = 0; i < g_viewer_skin_count; i++) {
+        const ViewerSkin *s = viewer_skin(i);
+        if (!s || !s->name) continue;
+        int add = (s->flags & VS_FREE) && !(s->flags & VS_BLOCKED) && s->type != 4;
+        if (!add && acc) {
+            const cJSON *j = skin_json(i);
+            add = json_list_has_lower(cJSON_GetObjectItemCaseSensitive(j, "creators"), acc->name) ||
+                  (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "kpd")) && acc->is_mod);
+        }
+        if (!add) continue;
+        int dup = 0;
+        for (int k = 0; k < *count && !dup; k++) dup = (*list)[k].ind == i;
+        if (dup) continue;
+        OwnedSkin *grown = realloc(*list, (size_t) (*count + 1) * sizeof(OwnedSkin));
+        if (!grown) return;
+        *list = grown;
+        (*list)[*count] = (OwnedSkin) {i, 1, *count, NULL, 0};
+        (*count)++;
+    }
+}
+
+// acc.skins ({ind, cnt} entries, account data slot 10) plus getSkins(acc, true)'s free items, sorted
+// (by_rarity_only < 0: in account order); a guest has the free items only. Offline mode: one of every
+// skin. Caller frees.
 static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
     *count = 0;
     if (all_skins_unlocked() && g_viewer_skin_count > 0) {
@@ -608,13 +655,13 @@ static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
             (*count)++;
         }
         g_owned_by_rarity_only = by_rarity_only;
-        qsort(all, (size_t) *count, sizeof(OwnedSkin), owned_cmp);
+        if (by_rarity_only >= 0) qsort(all, (size_t) *count, sizeof(OwnedSkin), owned_cmp);
         return all;
     }
     const AccountInfo *acc = active_account();
     const cJSON *skins = acc ? cJSON_GetArrayItem(acc->data, 10) : NULL;
     const int n = cJSON_GetArraySize(skins);
-    OwnedSkin *out = n > 0 ? calloc((size_t) n, sizeof(OwnedSkin)) : NULL;
+    OwnedSkin *out = calloc((size_t) (n > 0 ? n : 1), sizeof(OwnedSkin));
     if (!out) return NULL;
     const cJSON *e;
     cJSON_ArrayForEach(e, skins) {
@@ -624,8 +671,9 @@ static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
                                    cJSON_IsNumber(id) ? id->valueint : 0};
         (*count)++;
     }
+    owned_add_free(&out, count, acc);
     g_owned_by_rarity_only = by_rarity_only;
-    qsort(out, (size_t) *count, sizeof(OwnedSkin), owned_cmp);
+    if (by_rarity_only >= 0) qsort(out, (size_t) *count, sizeof(OwnedSkin), owned_cmp);
     return out;
 }
 
@@ -641,20 +689,142 @@ static int free_store_spray(const int index) {
     return (index < SPRAY_DEFAULT_INDEX || index >= SPRAY_DEFAULT_INDEX + SPRAYS_BASE_COUNT) && free_spray(store_skin(index));
 }
 
-// getRandomOwnedSkin(null, 4) (v10:10178643): one of the account's sprays, the free ones included
-// (offline mode: every spray); -1 for a guest (players.spray then sprays 2482).
+// ---- favourites: krk_favList (deob-10.0.7.js:214619-214655), read once like v10's list and written by
+// favItem (updateFavList). Entries are store indices (numbers) or "<id>#<ind>" for one copy; v10's indexOf
+// compares strictly, so 5 and "5" differ.
+#define FAV_KEY "krk_favList"
+#define FAV_MAX (256 * 1024)
+static cJSON *g_favs;
+static int g_favs_loaded;
+
+static cJSON *favs(void) {
+    if (!g_favs_loaded) {
+        g_favs_loaded = 1;
+        char *buf = malloc(FAV_MAX);
+        if (buf && html_storage_get(FAV_KEY, buf, FAV_MAX) >= 0 && buf[0]) g_favs = cJSON_Parse(buf);
+        free(buf);
+        if (!cJSON_IsArray(g_favs)) {
+            cJSON_Delete(g_favs);
+            g_favs = cJSON_CreateArray();
+        }
+    }
+    return g_favs;
+}
+
+// customizeImport's favorites (ui_settings.c) replaced the stored list: read it again
+void ui_loadout_fav_reload(void) {
+    cJSON_Delete(g_favs);
+    g_favs = NULL;
+    g_favs_loaded = 0;
+}
+
+// favList.indexOf(ind) >= 0
+static int fav_has_ind(const int ind) {
+    const cJSON *e;
+    cJSON_ArrayForEach(e, favs()) if (cJSON_IsNumber(e) && e->valuedouble == ind) return 1;
+    return 0;
+}
+
+static int fav_has_key(const char *key) {
+    const cJSON *e;
+    cJSON_ArrayForEach(e, favs()) if (cJSON_IsString(e) && !strcmp(e->valuestring, key)) return 1;
+    return 0;
+}
+
+// isFav(entry) (deob-10.0.7.js:214621-214625): its key (id ? id + "#" + ind : ind) or its ind is listed
+static int is_fav(const int ind, const int id) {
+    if (id) {
+        char key[32];
+        snprintf(key, sizeof(key), "%d#%d", id, ind);
+        if (fav_has_key(key)) return 1;
+    }
+    return fav_has_ind(ind);
+}
+
+// favItem(el, index, id) (deob-10.0.7.js:223687-223700): toggles the item's key, recolours the star and saves
+static void fav_item(const HtmlEvent *ev, const int ind, const int id) {
+    html_ui_stop_propagation();
+    if (!store_skin(ind)) return;
+    cJSON *list = favs();
+    char key[32];
+    snprintf(key, sizeof(key), "%d#%d", id, ind);
+    const int was = (id && fav_has_key(key)) || fav_has_ind(ind);
+    if (was) {
+        for (int i = cJSON_GetArraySize(list) - 1; i >= 0; i--) {
+            const cJSON *e = cJSON_GetArrayItem(list, i);
+            if ((cJSON_IsNumber(e) && e->valuedouble == ind) || (id && cJSON_IsString(e) && !strcmp(e->valuestring, key)))
+                cJSON_DeleteItemFromArray(list, i);
+        }
+    } else if (id) {
+        cJSON_AddItemToArray(list, cJSON_CreateString(key));
+    } else {
+        cJSON_AddItemToArray(list, cJSON_CreateNumber(ind));
+    }
+    if (ev && ev->target) {
+        html_dom_set_attr(ev->target, "data-col", was ? "white" : "yellow");
+        html_dom_set_attr(ev->target, "data-icon", was ? "star_border" : "star");
+    }
+    char *text = cJSON_PrintUnformatted(list);
+    if (text) html_storage_set(FAV_KEY, text); // updateFavList: the spray wheel reads the list when it opens
+    free(text);
+}
+
+// The selected class's name (classes[i].name)
+static const char *class_name_at(const int index) {
+    const Client *client = menu_ui()->client;
+    const size_t count = client->game.class_count ? client->game.class_count : rules_class_count();
+    const ClassConfig *classes = client->game.classes ? client->game.classes : rules_classes();
+    return index >= 0 && (size_t) index < count && classes[index].name ? classes[index].name : "";
+}
+
+// item.classIndex, -1 when it has none
+static int skin_class_index(const int ind) {
+    const cJSON *c = cJSON_GetObjectItemCaseSensitive(skin_json(ind), "classIndex");
+    return cJSON_IsNumber(c) ? c->valueint : -1;
+}
+
+// A class-only item is usable only while its class is selected: account.isDev || item.classIndex == null ||
+// item.classIndex == selectedClass || isSandbox (deob-10.0.7.js:220894, :223500)
+static int skin_class_open(const int ind) {
+    const AccountInfo *acc = active_account();
+    const int ci = skin_class_index(ind);
+    if (ci < 0 || (acc && acc->is_dev) || !online_mode_online() || menu_ui()->client->offline) return 1;
+    return ci == menu_ui()->client->menu_class_index;
+}
+
+// The pool's pick: a favourite when any is in it (deob-10.0.7.js:217806-217812), uniform otherwise
+static int pick_random_pool(const int *pool, const int n) {
+    int favn = 0;
+    for (int i = 0; i < n; i++) favn += fav_has_ind(pool[i]);
+    if (!n) return -1;
+    if (!favn) return pool[rand() % n];
+    int k = rand() % favn;
+    for (int i = 0; i < n; i++)
+        if (fav_has_ind(pool[i]) && k-- == 0) return pool[i];
+    return -1;
+}
+
+// getRandomOwnedSkin(null, 4) (deob-10.0.7.js:217800-217813): one of the account's sprays, the free ones
+// included (offline mode: every spray), a favourite when there is one; -1 for a guest (players.spray then
+// sprays 2482).
 static int random_owned_spray(void) {
     if (!active_account() && !all_skins_unlocked()) return -1;
-    int n = 0, matches = 0, pick = -1;
-    OwnedSkin *owned = owned_skins(&n, 0);
+    int n = 0, m = 0;
+    OwnedSkin *owned = owned_skins(&n, -1);
+    int *pool = malloc((size_t) (n + g_viewer_skin_count + 1) * sizeof(int));
+    if (!pool) {
+        free(owned);
+        return -1;
+    }
     for (int i = 0; i < n; i++) {
         const ViewerSkin *s = store_skin(owned[i].ind);
-        if (s && s->type == 4 && !free_spray(s) && rand() % ++matches == 0) pick = owned[i].ind; // reservoir sample
+        if (s && s->type == 4 && !free_spray(s)) pool[m++] = owned[i].ind;
     }
     free(owned);
-    for (int i = 0; i < g_viewer_skin_count; i++) {
-        if (free_spray(store_skin(i)) && rand() % ++matches == 0) pick = i;
-    }
+    for (int i = 0; i < g_viewer_skin_count; i++)
+        if (free_spray(store_skin(i))) pool[m++] = i;
+    const int pick = pick_random_pool(pool, m);
+    free(pool);
     return pick;
 }
 
@@ -672,24 +842,33 @@ int ui_loadout_spray(void) {
     return pick;
 }
 
-// updateSprayWheel: the account's SPRAY items other than the equipped one (acc.skins order, then
-// the free sprays: getSkins(account, true); v7 puts the favourites first, KrunkNative keeps no
-// favourites), at most SPRAY_WHEEL_MAX, then the equipped spray (sprayIndex <= 0 -> 2482).
+// updateSprayWheel (deob-10.0.7.js:227092-227104): the account's SPRAY items other than the equipped one
+// (acc.skins order, then the free sprays: getSkins(account, true)), the favourites first (a stable sort on
+// favList.indexOf(ind)), at most SPRAY_WHEEL_MAX, then the equipped spray (sprayIndex <= 0 -> 2482).
 // Returns the count written to `out` (<= max).
 int ui_loadout_spray_wheel(int *out, const int max) {
     if (!out || max <= 0) return 0;
     const int pick = sel(SEL_SPRAY);
     const int equipped = pick >= 0 ? store_spray_from_legacy(pick) : SPRAY_DEFAULT_INDEX;
-    int count = 0, n = 0;
-    OwnedSkin *skins = owned_skins(&n, 0);
-    for (int i = 0; i < n && count < SPRAY_WHEEL_MAX && count < max - 1; i++) {
+    int count = 0, n = 0, m = 0;
+    OwnedSkin *skins = owned_skins(&n, -1);
+    int *all = malloc((size_t) (n + g_viewer_skin_count + 1) * sizeof(int));
+    if (!all) {
+        free(skins);
+        out[0] = SPRAY_DEFAULT_INDEX;
+        return 1;
+    }
+    for (int i = 0; i < n; i++) {
         const ViewerSkin *skin = store_skin(skins[i].ind);
-        if (skin && skin->type == 4 && !free_spray(skin) && skins[i].ind != equipped) out[count++] = skins[i].ind;
+        if (skin && skin->type == 4 && !free_spray(skin) && skins[i].ind != equipped) all[m++] = skins[i].ind;
     }
     free(skins);
-    for (int i = 0; i < g_viewer_skin_count && count < SPRAY_WHEEL_MAX && count < max - 1; i++) {
-        if (free_spray(store_skin(i)) && i != equipped) out[count++] = i;
-    }
+    for (int i = 0; i < g_viewer_skin_count; i++)
+        if (free_spray(store_skin(i)) && i != equipped) all[m++] = i;
+    for (int fav = 1; fav >= 0; fav--)
+        for (int i = 0; i < m && count < SPRAY_WHEEL_MAX && count < max - 1; i++)
+            if (fav_has_ind(all[i]) == fav) out[count++] = all[i];
+    free(all);
     const ViewerSkin *eq = store_skin(equipped);
     out[count++] = eq && eq->type == 4 ? equipped : SPRAY_DEFAULT_INDEX;
     return count;
@@ -697,15 +876,22 @@ int ui_loadout_spray_wheel(int *out, const int max) {
 
 // getRandomOwnedSkin(weapon, type): a random owned weapon skin of `weapon` (1-based, type < 0) or item
 // of store type `type`; -1 when there is none (a guest owns nothing, offline mode owns everything).
+// v10 (deob-10.0.7.js:217800-217813) keeps the items of the selected class (or none) and picks among the
+// favourites when any of them is one.
 static int random_owned_skin(const int weapon, const int type) {
-    int n = 0, matches = 0, pick = -1;
-    OwnedSkin *owned = owned_skins(&n, 0);
-    for (int i = 0; i < n; i++) {
+    int n = 0, m = 0;
+    OwnedSkin *owned = owned_skins(&n, -1);
+    int *pool = malloc((size_t) (n + 1) * sizeof(int));
+    for (int i = 0; pool && i < n; i++) {
         const ViewerSkin *s = store_skin(owned[i].ind);
         if (!s || (type < 0 ? s->type != 0 || s->weapon != weapon : s->type != type)) continue;
-        if (rand() % ++matches == 0) pick = owned[i].ind; // reservoir sample: uniform over the matches
+        const int ci = skin_class_index(owned[i].ind);
+        if (ci >= 0 && ci != menu_ui()->client->menu_class_index) continue;
+        pool[m++] = owned[i].ind;
     }
     free(owned);
+    const int pick = pool ? pick_random_pool(pool, m) : -1;
+    free(pool);
     return pick;
 }
 
@@ -936,7 +1122,9 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
         if (lc.secondary && !slot_item(&sec, ss) && ss == -2) snprintf(sec.name, sizeof(sec.name), "Random");
         if (melee >= 0) slot_item(&mel, melee);
     }
-    const int has_attach = pw && pw->attach;
+    // (weaponConfig.attach != null || the primary skin's attachBypass) && !weaponConfig.forceAttach
+    // (deob-10.0.7.js:218688; no v10.0.7 weapon sets forceAttach)
+    const int has_attach = pw && (pw->attach || skin_attach_bypass(weapon_skin(lc.primary)));
     const int has_scope = pw && pw->scope;
 
     sb_append(out, "<div id='loadoutHolder' style='text-align:left;margin-bottom:5px;margin-top: -8px;'>");
@@ -1096,7 +1284,7 @@ static void gen_tab_customize(StrBuf *out) {
         int spray_item = 0;
         const char *spray_base = cs->type < 0 ? spray_name(pick) : NULL;
         const ViewerSkin *s = cs->type < 0 && spray_base ? NULL
-                            : (has_inventory() || (cs->type < 0 && free_spray(store_skin(pick))) ? store_skin(pick) : NULL);
+                            : (has_inventory() || store_item_free(pick) ? store_skin(pick) : NULL); // account || item.free (deob-10.0.7.js:222501)
         if (spray_base) { // KrunkNative's default sprays (Game.sprays of v3.1.1): free items
             snprintf(v.name, sizeof(v.name), "%s", spray_base);
             char path[64];
@@ -1258,6 +1446,26 @@ static void pick_add_owned(const OwnedSkin *o) {
 
 static void pick_card(StrBuf *out, int pos, void *user);
 
+// .sort((a, b) => ~~fav(b) - ~~fav(a)) over the entries from `from` on (stable): by_key uses isFav (the copy's
+// key or its ind: Select Skin, Select Spray), else favList.indexOf(ind) (the item lists) (deob-10.0.7.js:220249,
+// :220890, :223501)
+static void pick_fav_first(const int from, const int by_key) {
+    const int n = g_pick.n_all - from;
+    if (n <= 1) return;
+    PickEntry *tmp = malloc((size_t) n * sizeof(PickEntry));
+    if (!tmp) return;
+    int k = 0;
+    for (int fav = 1; fav >= 0; fav--)
+        for (int i = from; i < g_pick.n_all; i++) {
+            const PickEntry *e = &g_pick.all[i];
+            const int ind = e->kind == PICK_FREE_SPRAY ? SPRAY_DEFAULT_INDEX + e->ind : e->ind;
+            const int f = by_key ? is_fav(ind, e->kind == PICK_OWNED ? e->copy_id : 0) : fav_has_ind(ind);
+            if (f == fav) tmp[k++] = *e;
+        }
+    memcpy(g_pick.all + from, tmp, (size_t) n * sizeof(PickEntry));
+    free(tmp);
+}
+
 // New picker: entries are added with pick_add(), then pick_list() writes #skinList.
 static void pick_begin(const PickerKind kind, const char *fn, const char *img_class, const int type) {
     free(g_pick.all);
@@ -1317,9 +1525,51 @@ static int owned_meta_style(const cJSON *meta) {
     return value;
 }
 
-// One owned item card of f1828 / Select Skin (weapon: the selectSkin weapon, -1 = fn(ind)).
+// iîìiiïî(wear) (deob-10.0.7.js: the wear tiers, config-10.0.7.js:7052-7068): the tier's name, the last past the end
+static const char *wear_tier_name(const double wear) {
+    static const double max[] = {0.1, 0.3, 0.6, 1};
+    static const char *const keys[] = {"wear_flawless", "wear_tested", "wear_trashed", "wear_wrecked"};
+    for (int i = 0; i < 4; i++)
+        if (wear < max[i]) return i18n_t(keys[i]);
+    return i18n_t(keys[3]);
+}
+
+// The copy's m.name ("<name>") and its wear / #serial tags (deob-10.0.7.js:220895, :223505)
+static void owned_name_tags(StrBuf *out, const cJSON *meta) {
+    cJSON *parsed = cJSON_IsString(meta) && meta->valuestring ? cJSON_Parse(meta->valuestring) : NULL;
+    const cJSON *m = parsed ? parsed : meta;
+    if (cJSON_IsObject(m)) {
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(m, "name"));
+        if (name && name[0]) {
+            sb_append(out, "<div class='skinNametag'>\"");
+            sb_append_esc(out, name);
+            sb_append(out, "\"</div>");
+        }
+        const cJSON *wear = cJSON_GetObjectItemCaseSensitive(m, "wear"), *serial = cJSON_GetObjectItemCaseSensitive(m, "serial");
+        if (cJSON_IsNumber(wear) || cJSON_IsNumber(serial)) {
+            sb_append(out, "<div class='skinNametag'>");
+            if (cJSON_IsNumber(wear)) sb_append_esc(out, wear_tier_name(wear->valuedouble));
+            if (cJSON_IsNumber(serial)) sb_appendf(out, "<span class='serialTag'>#%.15g</span>", serial->valuedouble);
+            sb_append(out, "</div>");
+        }
+    }
+    cJSON_Delete(parsed);
+}
+
+static void fav_button(StrBuf *out, const int ind, const int id, const int fav) {
+    sb_appendf(out, "<div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='%s' data-icon='%s' onclick='favItem(this, %d",
+               fav ? "yellow" : "white", fav ? "star" : "star_border", ind);
+    if (id) sb_appendf(out, ", %d", id);
+    sb_append(out, ")'></div>");
+}
+
+// One owned item card of f1828 / Select Skin (weapon: the selectSkin weapon, -1 = fn(ind)), as v10 draws it
+// (deob-10.0.7.js:220893-220897, :223498-223506): a free item has a light grey border, no count and "Default
+// Skin", no season; an item of another class has no click, "Req <class>" and the lock; the star is the
+// favourite's (isFav for both lists).
 static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, const char *fn, const char *img_class, const int with_season, const int weapon) {
     const char *col = rarity_color(s);
+    const int is_free = (s->flags & VS_FREE) != 0, open = skin_class_open(o->ind);
     char img[256];
     skin_thumb(o->ind, img, sizeof(img));
     // styles && m && m.style != null && 0 <= m.style < styles.length: getStylePreview(item, m.style) (deob-10.0.7.js:223502)
@@ -1329,15 +1579,33 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
         skin_style_preview(s, style, path, sizeof path);
         asset(path, img, sizeof img);
     }
-    sb_appendf(out, "<div class='skinCard%s%s' style='color:%s;border:5px solid%s' onmouseenter='playTick()'onclick='%s(%d",
-               s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col, fn, o->ind);
-    if (weapon >= 0) sb_appendf(out, ",%d", weapon);
-    sb_appendf(out, ");cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'><div class='itemCnt' data-badge='x%d'></div>", o->ind, o->cnt);
+    if (is_free) sb_appendf(out, "<div class='skinCard%s' style='border: 5px solid lightgrey' onmouseenter='playTick()'", s->rarity == 5 ? "" : " blackShad");
+    else sb_appendf(out, "<div class='skinCard%s%s' style='color:%s;border:5px solid%s' onmouseenter='playTick()'",
+                    s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col);
+    if (open) {
+        sb_appendf(out, "onclick='%s(%d", fn, o->ind);
+        if (weapon >= 0) sb_appendf(out, ",%d", weapon);
+        sb_append(out, ");cancelTip()' ");
+    } else {
+        sb_append(out, " ");
+    }
+    sb_appendf(out, "data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>", o->ind);
+    if (!is_free) sb_appendf(out, "<div class='itemCnt' data-badge='x%d'></div>", o->cnt);
     sb_append_esc(out, s->name ? s->name : "");
-    sb_append(out, "<div class='itemOwn' style='z-index: 3;position: relative;'>by ");
-    sb_append_esc(out, skin_creator(o->ind));
+    owned_name_tags(out, o->meta);
+    sb_append(out, "<div class='itemOwn' style='z-index: 3;position: relative;'>");
+    if (!open) {
+        char req[96];
+        I18N_F(req, "windows.skins.classOnly", "Req {0}", class_name_at(skin_class_index(o->ind)));
+        sb_append_esc(out, req);
+    } else if (is_free) {
+        sb_append_esc(out, I18N("windows.skins.default", "Default Skin"));
+    } else {
+        sb_append(out, "by ");
+        sb_append_esc(out, skin_creator(o->ind));
+    }
     sb_append(out, "</div>");
-    if (with_season) sb_appendf(out, "<div class='itemSea'>Season %d</div>", s->seas ? s->seas : 1);
+    if (with_season && !is_free) sb_appendf(out, "<div class='itemSea'>Season %d</div>", s->seas ? s->seas : 1);
     sb_appendf(out, "<img loading='lazy' %sclass='%s%s' src='%s' />",
                weapon >= 0 ? "draggable='false' " : "", img_class, (s->flags & VS_RGB) ? " rgbHue" : "", img);
     owned_paint_badge(out, o); // v10.0.3: after the image, before the info button
@@ -1355,8 +1623,10 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
         sb_appendf(out, "' onclick='styleOpen(%d,%d);event.stopPropagation()'><i class='material-icons'>checkroom</i></div>", o->ind,
                    o->copy_id ? o->copy_id : o->ind);
     }
-    sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()'onclick='viewItem(%d)'>?</div><div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='white' data-icon='star_border' onclick='favItem(this, %d)'></div></div>",
-               o->ind, o->ind);
+    sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()'onclick='viewItem(%d)'>?</div>", o->ind);
+    fav_button(out, o->ind, o->copy_id, is_fav(o->ind, o->copy_id));
+    if (!open) sb_append(out, "<div class='lockedSkin'><span class='material-icons' style='font-size: 55px;color:#fff'>lock</span></div>");
+    sb_append(out, "</div>");
 }
 
 // One store spray card of Select Spray (v10:10518334: a free one has a light grey border, no
@@ -1373,8 +1643,18 @@ static void spray_card(StrBuf *out, const PickEntry *e, const ViewerSkin *s) {
     sb_appendf(out, "<div class='noBtnCard%s%s' style='height:158px;%s'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s",
                s->rarity == 5 ? "" : " blackShad", !is_free && rarity_anim(s) ? " rainbow" : "", style, e->ind, e->ind, count);
     sb_append_esc(out, s->name ? s->name : "");
-    sb_appendf(out, "<div class='itemOwn'>%s</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div></div>",
-               is_free ? I18N("windows.spray.default", "Free Spray") : I18N("windows.spray.spin", "Spray"), img, anim);
+    // free ? "Free Spray" : creator ? "by " + creator : "Spray", then the item and favourite buttons, the star
+    // on favList.indexOf(index) (deob-10.0.7.js:220249-220253)
+    sb_append(out, "<div class='itemOwn'>");
+    if (is_free) sb_append(out, I18N("windows.spray.default", "Free Spray"));
+    else if (s->creator && s->creator[0]) {
+        sb_append(out, "by ");
+        sb_append_esc(out, s->creator);
+    } else sb_append(out, I18N("windows.spray.spin", "Spray"));
+    sb_appendf(out, "</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div>", img, anim);
+    sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()'onclick='viewItem(%d)'>?</div>", e->ind);
+    fav_button(out, e->ind, 0, fav_has_ind(e->ind));
+    sb_append(out, "</div>");
 }
 
 static void pick_card(StrBuf *out, const int pos, void *user) {
@@ -1394,8 +1674,9 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
             sb_appendf(out, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>%s</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div>",
                        i, i, BASE_SPRAYS[i].name, I18N("windows.spray.default", "Free Spray"), spray_url, frames ? "animation: sprayAnm4 1.25s steps(4) infinite;" : "");
             // the store's free spray items (2482 + i): their item / favourite buttons as on every card
-            sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()' onclick='viewItem(%d)'>?</div><div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='white' data-icon='star_border' onclick='favItem(this, %d)'></div></div>",
-                       SPRAY_DEFAULT_INDEX + i, SPRAY_DEFAULT_INDEX + i);
+            sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()' onclick='viewItem(%d)'>?</div>", SPRAY_DEFAULT_INDEX + i);
+            fav_button(out, SPRAY_DEFAULT_INDEX + i, 0, fav_has_ind(SPRAY_DEFAULT_INDEX + i));
+            sb_append(out, "</div>");
         } else {
             const ViewerSkin *s = store_skin(e->ind);
             if (s) spray_card(out, e, s);
@@ -1442,6 +1723,7 @@ static char *gen_items_list(const char *fn, const int type) {
         if (s && s->type == type) pick_add_owned(&owned[i]);
     }
     free(owned);
+    pick_fav_first(2, 0);
     StrBuf out = {0};
     sb_append(&out, ITEM_SEARCH_HEAD("2", "") "<div id='skinList' style='overflow-y: scroll;height: calc(100% - 95px);'>");
     pick_list(&out);
@@ -1463,6 +1745,7 @@ static char *gen_skins(void) {
         if (s && !s->type && s->weapon == g_skin_weapon + 1) pick_add_owned(&owned[i]);
     }
     free(owned);
+    pick_fav_first(2, 1);
     StrBuf out = {0};
     sb_appendf(&out, "<div id='itemSearchH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(%d)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><input id='itemSearch' type='text' placeholder='Search Item' onkeyup='searchItems(this)'><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>",
                w && w->secondary ? 19 : 2);
@@ -1497,10 +1780,14 @@ static char *gen_secondary(void) {
             if (unlocked) sb_appendf(&out, " onclick='skinSelector(%d, true)'", i);
             sb_append(&out, ">");
             sb_append_esc(&out, w->name);
-            if (w->min_rec) {
+            // req ? t("windows.secondary." + (open ? "unlocked" : customOnly ? "customOnly" : "req"), minRec)
+            // : "Default" (deob-10.0.7.js:221076-221080): the Grappler (customOnly, no minRec) has a req too
+            const Weapon *rw = rules_weapon(i);
+            if (w->min_rec || (rw && rw->custom_only)) {
                 char lvl[16], own[64];
                 snprintf(lvl, sizeof(lvl), "%d", w->min_rec);
                 if (unlocked) snprintf(own, sizeof(own), "%s", I18N("windows.secondary.unlocked", "Unlocked"));
+                else if (rw && rw->custom_only) snprintf(own, sizeof(own), "%s", I18N("windows.secondary.customOnly", "Customs Only"));
                 else I18N_F(own, "windows.secondary.req", "Req lvl {0}", lvl);
                 sb_appendf(&out, "<div class='itemOwn'>%s</div>", own);
             } else {
@@ -1515,9 +1802,12 @@ static char *gen_secondary(void) {
     return sb_finish(&out);
 }
 
+// weaponConfig[primary].attach != null || the selected primary skin's attachBypass (deob-10.0.7.js:221361,
+// :221384): Select Attachment lists the attachments, Select Reticle offers ADD CUSTOM
 static int class_primary_has_attach(void) {
-    const LoadoutWeapon *w = weapon_at(class_at(menu_ui()->client->menu_class_index).primary);
-    return w && w->attach;
+    const int primary = class_at(menu_ui()->client->menu_class_index).primary;
+    const LoadoutWeapon *w = weapon_at(primary);
+    return (w && w->attach) || skin_attach_bypass(weapon_skin(primary));
 }
 
 // v10 Acog Scope req (v10.js:178111): a dev, or the CLASS level max(1, floor(rankVar * sqrt(stats.c<class>)) + 1)
@@ -1682,30 +1972,37 @@ static char *gen_streaks(void) {
     return sb_finish(&out);
 }
 
-// windows[8] Select Spray: Random, then every spray the player has (free ones first: the
-// default sprays, then v10's other free sprays by store index; then the owned store sprays by
-// rarity), with their frame animations.
+// windows[8] Select Spray (deob-10.0.7.js:220243-220256): Random, then getSkins(account, true)'s sprays
+// sorted by rarity (descending, stable: the owned store sprays in account order, then the free ones by
+// store index, KrunkNative's default sprays among them), then the favourites first; with their frame
+// animations.
 static char *gen_sprays(void) {
     StrBuf style = {0};
     int frames_seen[16], frames_n = 0;
     pick_begin(PICKER_SPRAY, "selectSpray", "", 4);
     pick_add(PICK_RANDOM, -2, 0);
-    for (int i = 0; i < SPRAYS_BASE_COUNT; i++) {
-        if (BASE_SPRAYS[i].id == 88 && frames_n < 16) { // Verb: 4 frames x 250 ms
-            sb_appendf(&style, "@keyframes sprayAnm%d {100%%{background-position:-%dpx}}", 4, 4 * 110);
-            frames_seen[frames_n++] = 4;
-        }
-        pick_add(PICK_FREE_SPRAY, i, 0);
-    }
     int n;
     OwnedSkin *owned = owned_skins(&n, 1);
-    // v10's other free sprays (Poisn, Chwoubaka, ...), then the owned ones; a free spray an
-    // account owns (offline mode: all) is listed once, with the free ones
+    // the owned ones (by rarity), then the free ones; a free spray an account owns (offline mode: all)
+    // is listed once, with the free ones
     for (int pass = 0; pass < 2; pass++) {
-        for (int i = 0; i < (pass ? n : g_viewer_skin_count); i++) {
-            const int ind = pass ? owned[i].ind : i;
+        for (int i = 0; i < (pass ? g_viewer_skin_count : n); i++) {
+            const int ind = pass ? i : owned[i].ind;
+            if (pass && ind >= SPRAY_DEFAULT_INDEX && ind < SPRAY_DEFAULT_INDEX + SPRAYS_BASE_COUNT) {
+                const int b = ind - SPRAY_DEFAULT_INDEX;
+                if (BASE_SPRAYS[b].id == 88 && frames_n < 16) { // Verb: 4 frames x 250 ms
+                    int seen = 0;
+                    for (int k = 0; k < frames_n; k++) seen |= frames_seen[k] == 4;
+                    if (!seen) {
+                        sb_appendf(&style, "@keyframes sprayAnm%d {100%%{background-position:-%dpx}}", 4, 4 * 110);
+                        frames_seen[frames_n++] = 4;
+                    }
+                }
+                pick_add(PICK_FREE_SPRAY, b, 0);
+                continue;
+            }
             const ViewerSkin *s = store_skin(ind);
-            if (!s || s->type != 4 || (pass ? free_spray(s) : !free_store_spray(ind))) continue;
+            if (!s || s->type != 4 || (pass ? !free_store_spray(ind) : free_spray(s))) continue;
             if (s->frames) { // UTILS.getFrameAnim(b7, "sprayAnm") and its @keyframes
                 int seen = 0;
                 for (int k = 0; k < frames_n; k++) seen |= frames_seen[k] == s->frames;
@@ -1714,10 +2011,12 @@ static char *gen_sprays(void) {
                     frames_seen[frames_n++] = s->frames;
                 }
             }
-            pick_add(PICK_OWNED, ind, pass ? owned[i].cnt : 1);
+            if (pass) pick_add(PICK_OWNED, ind, 1);
+            else pick_add_owned(&owned[i]);
         }
     }
     free(owned);
+    pick_fav_first(1, 1);
     char *st = sb_finish(&style);
     StrBuf out = {0};
     if (st[0]) sb_appendf(&out, "<style>%s</style>", st);
@@ -2251,9 +2550,12 @@ int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             return 1;
         }
     }
-    // item tooltips (ui_tooltip.c); favourites and the item view are store features KrunkNative leaves out
+    // item tooltips (ui_tooltip.c)
     if (!strcmp(name, "createTip") || !strcmp(name, "cancelTip") || !strcmp(name, "createStreakTip") || !strcmp(name, "createSpinHistoryTip")) return ui_tooltip_handle(name, ev, args, argc); // ui_tooltip.c
-    if (!strcmp(name, "favItem")) return 1;
+    if (!strcmp(name, "favItem")) { // favItem(this, index[, id])
+        fav_item(ev, harg_int(args, argc, 1, -1), harg_int(args, argc, 2, 0));
+        return 1;
+    }
     return -1;
 }
 

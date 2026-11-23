@@ -17,6 +17,8 @@ static struct {
     int loaded;
     StoreSpray *items; // sorted by index
     int count;
+    unsigned char *free_items; // store_item_free, one per store index
+    int item_count;
 } g_store_sprays;
 
 static void store_sprays_load(void) {
@@ -48,8 +50,14 @@ static void store_sprays_load(void) {
         cJSON_Delete(json);
         return;
     }
+    const int total = cJSON_GetArraySize(json);
+    g_store_sprays.free_items = calloc((size_t) (total > 0 ? total : 1), 1);
+    g_store_sprays.item_count = g_store_sprays.free_items ? total : 0;
     cJSON_ArrayForEach(item, json) {
         const int at = index++;
+        if (at < g_store_sprays.item_count)
+            g_store_sprays.free_items[at] = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "free")) &&
+                                            !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "blocked"));
         const cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
         if (!cJSON_IsNumber(type) || type->valueint != SPRAY_ITEM_TYPE) continue;
         const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
@@ -80,6 +88,11 @@ const StoreSpray *store_spray(const int index) {
         else hi = mid - 1;
     }
     return NULL;
+}
+
+int store_item_free(const int index) {
+    store_sprays_load();
+    return index >= 0 && index < g_store_sprays.item_count && g_store_sprays.free_items[index];
 }
 
 int store_spray_from_legacy(const int index) {

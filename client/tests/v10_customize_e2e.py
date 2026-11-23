@@ -123,6 +123,83 @@ def db(path, sql, args=()):
         con.close()
 
 
+def set_storage(key, value):
+    folder = os.path.join(WORK, "cfg", "krunknative")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, key + ".json")
+    if value is None:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    with open(path, "w") as f:
+        f.write(value)
+
+
+def rect_indices(log, label):
+    m = re.search(r"\[input_script\] rects t=\d+ @%s n=\d+(.*)" % re.escape(label), log)
+    return [tok.split("@", 1)[0] for tok in m.group(1).split()] if m else []
+
+
+def grep_hits(log, label):
+    m = re.search(r"\[input_script\] grep t=\d+ @%s .*hits=(\d+)" % re.escape(label), log)
+    return int(m.group(1)) if m else -1
+
+
+def guest_picks(brain_url, game_port):
+    """Round 6 (deob-10.0.7.js): a guest's pickers. getSkins(account, true) gives everyone the free items
+    (:217752-217795): the 14 class faces (Triggerman 4544 .. Infiltrator 5234, classIndex) in Select Face, each
+    locked unless its class is selected ("Req <class>", the lockedSkin overlay: :223500-223505); favItem stars a
+    card, saves krk_favList and the next list puts it first (:223687, :223501); Select Spray's cards carry the item
+    and favourite buttons (:220249-220253); the Grappler's caption is "Customs Only" (:221076-221080); without
+    premium the hat + head pair blocks the hat (:222484-222516)."""
+    set_storage("krk_favList", None)
+    set_storage("hatIndex", "111")
+    set_storage("headIndex", "6044")
+    log = run_client("guest-picks", """0 menu
+1500 call showWindow 39
+2500 rects @faces .skinCard[data-index]
+2550 rects @locked .lockedSkin
+2600 rects @open .skinCard[onclick*="selectFace(4544)"]
+2650 grep @req Req .skinCard
+2700 grep @dflt Default .skinCard[data-index]
+2800 clicksel .skinCard[data-index="4550"] .selctFavBtn
+3300 attr @star data-icon .skinCard[data-index="4550"] .selctFavBtn
+3350 call closWind
+3500 call showWindow 39
+4400 rects @faces2 .skinCard[data-index]
+4500 call showWindow 9
+5500 rects @sprayfav .noBtnCard .selctFavBtn
+5600 rects @sprayinfo .noBtnCard .selctInfoBtn
+5700 call showWindow 20
+6700 grep @grap Customs .skinCard
+6800 call showWindow 3
+7300 clicksel [onclick*="tabIndex=2"]
+8300 rects @prem .custPremReq
+8400 grep @remove Remove .custPremReq
+8500 quit
+""", brain_url, game_port)
+    faces = rect_indices(log, "faces")
+    check("guest: Select Face lists the free class faces (getSkins(account, true))",
+          "4544" in faces and "4550" in faces and len(faces) >= 8, "faces=%s" % faces)
+    check("guest: only the selected class's face is open (Triggerman), the others locked with Req <class>",
+          count(log, "open") == 1 and count(log, "locked") == len(faces) - 1 and grep_hits(log, "req") == len(faces) - 1,
+          "open=%d locked=%d req=%d" % (count(log, "open"), count(log, "locked"), grep_hits(log, "req")))
+    check("guest: a free item's caption is Default Skin", grep_hits(log, "dflt") >= 1, "hits=%d" % grep_hits(log, "dflt"))
+    m = re.search(r"\[input_script\] attr t=\d+ @star n=\d+ data-icon=(\S+)", log)
+    check("favItem: the star turns on", bool(m) and m.group(1) == "star", m.group(0) if m else "no attr")
+    check("favItem: krk_favList holds the index", storage("krk_favList") == [4550], "krk_favList=%r" % storage("krk_favList"))
+    faces2 = rect_indices(log, "faces2")
+    check("the favourite comes first in the list", bool(faces2) and faces2[0] == "4550", "faces=%s" % faces2)
+    check("Select Spray: every card has the item and favourite buttons",
+          count(log, "sprayfav") > 10 and count(log, "sprayfav") == count(log, "sprayinfo"),
+          "fav=%d info=%d" % (count(log, "sprayfav"), count(log, "sprayinfo")))
+    check("Select Secondary: the Grappler says Customs Only", grep_hits(log, "grap") == 1, "hits=%d" % grep_hits(log, "grap"))
+    check("Customize, no premium: hat + head blocks the hat (Remove Head)", count(log, "prem") == 1 and grep_hits(log, "remove") == 1,
+          "prem=%d remove=%d" % (count(log, "prem"), grep_hits(log, "remove")))
+    for key in ("krk_favList", "hatIndex", "headIndex"):
+        set_storage(key, None)
+
+
 def scenario(brain_url, game_port, dbpath):
     # 0. a guest online: the Class tab opens every class. v10 locks a class below its level (req _34270), but
     #    Box Office only does that in an official krunker.io game (8de2fe8c, ui_loadout.c gen_tab_class), which
@@ -312,6 +389,7 @@ def main():
                         break
             except OSError:
                 time.sleep(0.1)
+        guest_picks(brain_url, game_port)
         scenario(brain_url, game_port, dbpath)
         daily_spin(brain_url, game_port, dbpath)
     except Exception as e:  # noqa: BLE001

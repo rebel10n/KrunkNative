@@ -97,6 +97,8 @@ typedef struct {
 // A SPRAY item of the store table (loaded from assets/skins.json at the first call), NULL for
 // anything else or when the table cannot be read.
 const StoreSpray *store_spray(int index);
+// store.skins[index].free && !blocked: an item everyone has (getSkins(account, true), deob-10.0.7.js:217752)
+int store_item_free(int index);
 // ENT sprayIndex of older KrunkNative clients: 0..52 named v3.1.1's Game.sprays, which v7.1.4 sells
 // as the free store items 2482..2534 (same textures). Every other index is returned unchanged.
 int store_spray_from_legacy(int index);
