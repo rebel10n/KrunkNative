@@ -295,7 +295,8 @@ def main():
         check("SUCCESS" in (hub.text_of(".responsePop") or ""), "Give Badge: the SUCCESS popup shows")
         hub.ui("clearPops()")
         time.sleep(1.0)
-        check("Legacy Challenger" in (hub.text_of("pTabContent_badges") or ""),
+        # v10's badge cards are images (hub-10.0.7.js:2970-2979): the card of badge 0, its name only in the tip
+        check(hub.count("#pTabContent_badges .badgeCard[data-index='0']") == 1,
               "the profile's Badges tab lists the badge after Give (the page reloaded)")
         hub.click("badgeBtn")
         check(hub.visible("declineBtn"), "Remove is offered in the badge popup")
@@ -342,12 +343,15 @@ def main():
         hub.ui("updateWindow('profile','%s')" % tgt_n)
         time.sleep(2.0)
         check(hub.count(".onStatProf[title=\"Online\"]") == 1, "back on the online target: the dot is Online again")
-        hub.ui("startChat(%d,0,'%s',null,1)" % (tgt, tgt_n))
+        # the chat header shows startChat's own status argument (hub-10.0.7.js:2249-2255): a friend row passes its raw sm,
+        # and none (or "undefined") reads Offline whatever the peer's presence
+        hub.ui("startChat(%d,0,'%s',null,1,'In game','')" % (tgt, tgt_n))
         time.sleep(2.0)
-        check(hub.text_of("chatStatus") == "Online", "chat header: the peer reads Online")
-        hub.ui("startChat(%d,0,'%s',null,1)" % (offline, off_n))
+        check((hub.text_of("#chatWithHead") or "") == tgt_n + "In game" and hub.count("#chatWithHead .frndQickJoin") == 0,
+              "chat header: the status passed (In game), no Join without a game: %r" % hub.text_of("#chatWithHead"))
+        hub.ui("startChat(%d,0,'%s',null,1,'undefined','')" % (offline, off_n))
         time.sleep(2.0)
-        check(hub.text_of("chatStatus") == "Offline", "chat header: a signed-out peer reads Offline")
+        check((hub.text_of("#chatWithHead") or "") == off_n + "Offline", "chat header: sm undefined reads Offline")
         hub.shot("chat-status")
 
         # ---- the KR giveaway switch of the post box (togglPos)

@@ -577,6 +577,17 @@ int app_mode_page_ready(Client *client) {
     return g_app.page->ready ? g_app.page->ready(client) : 1;
 }
 
+void app_set_page_title(const char *title) {
+    if (!title) return;
+    const HtmlElem t = html_dom_query(0, "title");
+    if (t) html_dom_set_text(t, title);
+#ifdef __EMSCRIPTEN__
+    emscripten_set_window_title(title);
+#else
+    if (g_app.client && g_app.client->window) glfwSetWindowTitle(g_app.client->window, title);
+#endif
+}
+
 int app_mode_frame(Client *client, const float now, const float delta) {
     g_app.client = client;
 #ifndef __EMSCRIPTEN__

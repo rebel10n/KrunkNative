@@ -736,6 +736,7 @@ static void sb_pfp(StrBuf *sb, const double id, const int cond, const char *fall
 static cJSON *g_friends; // the last "chtb" rows, online first (owned; the hub chat below)
 static double jnum(const cJSON *o, const char *key);
 static const char *jstr(const cJSON *o, const char *key);
+static void hub_title(const char *name, int escape, const char *suffix);
 
 // config.mapTabs / config.modTabs (v7.1.4). `api` is the /api/maps|mods `index` the
 // KrunkNative server and kn_brain answer (shared/src/social.c, services/brain/creations.c:
@@ -1407,6 +1408,15 @@ static void readable_time(char *out, const size_t n, const double ms) {
     snprintf(out, n, "%s%s%s%lldm ", yp, dp, hp, m);
 }
 
+// the offers' and reports' age (config-10.0.7.js:4342-4361, used at hub-10.0.7.js:2665, 4185): the largest unit only
+static void time_ago(char *out, const size_t n, const double ms) {
+    const long long m = ms < 0 ? 0 : (long long) floor(ms / 60000.0), h = m / 60, d = h / 24;
+    if (d) snprintf(out, n, "%lldd ago", d);
+    else if (h) snprintf(out, n, "%lldh ago", h);
+    else if (m) snprintf(out, n, "%lldm ago", m);
+    else snprintf(out, n, "just now");
+}
+
 // UTILS.commaFloat(n): commas in the integer part only
 static void comma_float(char *out, const size_t n, const char *num) {
     const char *dot = strchr(num, '.');
@@ -1848,8 +1858,6 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
             }
             const char *img = jstr(r, i == 0 ? "map_image" : "mod_image");
             const char *open = i == 0 ? "openMap" : "openMod";
-            const char *by = row_str2(r, "ctn", "creatorname");
-            if (!by) by = g_hub.profile_name;
             char votes[32];
             js_num(votes, sizeof(votes), row_num2(r, "vte", i == 0 ? "map_votes" : "mod_votes"));
             sb_append(&sb, "<div class='mapListThumbHolder' style='width:204px;height:90px;'><img draggable='false' class='mapListThumb' loading='lazy' style='width:204px;height: 90px;' src='");
@@ -1860,11 +1868,7 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
             sb_append_js_escape(&sb, nm);
             sb_append(&sb, "&quot;)'/>");
             sb_append_served(&sb, nm);
-            sb_append(&sb, "</a></div><div style='margin-top:1px;display: block;color: rgba(255,255,255,0.2);font-size: 15px;text-align: left;'>by <span onclick='openProfile(&quot;");
-            sb_append_esc(&sb, by);
-            sb_append(&sb, "&quot;)' style='color: rgba(255,255,255,0.6);'>");
-            sb_append_esc(&sb, by);
-            sb_append(&sb, "</span></div></div>");
+            sb_append(&sb, "</a></div></div>"); // no creator line: the profile is the creator's (hub-10.0.7.js:3023, 3066)
         }
         if (!any) sb_appendf(&sb, "<div class='noneText'>%s</div>", i18n_tr(nones[i][0], nones[i][1]));
         sb_append(&sb, "</div>");
@@ -2390,6 +2394,9 @@ static void append_skin_img(StrBuf *sb, const ViewerSkin *s, const char *preview
     }
 }
 
+// the open black-market popup's purchase key (KrunkNative: the pbm op's idempotency key, one per popup)
+static char g_pbm_key[48];
+
 // store.skins entries with `illicit` / blackM: the black market, econ_black_market() (economy_client.c, shared with
 // the v10 popup; generated from assets/skins.json), each with its store.checkReq rule.
 typedef EconBlackMarketItem IllicitSkin;
@@ -2545,6 +2552,41 @@ static int g_offer_count;
 static cJSON *g_trades_cache; // the last trade page (loadMoreTradeHistory draws it again)
 static int g_his_page = TRADE_HISTORY_PAGE, g_his_keep;
 
+static int cmp_offer_ids(const void *pa, const void *pb);
+
+// iíîììîì's onclick strings (hub-10.0.7.js:2661-2665): text between &quot;s in a single-quoted attribute; the
+// backslash doubled as v10 does for the name, and (KrunkNative) a quote escaped so a message with one still opens
+static void sb_offer_arg(StrBuf *b, const char *v) {
+    for (const char *c = v; c && *c; c++) {
+        if (*c == '\\') sb_append(b, "\\\\");
+        else if (!strncmp(c, "&quot;", 6)) {
+            sb_append(b, "\\&quot;");
+            c += 5;
+        } else if (*c == '\'') sb_append(b, "&#39;");
+        else sb_appendf(b, "%c", *c);
+    }
+}
+
+// iìíiïií(items, currencies, sprays, most) (hub-10.0.7.js:2605-2645): one side of an offer row
+static void offer_row_side(StrBuf *b, const int *ids, const int n, const int most, const double kr) {
+    for (int i = 0; i < n; i++) {
+        const ViewerSkin *pa = hub_skin(ids[i]);
+        if (!pa) continue;
+        char prev[256];
+        skin_preview(prev, sizeof(prev), pa);
+        sb_appendf(b, "<div class='oItemHolder%s'style='border: 2px solid %s;'data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>",
+                   g_hub.rarity_anim && rarity_animate(pa) ? " rainbowBorder" : "", rarity_color(pa), ids[i]);
+        append_skin_img(b, pa, prev, "oItemSprayImg", "oItemImg");
+        sb_append(b, "</div>");
+    }
+    for (int i = 0; i < (most + 4) / 5 * 5 - n; i++) sb_append(b, "<div class='oItemHolder' style='border: 2px solid rgba(0,0,0,0);'><div draggable='false' class='oItemImg'></div></div>");
+    if (kr > 0) { // csell / cbuy [{cid: 1, amt}]: kn_brain's krsell / krbuy
+        char v[32];
+        comma_number(v, sizeof(v), kr);
+        sb_appendf(b, "<div class='oCurrencyLine'><span class='oCurrencyItem'>+%s KR</span></div>", v);
+    }
+}
+
 static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
     const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (t != g_trades_cache) {
@@ -2577,96 +2619,90 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
                 his_more = 1;
                 continue;
             }
-            int ids[2][16], counts[2] = {0, 0};
+            // UTILS.splitIds, sorted as iiîíïií sorts them (rarity, season, index)
+            int ids[2][64], counts[2] = {0, 0};
             const char *lists[2] = {give, take};
             for (int k = 0; k < 2; k++) {
-                for (const char *p = lists[k]; p && *p && counts[k] < 16;) {
-                    ids[k][counts[k]++] = atoi(p);
-                    p = strchr(p, ',');
-                    if (p) p++;
+                for (const char *q = lists[k]; q && *q && counts[k] < 64;) {
+                    if (*q != ',') ids[k][counts[k]++] = atoi(q);
+                    q = strchr(q, ',');
+                    if (q) q++;
                 }
+                qsort(ids[k], (size_t) counts[k], sizeof(int), cmp_offer_ids);
             }
             const int be = counts[0] > counts[1] ? counts[0] : counts[1];
             fe[we]++;
             StrBuf *b = &pe[we];
             const int trid = (int) jnum(o, "trid");
             const double kr_give = jnum(o, he ? "krsell" : "krbuy"), kr_take = jnum(o, he ? "krbuy" : "krsell");
+            const char *m = jstr(o, "message");
             if (g_offers) {
                 HubOffer *of = &g_offers[g_offer_count++];
                 of->trid = trid;
                 of->we = we;
                 snprintf(of->name, sizeof(of->name), "%s", name);
-                // UTILS.splitIds: every id (counts[] stop at 16 for the row's thumbnails)
-                for (int k = 0; k < 2; k++) {
-                    int *dst = k ? of->take : of->give, *nd = k ? &of->ntake : &of->ngive;
-                    for (const char *q = lists[k]; q && *q && *nd < 64;) {
-                        if (*q != ',') dst[(*nd)++] = atoi(q);
-                        q = strchr(q, ',');
-                        if (q) q++;
-                    }
-                }
+                memcpy(of->give, ids[0], sizeof(of->give));
+                memcpy(of->take, ids[1], sizeof(of->take));
+                of->ngive = counts[0];
+                of->ntake = counts[1];
                 of->kr_give = kr_give;
                 of->kr_take = kr_take;
-                const char *m = jstr(o, "message");
                 of->message = m && *m ? strdup(m) : NULL;
             }
-            sb_appendf(b, "<div class='offerHolder' %s id='of_%d' onclick='viewOffer(%d,%d)'>",
-                       we == 0 && counts[1] == 0 ? "style='background-color:#ffb2b2'" : we == 0 && counts[0] == 0 ? "style='background-color:#C4F399'" : "", trid, trid, we);
+            // iíîììîì(offer, we, acc) (hub-10.0.7.js:2646-2675)
+            sb_appendf(b, "<div class='offerHolder' style='%s' id='of_%d' onclick='viewOffer(%d,%d,&quot;",
+                       we == 0 && counts[1] == 0 ? "background-color:#ffb2b2" : we == 0 && counts[0] == 0 ? "background-color:#C4F399" : "", trid, trid, we);
+            char *ename = NULL;
+            {
+                StrBuf e = {0};
+                sb_append_esc(&e, name);
+                ename = sb_finish(&e);
+            }
+            sb_offer_arg(b, ename);
+            for (int k = 0; k < 2; k++) {
+                sb_append(b, "&quot;,&quot;");
+                for (int i = 0; i < counts[k]; i++) sb_appendf(b, i ? ",%d" : "%d", ids[k][i]);
+            }
+            sb_append(b, "&quot;");
+            if (m && *m) {
+                sb_append(b, ",&quot;");
+                sb_offer_arg(b, m); // html-escaped by kn_brain
+                sb_append(b, "&quot;");
+            }
+            sb_append(b, ")'>");
             if (we != 2) sb_appendf(b, "<div class='material-icons offerCancel' onclick='fastDeclOffer(%d)'>clear</div>", trid);
             char ago[48] = "just now";
             const double dte = jnum(o, "dte"); // kn_brain: epoch ms (sent / closed)
-            if (dte > 0 && now_epoch_ms() - dte > 60000) {
-                char rt[40];
-                readable_time(rt, sizeof(rt), now_epoch_ms() - dte);
-                snprintf(ago, sizeof(ago), "%s ago", rt);
-            }
-            sb_appendf(b, "<div class='offerDate'%s>%s</div><div class='offerFrom'>Offer %s <span id='oProf' onclick='openLink(&quot;/social.html?p=profile&q=", we == 2 ? " style='right:11px;'" : "", ago, he ? "to" : "from");
-            sb_append_esc(b, name);
+            if (dte > 0) time_ago(ago, sizeof(ago), now_epoch_ms() - dte);
+            sb_appendf(b, "<div class='offerDate'%s>%s</div><div class='offerFrom'>%sOffer %s <span id='oProf' onclick='openLink(&quot;/social.html?p=profile&q=", we == 2 ? " style='right:11px;'" : "", ago,
+                       m && *m && !he ? "<span class='material-icons offerMsg'>markunread</span>" : "", he ? "to" : "from");
+            sb_append(b, ename);
             sb_append(b, "&quot;, &quot;_blank&quot;)'>");
-            sb_append_esc(b, name);
-            sb_append(b, "</span></div>");
-            for (int k = 0; k < 2; k++) {
-                sb_append(b, "<div class='offerContents'>");
-                for (int i = 0; i < counts[k]; i++) {
-                    const ViewerSkin *pa = hub_skin(ids[k][i]);
-                    if (!pa) continue;
-                    char prev[256];
-                    skin_preview(prev, sizeof(prev), pa);
-                    sb_appendf(b, "<div class='oItemHolder'style='border: 2px solid %s;'data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>",
-                               rarity_color(pa), ids[k][i]);
-                    append_skin_img(b, pa, prev, "oItemSprayImg", "oItemImg");
-                    sb_append(b, "</div>");
-                }
-                for (int i = 0; i < (be > 5 ? 10 : 5) - counts[k]; i++) sb_append(b, "<div class='oItemHolder' style='border: 2px solid rgba(0,0,0,0);'><div draggable='false' class='oItemImg'></div></div>");
-                const double kr = k ? kr_take : kr_give; // KrunkNative: KR in the offer
-                if (kr > 0) {
-                    char v[32];
-                    comma_number(v, sizeof(v), kr);
-                    sb_appendf(b, "<div style='font-size:14px;color:#FBC02D'>+ %s KR</div>", v);
-                }
-                sb_append(b, "</div>");
-                if (k == 0) sb_append(b, "<div class='oSwapHolder'><div class='material-icons oSwapIcon'>swap_horiz</div></div>");
-            }
-            sb_append(b, "</div>");
+            sb_append(b, ename);
+            free(ename);
+            sb_append(b, "</span></div><div class='offerContents'>");
+            offer_row_side(b, ids[0], counts[0], be, kr_give);
+            sb_append(b, "</div><div class='oSwapHolder'><div class='material-icons oSwapIcon'>swap_horiz</div></div><div class='offerContents'>");
+            offer_row_side(b, ids[1], counts[1], be, kr_take);
+            sb_append(b, "</div></div>");
         }
     }
     static const char *const ids[3] = {"in", "out", "his"};
     static const char *const heads[3][2] = {{"social.trades.in.head", "Incoming Offers ({0})"}, {"social.trades.out.head", "Outgoing Offers ({0})"},
                                             {"social.trades.history.head", "Trade History ({0})"}};
-    sb_append(out, "<div class='scrollItem' id='offers'><div id='tradeNav'><div class='tradeNavBtn' style='background-color: rgba(0, 0, 0, 0.5);' onclick='updateTrades(&quot;in&quot;)' id='tn_in'>Incoming</div><div class='tradeNavBtn' id='tn_out' onclick='updateTrades(&quot;out&quot;)'>Outgoing</div><div class='tradeNavBtn' id='tn_his' onclick='updateTrades(&quot;his&quot;)'>History</div></div>");
+    // iiîiïií(trades, acc, more) (hub-10.0.7.js:2677-2714): the three columns side by side, no tabs
     for (int i = 0; i < 3; i++) {
-        char count[32], head[128], decline[128] = "";
-        snprintf(count, sizeof(count), "<span>%d</span>", fe[i]);
+        char count[64], head[160], decline[128] = "";
+        snprintf(count, sizeof(count), "<span%s style='color:#9f9f9f'>%d</span>", i == 2 ? " id='hisCnt'" : "", fe[i]);
         i18n_trf(head, sizeof(head), heads[i][0], heads[i][1], 1, I18N_ARGV(count));
         if (i == 0) snprintf(decline, sizeof(decline), "<div class='declineAll' onclick='declineAllTrades();'>%s</div>", I18N("social.trades.decline", "Decline All"));
-        sb_appendf(out, "<div id='o_%s'%s><div style='margin-bottom:10px;margin-top:-4px;'>%s%s</div>", ids[i], i ? " style='display:none'" : "", head, decline);
+        sb_appendf(out, "<div class='offers scrollItem' id='o_%s'><div style='margin-bottom:10px;margin-top:-4px;color:#9f9f9f'>%s%s</div>", ids[i], head, decline);
         char *body = sb_finish(&pe[i]);
         sb_append(out, body[0] ? body : "<div style='color: rgba(0,0,0,0.6);font-size: 17px;'>None</div>");
+        if (i == 2 && his_more && body[0]) sb_append(out, "<div class='offerHolder loadMoreHis' onclick='loadMoreTradeHistory()' style='text-align: center;'>Load More</div>");
         free(body);
-        if (i == 2 && his_more) sb_append(out, "<div class='offerHolder loadMoreHis' onclick='loadMoreTradeHistory()' style='text-align: center;'>Load More</div>");
         sb_append(out, "</div>");
     }
-    sb_append(out, "</div>");
 }
 
 // One market / inventory / sales card (row v of g_market_rows; showPopup reads it back).
@@ -2834,6 +2870,7 @@ static void hub_render_itemsales(const cJSON *t, const cJSON *owners) {
     }
     const int ind = row_int(t, "ind", NULL, NULL, 0);
     set_display("itemsalesList", "block");
+    if (pe->name) hub_title(pe->name, 0, " Skin - Krunker Hub");
     char prev[256], a[32], b[32];
     skin_preview(prev, sizeof(prev), pe);
     const char *col = rarity_color(pe);
@@ -3362,9 +3399,8 @@ static void market_popup_html(StrBuf *out, const MarketPop *p) {
         sb_appendf(&sb, "<div class='pItemPricing'><div class='priceP'>%s <span style='color:#fff'>KR</span></div><div class='priceP'>-%s <span style='color:#fff'>KR</span></div><div class='pricePF' style='%s'>%s <span style='color:#fff'>KR</span></div></div>",
                    a, b, left < 0 ? "color:#ed4242" : "", c);
         sb_appendf(&sb, "<div class='pItemButton' style='%s' ", block ? "background-color:#2b2b2b" : left < 0 ? "background-color:#ed4242" : "");
-        char key[48];
-        econ_new_op(key, sizeof(key), "pbm"); // one purchase per popup, however often YES is clicked
-        if (!block && left >= 0) sb_appendf(&sb, "onclick='buyIllicit(%d, &quot;%s&quot;)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", p->skin, key);
+        econ_new_op(g_pbm_key, sizeof(g_pbm_key), "pbm"); // one purchase per popup, however often it is clicked
+        if (!block && left >= 0) sb_appendf(&sb, "onclick='buyblackM(%d)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", p->skin);
         sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? I18N("social.market.cant", "Can't Afford") : I18N("social.market.purchase", "Purchase"));
     } else if (!strcmp(p->page, "sales")) {
         comma_number(a, sizeof(a), atof(p->funds));
@@ -3634,6 +3670,24 @@ static int hub_market_frame(const char *label, const cJSON *frame) {
 // The v7 item list (io_0 "items": the whole store table, client side)
 static void items_page(const char *a, const char *k);
 
+// iíïïiìi(title) (hub-10.0.7.js:7136-7141): document.title, "Krunker Hub" by default; a page's own title is
+// "<name><suffix>", the name escaped as v10's (config's `am`: a backslash before \, " and ')
+static void hub_title(const char *name, const int escape, const char *suffix) {
+    if (!name) {
+        app_set_page_title("Krunker Hub");
+        return;
+    }
+    StrBuf sb = {0};
+    for (const char *c = name; *c; c++) {
+        if (escape && (*c == '\\' || *c == '"' || *c == '\'')) sb_append(&sb, "\\");
+        sb_appendf(&sb, "%c", *c);
+    }
+    sb_append(&sb, suffix);
+    char *title = sb_finish(&sb);
+    app_set_page_title(title ? title : "Krunker Hub");
+    free(title);
+}
+
 // io_0(e, a, t, ...): one page's data arrived
 static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extra) {
     char key[HUB_KEY_MAX * 2];
@@ -3641,6 +3695,7 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
     if (g_hub.has_s && strcmp(g_hub.S, key) != 0) return;
     if (!e) return;
     const int has_t = t && !cJSON_IsNull(t);
+    hub_title(NULL, 0, NULL); // the page's own title below
     hide_all(0);
     set_display("loadMessage", "none");
     const HtmlElem title = el("navTitle");
@@ -3656,18 +3711,23 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
     } else if (!strcmp(e, "mods")) {
         set_display("modsHolder", "block");
         list_update(1);
+        hub_title("Mods", 0, " - Krunker Hub");
     } else if (!strcmp(e, "mod") || !strcmp(e, "map")) {
         const int is_mod = !strcmp(e, "mod");
         side_boxes();
         set_display(is_mod ? "modHolder" : "mapHolder", "block");
         hub_render_creation(is_mod, has_t ? t : NULL);
+        const char *cname = has_t && cJSON_IsObject(t) ? jstr(t, is_mod ? "mod_name" : "map_name") : NULL;
+        if (cname) hub_title(cname, 1, " - Krunker Hub");
     } else if (!strcmp(e, "maps")) {
         set_display("mapsHolder", "block");
         list_update(0);
+        hub_title("Games", 0, " - Krunker Hub");
     } else if (!strcmp(e, "leaders")) {
         side_boxes();
         set_display("leaderHolder", "block");
         hub_render_leaders(a, has_t ? t : NULL); // no leaderboard rows offline: an empty list
+        if (has_t) hub_title("Leaderboards", 0, " - Krunker Hub");
     } else if (!strcmp(e, "market")) {
         set_display("marketHolder", "block");
         set_display("invSortB", a && !strcmp(a, "inventory") ? "table-cell" : "none");
@@ -3678,6 +3738,7 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
         else set_market_note("marketList", STR_MARKET_LOGIN);
     } else if (!strcmp(e, "items")) {
         items_page(a, g_hub.k);
+        hub_title("Skin List", 0, " - Krunker Hub");
     } else if (!strcmp(e, "itemsales") && g_hub.brain) {
         hub_render_itemsales(has_t ? t : NULL, cJSON_GetArrayItem(extra, 4));
     } else if (!strcmp(e, "itemsales")) {
@@ -3694,6 +3755,11 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
         side_boxes();
         set_display("clanHolder", "block");
         if (g_hub.brain && has_t && cJSON_IsObject(t)) hub_render_clan(t);
+        if (has_t && cJSON_IsObject(t) && jstr(t, "clan_name")) {
+            char clan[96];
+            snprintf(clan, sizeof(clan), "[%s", jstr(t, "clan_name"));
+            hub_title(clan, 0, "] Clan - Krunker Hub");
+        }
     } else if (!strcmp(e, "feed")) {
         set_display("feedHolder", "block");
         set_display("postEntryC", g_hub.logged_in ? "inline-block" : "none"); // acc ? inline-block : none
@@ -3750,18 +3816,21 @@ static const char *friend_status(const cJSON *r) {
     return sm && *sm ? sm : "Online";
 }
 
-// startChat(fid, 0, name, picture, 1, status, game) for a friend row; the picture is a subscriber's, else ""
+// startChat(fid, 0, name, picture, 1, `sm`, `gid`) for a friend row (hub-10.0.7.js:2340, 5337): the picture is a
+// subscriber's, else ""; the status is the row's raw sm, "undefined" without one (the header then says Offline, also
+// for an online friend without a status text, as in v10)
 static void friend_chat_call(StrBuf *sb, const cJSON *r) {
     const char *fna = jstr(r, "fna") ? jstr(r, "fna") : "", *gid = jstr(r, "gid") ? jstr(r, "gid") : "";
+    const char *sm = jstr(r, "sm");
     sb_appendf(sb, "startChat(%d,0,&quot;", (int) jnum(r, "fid"));
     sb_append_js_escape(sb, fna);
     sb_append(sb, "&quot;,&quot;");
     sb_pfp(sb, jnum(r, "fid"), jnum(r, "sub") != 0, "");
-    sb_append(sb, "&quot;,1,&quot;");
-    sb_append_js_escape(sb, jnum(r, "st") ? friend_status(r) : "");
-    sb_append(sb, "&quot;,&quot;");
+    sb_append(sb, "&quot;,1,`");
+    sb_append_js_escape(sb, sm ? sm : "undefined");
+    sb_append(sb, "`,`");
     sb_append_js_escape(sb, gid);
-    sb_append(sb, "&quot;)");
+    sb_append(sb, "`)");
 }
 
 static int friend_order(const cJSON *a, const cJSON *b) { return (int) jnum(b, "st") - (int) jnum(a, "st"); }
@@ -4041,20 +4110,6 @@ static void hub_action_result(const int ok, const char *text) {
     request_page();
 }
 
-// chat header presence: ["chs", {id, st, sm}] for the open conversation
-static void chat_status_frame(const cJSON *s) {
-    if (!cJSON_IsObject(s) || (int) jnum(s, "id") != g_chat_peer) return;
-    if (!el("chatStatus")) return;
-    const int on = (int) jnum(s, "st");
-    const char *sm = jstr(s, "sm");
-    StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='onStatus' style='background:%s;margin-top:-8px;vertical-align:middle;'></div>", on ? "#27ab32" : "#7f7f7f");
-    sb_append(&sb, on ? (sm ? sm : "Online") : "Offline");
-    char *html = sb_finish(&sb);
-    set_html("chatStatus", html);
-    free(html);
-}
-
 static void handle_reply_frame(const cJSON *frame) {
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
     if (!label) return;
@@ -4062,10 +4117,7 @@ static void handle_reply_frame(const cJSON *frame) {
         hub_action_result(cJSON_IsTrue(cJSON_GetArrayItem(frame, 1)), "SUCCESS");
         return;
     }
-    if (!strcmp(label, "chs")) {
-        chat_status_frame(cJSON_GetArrayItem(frame, 1));
-        return;
-    }
+    if (!strcmp(label, "chs")) return; // kn_brain's chat presence: v10's header keeps startChat's status (hub-10.0.7.js:2249)
     if (!strcmp(label, "rps") && cJSON_IsArray(cJSON_GetArrayItem(frame, 1))) { // the profile's reports (staff)
         profile_reports(cJSON_GetArrayItem(frame, 1));
         return;
@@ -4625,6 +4677,7 @@ H(h_start_chat) {
     char cnt[32];
     snprintf(cnt, sizeof(cnt), "msgCnt%d", id);
     set_display(cnt, "none");
+    set_html(cnt, "0");
     cJSON_Delete(g_chat_list);
     g_chat_list = cJSON_CreateArray();
     set_html("chatBoxFill", "<div style='width:100%;opacity:0.6;text-align:center;margin-bottom:10px;font-size:25px'><div style='display:inline-block'><div class='lds-ring'><div></div><div></div><div></div><div></div></div></div></div>");
@@ -4644,20 +4697,20 @@ H(h_start_chat) {
     } else if (name) {
         sb_append_esc(&sb, name);
     }
-    // the peer's presence at the right of the header: startChat's status text (a friend bubble's, hub-10.0.7.js:2229-2262),
-    // then the brain's "chs"; Join while the friend is in a game
-    const char *status = argc > 5 ? arg_s(ev, args, argc, 5) : NULL, *game = argc > 6 ? arg_s(ev, args, argc, 6) : NULL;
-    sb_append(&sb, "<div id='chatStatus' style='position:absolute;vertical-align:top;color:rgba(255,255,255,0.6);margin-right:5px;right:5px;top:6px;'>");
+    // the peer's presence at the right of the header (hub-10.0.7.js:2249-2255): startChat's status text, "Offline" when
+    // it is empty or "undefined"; Join unless the game argument is "" (a missing one is undefined: Join too)
+    const char *status = argc > 5 ? arg_s(ev, args, argc, 5) : NULL, *game = argc > 6 ? arg_s(ev, args, argc, 6) : "undefined";
+    sb_append(&sb, "<div style='position:absolute;vertical-align:top;color:rgba(255,255,255,0.6);margin-right:5px;right:5px;top:6px;'>");
     if (status && *status && strcmp(status, "undefined")) {
         sb_append(&sb, "<div class='onStatus' style='background:#27ab32;margin-top:-8px;vertical-align:middle;'></div>");
         sb_append_esc(&sb, status);
-    } else if (argc > 5) {
+    } else {
         sb_append(&sb, "<div class='onStatus' style='background:#7f7f7f;margin-top:-8px;vertical-align:middle;'></div>Offline");
     }
-    if (game && *game) {
-        sb_append(&sb, "<div class='frndQickJoin' title='Join' onclick='openURL(`/?game=");
-        sb_append_js_escape(&sb, game);
-        sb_append(&sb, "`,1)'><span class='material-icons'>login</span></div>");
+    if (!game || *game) {
+        sb_append(&sb, "<div class='frndQickJoin' onclick='openURL(`/?game=");
+        sb_append_js_escape(&sb, game ? game : "undefined");
+        sb_append(&sb, "`,1)'><div title='Join'><span class='material-icons'style='color:#fff;font-size:35px;'>launch</span></div></div>");
     }
     sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
@@ -4856,14 +4909,12 @@ H(h_buy_item) {
     return 1;
 }
 
-// buyIllicit(skin, key): io.send("pbm", skin) -> io_bmr
+// buyblackM(skin) (hub-10.0.7.js:5182-5195): market.purchaseBlackMarketItem; kn_brain's io.send("pbm", skin) -> io_bmr
 H(h_buy_illicit) {
     UNUSED;
     const double v[1] = {arg_n(args, argc, 0, 0)};
-    const char *key = arg_s(ev, args, argc, 1);
-    char fresh[48];
-    if (!key || !*key) econ_new_op(fresh, sizeof(fresh), "pbm");
-    send_econ("pbm", 1, v, key && *key ? key : fresh);
+    if (!g_pbm_key[0]) econ_new_op(g_pbm_key, sizeof(g_pbm_key), "pbm");
+    send_econ("pbm", 1, v, g_pbm_key);
     io_wait("Buying Item...");
     return 1;
 }
@@ -4993,30 +5044,14 @@ H(h_reset_filter) { UNUSED; market_reset_filter((int) arg_n(args, argc, 0, 0) !=
 H(h_switch_filter) { UNUSED; market_switch_filter((int) arg_n(args, argc, 0, 0) != 0, (int) arg_n(args, argc, 1, 0)); return 1; }
 H(h_toggle_filters) { UNUSED; market_toggle_filters((int) arg_n(args, argc, 0, 0) != 0); return 1; }
 
-// updateTrades(tab): incoming / outgoing / history
-H(h_update_trades) {
-    UNUSED;
-    const char *tab = arg_s(ev, args, argc, 0);
-    static const char *const ids[3] = {"in", "out", "his"};
-    for (int i = 0; i < 3; i++) {
-        char a[16], b[16];
-        snprintf(a, sizeof(a), "tn_%s", ids[i]);
-        snprintf(b, sizeof(b), "o_%s", ids[i]);
-        const int on = tab && !strcmp(tab, ids[i]);
-        set_style(a, "background-color", on ? "rgba(0, 0, 0, 0.5)" : "rgba(0, 0, 0, 0.2)");
-        set_display(b, on ? "block" : "none");
-    }
-    return 1;
-}
-
-// loadMoreTradeHistory(): the next page of the Trade History, the History tab kept open
+// loadMoreTradeHistory(): the next page of the Trade History (hub-10.0.7.js:3843-3890)
 H(h_load_more_trade_history) {
+    UNUSED;
     if (!g_trades_cache || strcmp(g_hub.v, "market") || strcmp(g_hub.b, "trades")) return 1;
     g_his_page += TRADE_HISTORY_PAGE;
     g_his_keep = 1;
     hub_render_market("trades", g_trades_cache);
-    const HtmlArg tab = {.kind = HTML_ARG_STR, .str = "his"};
-    return h_update_trades(user, ev, &tab, 1);
+    return 1;
 }
 
 // fastDeclOffer(id) / declineAllTrades(): io.send("trC", id) / ("trCA")
@@ -5026,7 +5061,17 @@ H(h_decline_offer) {
         char key[48];
         econ_new_op(key, sizeof(key), "trca");
         send_econ("trCA", 0, NULL, key);
-        set_html("o_in", "<div style='margin-bottom:10px;margin-top:-4px;'>Incoming Offers (<span>0</span>)</div><div style='color: rgba(0,0,0,0.6);font-size: 17px;'>None</div>");
+        // iíïìiîí() (hub-10.0.7.js:5722-5735): the incoming rows go, the head's count reads 0
+        const HtmlElem in = el("o_in");
+        if (in) {
+            for (HtmlElem c = html_dom_first_child(in), nx; c; c = nx) {
+                nx = html_dom_next(c);
+                char cls[64];
+                if (html_dom_get_attr(c, "class", cls, sizeof(cls)) >= 0 && !strcmp(cls, "offerHolder")) html_dom_remove(c);
+            }
+            const HtmlElem head = html_dom_first_child(in), cnt = head ? html_dom_first_child(head) : 0;
+            if (cnt) html_dom_set_html(cnt, "0");
+        }
         return 0;
     }
     html_ui_stop_propagation(); // f486(window.event): not the row's viewOffer
@@ -6804,11 +6849,7 @@ static void profile_reports(const cJSON *rows) {
         const int idx = (int) jnum(r, "rp_index");
         char ago[48] = "just now";
         const double ms = jnum(r, "rp_ms");
-        if (ms > 0 && now_epoch_ms() - ms > 60000) {
-            char rt[40];
-            readable_time(rt, sizeof(rt), now_epoch_ms() - ms);
-            snprintf(ago, sizeof(ago), "%s ago", rt);
-        }
+        if (ms > 0) time_ago(ago, sizeof(ago), now_epoch_ms() - ms);
         sb_appendf(&sb, "<div class='reportHolder' id='rpt_%d' onclick='openReport(this)'><div class='reportDate'>%s</div>"
                         "<div class='reportFrom'>Report from <span class='reportFromView' onclick='viewReporter(%d)'>",
                    (int) jnum(r, "rp_id"), ago, i);
@@ -7619,7 +7660,7 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"setSetting", h_set_setting},
     {"delayExecute", h_delay_execute},
     {"showPopup", h_show_popup},
-    {"buyIllicit", h_buy_illicit},
+    {"buyblackM", h_buy_illicit},
     {"startChat", h_start_chat},
     {"closeChat", h_close_chat},
     {"sendChat", h_send_chat},
@@ -7689,7 +7730,6 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"switchSort", h_switch_filter},
     {"toggleFilters", h_toggle_filters},
     {"toggleSorts", h_toggle_filters},
-    {"updateTrades", h_update_trades},
     {"giftPopup", h_gift_popup},          // economy (doc/v7/economy.md)
     {"calcGiftFee", h_calc_gift_fee},
     {"giftUser", h_gift_user},

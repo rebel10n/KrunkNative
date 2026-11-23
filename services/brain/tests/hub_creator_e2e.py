@@ -243,6 +243,8 @@ def map_page(port, ids, tokens, names, map_name, map_id, stamp):
     c = Client(port, names[0], tokens[0], "p=map&q=" + map_name, "creator")
     try:
         check(c.has("mapTabsP", 60), "the creator's map page")
+        # iíïïiìi(am(map_name) + " - Krunker Hub") (hub-10.0.7.js:3164, 7136-7141)
+        check(c.textof("title") == map_name + " - Krunker Hub", "document.title: %r" % c.textof("title"))
         c.ui("updateMapTab(2, true)")
         ok = c.text_has("#mapLeaders", names[1])
         board = c.textof("#mapLeaders") or ""
@@ -402,14 +404,22 @@ def trade_history(port, ids, tokens, names):
     q("INSERT INTO market_listings (seller_id, skin_id, price) VALUES (?, 21, 1234)", A)
     c = Client(port, names[0], tokens[0], "p=market&q=trades", "trades")
     try:
-        check(c.has("tn_his", 60), "the Trading tab")
-        c.ui("updateTrades('his')")
+        check(c.has("o_his", 60), "the Trading tab")
+        # iiîiïií (hub-10.0.7.js:2677-2714): three .offers columns side by side, no tabs
+        check(c.count("#marketList .offers.scrollItem") == 3 and c.count("#tradeNav") == 0 and c.has("o_in", 5) and c.has("o_out", 5),
+              "Incoming, Outgoing and History columns all shown, no tab bar")
         check(wait(lambda: c.count("#o_his .offerHolder[id]") == 30, 15), "History shows the first 30: %d" % c.count("#o_his .offerHolder[id]"))
         check(c.count("#o_his .loadMoreHis") == 1, "and Load More")
+        check(c.textof("#hisCnt") == "30", "the History head counts #hisCnt: %r" % c.textof("#hisCnt"))
+        date = c.textof("#o_his .offerHolder[id] .offerDate") or ""
+        check(re.fullmatch(r"just now|\d+[mhd] ago", date) is not None, "a row's age is v10's (largest unit only): %r" % date)
+        # iíîììîì's onclick: viewOffer(trid, we, "name", "ids", "ids") (hub-10.0.7.js:2661-2665)
+        check(c.count("#o_his .offerHolder[onclick^='viewOffer('][onclick*=',2,\"']") == 30, "rows call viewOffer(trid, 2, \"name\", ...)")
         c.shot("history")
         c.ui("loadMoreTradeHistory()")
         check(wait(lambda: c.count("#o_his .offerHolder[id]") == 35, 10), "Load More: all 35")
-        check(c.count("#o_his .loadMoreHis") == 0 and c.has("o_his", 5), "no more pages; the History tab stays open")
+        check(c.count("#o_his .loadMoreHis") == 0 and c.textof("#hisCnt") == "35", "no more pages; #hisCnt reads 35")
+        check(c.textof("title") == "Krunker Hub", "the market's document.title is the default: %r" % c.textof("title"))
         # the settings' image collection (hub-10.0.7.js:6335-6440; image_collection.c)
         c.ui("clearPops();imagePopup('customScope')")
         check(c.has("imagesTabLayout"), "imagePopup opens the image collection")
@@ -589,6 +599,9 @@ async def friends(port, ids, tokens, names, bob_sock):
         check(wait(lambda: c.textof("msgCnt%d" % B) == "1", 10), "the message counts on bob's bubble (msg push)")
         # the chat's messages: every sender's picture (hub-10.0.7.js:2311), its default when there is none
         c.ui("startChat(%d,0,'%s','',1)" % (B, names[1]))
+        # no sm: v10 shows Offline and, gid undefined != "", Join (hub-10.0.7.js:2249-2255)
+        check(wait(lambda: (c.textof("#chatWithHead") or "").endswith("Offlinelaunch"), 10) and c.count("#chatWithHead .frndQickJoin") == 1,
+              "startChat without a status: Offline, and Join: %r" % c.textof("#chatWithHead"))
         check(wait(lambda: c.count(".chatItPFP[src^='%s']" % pfp(B)) == 1, 15), "bob's message shows p%d/profile.png" % B)
         rgb = None
         for _ in range(20):
@@ -636,6 +649,7 @@ async def friends(port, ids, tokens, names, bob_sock):
         mod_id = one("SELECT mod_id FROM published_mods WHERE creator_id = ? ORDER BY mod_id LIMIT 1", B)
         c.ui("clearPops();updateWindow('mods')")
         time.sleep(1.5)
+        check(wait(lambda: c.textof("title") == "Mods - Krunker Hub", 10), "document.title: Mods - Krunker Hub (hub-10.0.7.js:3130): %r" % c.textof("title"))
         c.ui("windows[1].switchTab(2)")  # New: every mod, newest first
         star = "#modsHolder .creationAction[onclick='favoriteM(1, this, %d);']" % mod_id
         if wait(lambda: c.count(star) == 1, 20):

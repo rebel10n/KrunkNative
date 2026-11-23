@@ -356,7 +356,8 @@ static void ui_cmds_run(Client *client, char *line) {
         HtmlElem all[256];
         fprintf(stderr, "[ui_cmds] count %s = %d\n", rest, html_dom_query_all(0, rest, all, 256));
     } else if (!strcmp(cmd, "textof")) {
-        const HtmlElem e = strchr("#.[", rest[0]) ? html_dom_query(0, rest) : html_dom_by_id(rest);
+        HtmlElem e = strchr("#.[", rest[0]) ? html_dom_query(0, rest) : html_dom_by_id(rest);
+        if (!e) e = html_dom_query(0, rest); // a tag selector ("title")
         char *text = NULL;
         const int need = e ? html_dom_get_text(e, NULL, 0) : 0;
         if (need >= 0 && (text = malloc((size_t) need + 1))) {

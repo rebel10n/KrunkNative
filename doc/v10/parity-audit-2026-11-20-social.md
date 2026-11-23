@@ -114,7 +114,7 @@ handlers (`window.<name>` resolves to `<name>`, html_dom_core.c), and every gene
 - Publish / Update Mod popup: the markup was the game window's (mods_ui.c publish_form); the hub's is now v10's
   (publishModPopup :6734-6754: publishLeft / publishRight, selectFile, uploadMod, #modResHolder). Box Office keeps
   its own upload transport (the platform file dialog, chunked to kn_brain). hub_creator_e2e.
-- Left as they are: `buyblackM` is KN's `buyIllicit` (same frame, KN adds an idempotency key); `openOneTrust` (the
+- Left as they are: `buyblackM` was KN's `buyIllicit` (now `buyblackM`, see "Sweep 2026-11-23, third pass"); `openOneTrust` (the
   ad consent manager, Box Office shows no ads); the documented Box Office additions (KR in trade offers, the
   developers' creator badge, the map page's Versions tab from the game's Creations window).
 
@@ -141,7 +141,7 @@ social_ui.c, mods_ui.c and kn_brain.
   "Potential Earnings" (the listings' prices). hub_creator_e2e.
 - The hub's mod upload says "Loading..." and "Mod Uploaded!" (:6755-6773, 6829), and "Mod.zip size Limit
   Reached" for a .zip over the limit.
-- Left as they are: the page titles ("Mods - Krunker Hub", ...); the badge tables (served by kn_brain). The
+- Left as they are: the page titles (now set, see "Sweep 2026-11-23, third pass"); the badge tables (served by kn_brain). The
   per-player pictures were left here too, and are now fixed (see "Profile pictures" below).
 
 ## Upload Mod window (window 19), 2026-11-23
@@ -200,3 +200,49 @@ friends". The pictures' fallback is player_pfp.png, not favicon.png.
 Tests: brain_avatar_e2e (p<id>/profile.png under /user-assets and /api/user-assets: served when approved, 404
 otherwise) and hub_creator_e2e (a seeded approved WebP drawn in a chat message and a follower row; the 404 and
 `src=''` fallbacks).
+
+
+## Sweep 2026-11-23, third pass
+
+- Page titles: v10 sets `document.title` through iíïïiìi (hub-10.0.7.js:7136-7141). Each page load first resets it
+  to "Krunker Hub", then sets the page's own title: "Mods - Krunker Hub" (:3130), "Games - Krunker Hub" (:3149), the
+  mod or map name + " - Krunker Hub" (:3143, :3164; the name escaped as config's `am` does), "Leaderboards - Krunker
+  Hub" (:3183, when rows arrived), "Skin List - Krunker Hub" (:3417), "<skin> Skin - Krunker Hub" (:3488) and
+  "[<clan>] Clan - Krunker Hub" (:3573). `app_set_page_title` (app_mode.c) writes the page's `<title>` and the
+  window title: `glfwSetWindowTitle` natively, `document.title` on the web. Each page has its own window, so the
+  game window keeps its own title. hub_creator_e2e reads `<title>` on the map page, the Mods page and the market.
+- startChat: the chat header shows the raw `sm` the caller passed, as v10 does (:2249-2255). When `sm` is missing or
+  "undefined" it shows a grey dot and "Offline", even for a friend who is online. Join (v10's launch icon) shows
+  unless the game argument is "". The brain's `chs` presence push is no longer drawn (v10 has no such frame). Friend
+  rows pass `sm` and `gid` as v10's bubbles do (:2340, :5337). Opening a chat sets its #msgCnt to "0".
+  social_hub_staff_e2e, hub_creator_e2e.
+- Trades: the Trading tab used v3.1.1's layout: an Incoming / Outgoing / History tab bar (`updateTrades`) with one
+  column shown at a time. It now uses v10's (iiîiïií :2677-2714): three `.offers` columns side by side.
+  - Heads are grey, and the History count is `#hisCnt`.
+  - Each row follows iíîììîì (:2646-2675). It always has a style attribute. Its onclick is
+    `viewOffer(trid, kind, "name", "ids", "ids"[, "message"])`. Received rows with a message show the markunread
+    icon.
+  - Each side's items are sorted as iiîíïií sorts them, and padded up to a multiple of 5 of the larger side
+    (:2629-2636). The KR part of an offer is v10's `.oCurrencyLine` "+N KR".
+  - Ages are v10's: one unit only, "3d ago" / "5h ago" / "2m ago" / "just now" (config bI). The staff Reports tab
+    uses the same format.
+  - Decline All clears the incoming rows and sets the head's count to 0, as iíïìiîí does (:5722-5735). Before, it
+    replaced the whole column.
+  - A quote in a trade message no longer breaks the row's onclick. v10 breaks there.
+  - hub_creator_e2e checks the columns, #hisCnt, the ages and the onclick.
+- Black Market: the popup's button calls `buyblackM(index)` (:4834, 5182). It was KN's `buyIllicit(index, key)`.
+  The idempotency key is kept per popup on the C side.
+- Profile Creations: the Games and Mods cards had a "by <creator>" line. v10's cards (:3023, :3066) have none,
+  since it is the creator's own profile. The line is removed.
+- Rechecked: every `window.*` function in hub-10.0.7.js has a handler of the same name, is drawn by the C side
+  (`genericPopup`, `hideAll`, `socPostRes`, `updateChatList`, `clanRSr`), or is unused in v10 (`copyProfile`,
+  `showError`, `openListing`).
+- Left as they are:
+  - The KR History popup on #profileKR (`krHistory`, the ledger's view) and KR in trade offers (`tradeKR`). Both
+    are Box Office additions.
+  - The developers' Creator button (`creatorPopup`).
+  - The map page's Versions tab (`revertMapVersion`).
+  - The catalogue thumbnails where v10 uses `<assets>/m<id>/thumb.png`. Box Office has no per-map thumbnail upload.
+  - Animated sprays (`sprayAnmOf<frames>` keyframes). The viewer's skin table does not carry `frames`, and only one
+    catalogue item has them. Sprays show their first frame.
+

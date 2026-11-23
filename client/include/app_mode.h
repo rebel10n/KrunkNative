@@ -146,3 +146,7 @@ int app_mode_needs_server(void);
 // page is shown, the whole frame (clear, page tick, page composite). Returns 1 when the
 // frame belonged to the page (client_tick returns), 0 in game mode.
 int app_mode_frame(Client *client, float now, float delta);
+
+// document.title = title (the hub's page titles, hub-10.0.7.js:7136-7141): the page's <title>, and the window's title
+// natively (glfwSetWindowTitle) or the tab's on the web (document.title)
+void app_set_page_title(const char *title);
