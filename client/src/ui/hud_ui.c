@@ -4263,6 +4263,9 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
     ui->board_shown = 0;
     dom_display("speakerDisplay", visible ? "block" : "none");
     if (visible) dom_display("infoHolder", "none");
+    // hideUI: the ad strip goes in a game (aHolder none, deob-10.0.7.js:163477) and comes back with the menu (:216469).
+    // Its #aHider is shown since menu_ads_apply (canShowAds); left up, its dark box dimmed the death screen's text.
+    dom_display("aHolder", visible ? "none" : "block");
     // toggleGameUI(true)
     dom_display("gameMessage", block);
     dom_display("roundMessage", block);
