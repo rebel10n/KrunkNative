@@ -215,6 +215,22 @@ static double js_parse_float(const uint8_t *s, size_t n) {
     return strtod(buf, NULL);
 }
 
+/* parseInt(string) with no radix: leading whitespace, a sign, then the longest run of decimal digits (hex digits
+ * after a 0x prefix); NaN when no digit follows. */
+static double js_parse_int(const uint8_t *s, size_t n) {
+    size_t i = 0;
+    while (i < n && ascii_space(s[i])) i++;
+    double sign = 1;
+    if (i < n && (s[i] == '+' || s[i] == '-')) sign = s[i++] == '-' ? -1 : 1;
+    int hex = 0;
+    if (n - i >= 2 && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) hex = 1, i += 2;
+    double v = 0;
+    size_t digits = 0;
+    for (; i < n && (hex ? isxdigit(s[i]) : isdigit(s[i])); i++, digits++)
+        v = v * (hex ? 16 : 10) + (isdigit(s[i]) ? s[i] - '0' : tolower(s[i]) - 'a' + 10);
+    return digits ? sign * v : NAN;
+}
+
 /* Number(v) for the values a client sends (undefined: NaN). */
 static double js_num(const KrunkerValue *v) {
     if (!v) return NAN;
@@ -264,6 +280,23 @@ static int64_t index_of(const KrunkerValue *v) {
     const double n = js_num(v);
     if (isfinite(n) && n == floor(n) && n >= 0) return n >= 9.2e18 ? INT64_MAX : (int64_t)n;
     return -1;
+}
+
+/* A loadout slot of ENTER_GAME: v10.0.7 sends an owned copy as "<copyId>#<index>" (iîìîiìï, deob-10.0.7.js:24381-24383;
+ * ENTER_GAME sends the saved values as they are, :215052) and its server splits it with iïiíiïí (:24362-24380):
+ * skinId = parseInt(the part before '#'), skinIndex = parseInt(the part after it). Any other value is a plain index
+ * (index_of). The store index (-1 none) and, through `copy`, the copy id (0: a plain index or no item). */
+static int64_t slot_index(const KrunkerValue *v, int32_t *copy) {
+    if (copy) *copy = 0;
+    if (!v || v->type != KRUNKER_STR) return index_of(v);
+    const uint8_t *s = (const uint8_t *)v->u.str;
+    const uint8_t *hash = memchr(s, '#', v->len);
+    if (!hash) return index_of(v);
+    const size_t at = (size_t)(hash - s);
+    const double ind = js_parse_int(hash + 1, v->len - at - 1), id = js_parse_int(s, at);
+    if (!isfinite(ind) || ind < 0) return -1;
+    if (copy && isfinite(id) && id >= 1 && id <= INT32_MAX) *copy = (int32_t)id;
+    return ind >= 9.2e18 ? INT64_MAX : (int64_t)ind;
 }
 
 /* int32(value, fallback): Number(value) | 0 when finite, else the fallback. */
@@ -493,20 +526,20 @@ int v10_encode_enter(const KrunkerValue *en, uint8_t out[V10_ENT_SIZE]) {
     const int64_t hair_color = hair_color_from_krunker(IT(EN_HAIR));
     wr_i32(out, ENT_COSMETICS_AT + 0, skin_color);
     wr_i32(out, ENT_COSMETICS_AT + 4, hair_color);
-    wr_i32(out, ENT_COSMETICS_AT + 8, index_of(IT(EN_HAT)));
-    wr_i32(out, ENT_COSMETICS_AT + 12, index_of(IT(EN_BODY)));
-    wr_i32(out, ENT_COSMETICS_AT + 16, index_of(IT(EN_WAIST)));
-    wr_i32(out, ENT_COSMETICS_AT + 20, index_of(IT(EN_FACE)));
-    wr_i32(out, ENT_COSMETICS_AT + 24, index_of(IT(EN_DYE)));
+    wr_i32(out, ENT_COSMETICS_AT + 8, slot_index(IT(EN_HAT), NULL));
+    wr_i32(out, ENT_COSMETICS_AT + 12, slot_index(IT(EN_BODY), NULL));
+    wr_i32(out, ENT_COSMETICS_AT + 16, slot_index(IT(EN_WAIST), NULL));
+    wr_i32(out, ENT_COSMETICS_AT + 20, slot_index(IT(EN_FACE), NULL));
+    wr_i32(out, ENT_COSMETICS_AT + 24, slot_index(IT(EN_DYE), NULL));
 
     out[ENT_SPECTATE_AT] = js_truthy(IT(EN_SPECTATE)) ? 1 : 0;
     out[ENT_SPECTATE_AT + 1] = 1; /* slidCont: not in the v10 array, the setting's default */
     wr_i32(out, ENT_SPRAY_AT, int32_or(IT(EN_SPRAY), 0));
 
     /* skinsFromKrunker: [2] = [primary, secondary] and [9] = meleeIndex */
-    wr_i32(out, ENT_SKINS_AT + 0, index_of(item_of(IT(EN_SKINS), 0)));
-    wr_i32(out, ENT_SKINS_AT + 4, index_of(item_of(IT(EN_SKINS), 1)));
-    wr_i32(out, ENT_SKINS_AT + 8, index_of(IT(EN_MELEE)));
+    wr_i32(out, ENT_SKINS_AT + 0, slot_index(item_of(IT(EN_SKINS), 0), NULL));
+    wr_i32(out, ENT_SKINS_AT + 4, slot_index(item_of(IT(EN_SKINS), 1), NULL));
+    wr_i32(out, ENT_SKINS_AT + 8, slot_index(IT(EN_MELEE), NULL));
     wr_f32(out, ENT_LAG_COMP_AT, lag_comp_from_ent(IT(EN_LAG_COMP)));
 
     wr_i32(out, ENT_ATTACH_AT, int32_or(IT(EN_ATTACH), -1));
@@ -515,15 +548,43 @@ int v10_encode_enter(const KrunkerValue *en, uint8_t out[V10_ENT_SIZE]) {
 
     const KrunkerValue *charms = IT(EN_CHARMS);
     const int64_t v7[9] = {
-        index_of(IT(EN_HEAD)),        index_of(IT(EN_BACK)),  index_of(IT(EN_SHOE)),
-        index_of(IT(EN_PET)),         index_of(IT(EN_WRIST)), index_of(item_of(charms, 0)),
-        index_of(item_of(charms, 1)), index_of(IT(EN_PLAYER_CARD)), -1, /* badge: the server takes the account's */
+        slot_index(IT(EN_HEAD), NULL),        slot_index(IT(EN_BACK), NULL),  slot_index(IT(EN_SHOE), NULL),
+        slot_index(IT(EN_PET), NULL),         slot_index(IT(EN_WRIST), NULL), slot_index(item_of(charms, 0), NULL),
+        slot_index(item_of(charms, 1), NULL), slot_index(IT(EN_PLAYER_CARD), NULL), -1, /* badge: the server takes the account's */
     };
     for (int i = 0; i < 9; i++) wr_i32(out, ENT_V9_COSMETICS_AT + 4 * (size_t)i, v7[i]);
     /* PLAYER_SHOW_BADGE_*: verified 0x01, premium 0x02, rank 0x04 (ent[33], deob-10.0.7.js:215052), custom 0x08 */
     out[ENT_SHOW_BADGES_AT] = (js_truthy(IT(EN_VERIFIED)) ? 0x01 : 0) | (js_truthy(IT(EN_PREMIUM)) ? 0x02 : 0) |
                               (js_truthy(IT(EN_RANK_BADGE)) ? 0x04 : 0) | (js_truthy(IT(EN_CUSTOM_BADGE)) ? 0x08 : 0);
 #undef IT
+    return 1;
+}
+
+int v10_encode_skin_copy_ids(const KrunkerValue *en, uint8_t out[V10_SKIN_COPY_IDS_SIZE]) {
+    if (!en || en->type != KRUNKER_ARRAY || en->len < EN_LENGTH_MIN) return 0;
+    _Static_assert(V10_SKIN_COPY_IDS_SIZE == NET_EXT_HEADER_SIZE + sizeof(NetSkinCopyIdsPacket), "the EXT body is NetSkinCopyIdsPacket");
+    memset(out, 0, V10_SKIN_COPY_IDS_SIZE);
+    out[0] = (uint8_t)(NET_EXT_KN_SKIN_COPY_IDS & 0xFF);
+    out[1] = (uint8_t)(NET_EXT_KN_SKIN_COPY_IDS >> 8);
+    const KrunkerValue *charms = item_of(en, EN_CHARMS), *skins = item_of(en, EN_SKINS);
+    /* the ENT slots of v10_encode_enter, in SKIN_COPY_SLOT order */
+    const KrunkerValue *slot[SKIN_COPY_SLOTS] = {
+        [SKIN_COPY_SLOT_PRIMARY] = item_of(skins, 0), [SKIN_COPY_SLOT_SECONDARY] = item_of(skins, 1),
+        [SKIN_COPY_SLOT_MELEE] = item_of(en, EN_MELEE), [SKIN_COPY_SLOT_HAT] = item_of(en, EN_HAT),
+        [SKIN_COPY_SLOT_BODY] = item_of(en, EN_BODY), [SKIN_COPY_SLOT_WAIST] = item_of(en, EN_WAIST),
+        [SKIN_COPY_SLOT_FACE] = item_of(en, EN_FACE), [SKIN_COPY_SLOT_DYE] = item_of(en, EN_DYE),
+        [SKIN_COPY_SLOT_HEAD] = item_of(en, EN_HEAD), [SKIN_COPY_SLOT_BACK] = item_of(en, EN_BACK),
+        [SKIN_COPY_SLOT_SHOE] = item_of(en, EN_SHOE), [SKIN_COPY_SLOT_PET] = item_of(en, EN_PET),
+        [SKIN_COPY_SLOT_WRIST] = item_of(en, EN_WRIST), [SKIN_COPY_SLOT_CHARM1] = item_of(charms, 0),
+        [SKIN_COPY_SLOT_CHARM2] = item_of(charms, 1), [SKIN_COPY_SLOT_CARD] = item_of(en, EN_PLAYER_CARD),
+    };
+    for (int k = 0; k < SKIN_COPY_SLOTS; k++) {
+        int32_t copy = 0;
+        const int64_t ind = slot_index(slot[k], &copy);
+        const int64_t skin = ind >= 0 && ind <= INT32_MAX ? ind : -1;
+        wr_i32(out, NET_EXT_HEADER_SIZE + 4 * (size_t)k, skin);
+        wr_i32(out, NET_EXT_HEADER_SIZE + 4 * (size_t)(SKIN_COPY_SLOTS + k), skin >= 0 ? copy : 0);
+    }
     return 1;
 }
 

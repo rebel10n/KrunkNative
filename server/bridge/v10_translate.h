@@ -90,6 +90,7 @@
 
 /* ---- sizes (the TS constants; the layouts are checked against shared.h in the tests) */
 #define V10_ENT_SIZE 101        /* ENT_V9_SIZE: NetEntPacket with the v7 cosmetics and show_badges */
+#define V10_SKIN_COPY_IDS_SIZE (NET_EXT_HEADER_SIZE + 128) /* EXT NET_EXT_KN_SKIN_COPY_IDS: subtype + NetSkinCopyIdsPacket */
 #define V10_CHAT_TEXT_SIZE 288  /* NET_CHAT_TEXT_SIZE */
 #define V10_ADD_RECORD_FIELDS 53
 #define V10_INIT_ARGS 20
@@ -134,8 +135,13 @@ int v10_truthy(const KrunkerValue *v);
 
 /* ---- client -> bridge (v10 labels) */
 
-/* The KN ENT (V9) for an "en" array (v10Translate encodeEnter). 0 when `en` is not the v10 shape. */
+/* The KN ENT (V9) for an "en" array (v10Translate encodeEnter). 0 when `en` is not the v10 shape. A loadout slot sent
+ * as v10.0.7's "<copyId>#<index>" (an owned copy, deob-10.0.7.js:215052) gives the ENT its index. */
 int v10_encode_enter(const KrunkerValue *en, uint8_t out[V10_ENT_SIZE]);
+/* The EXT payload (subtype NET_EXT_KN_SKIN_COPY_IDS, then NetSkinCopyIdsPacket) that goes right before that ENT: the
+ * copy each "<copyId>#<index>" slot of `en` names, as a native client sends it (client_send_skin_copies). Every slot
+ * holds the store index the ENT gets (-1 none) and the copy id, 0 for a plain index. 0 when `en` is not the v10 shape. */
+int v10_encode_skin_copy_ids(const KrunkerValue *en, uint8_t out[V10_SKIN_COPY_IDS_SIZE]);
 /* The KN CHAT_SEND text for a "ct" text (encodeChat): bytes written to out (NUL-terminated), 0 when
  * the text is not a string or is blank (out needs V10_CHAT_TEXT_SIZE bytes). */
 size_t v10_encode_chat(const KrunkerValue *text, uint8_t out[V10_CHAT_TEXT_SIZE]);
