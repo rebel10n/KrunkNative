@@ -542,9 +542,11 @@ static void check_skin_sounds(void) {
     CHECK(viewer_skin_inspect_sound(viewer_skin(7097), name, sizeof(name), &loop) && !strcmp(name, "inspect_monte_carlo_spin") && !loop,
           "inspect: Monte Carlo (%s)", name);
     CHECK(!viewer_skin_inspect_sound(viewer_skin(887), name, sizeof(name), &loop), "inspect: none");
-    // a custom skin's sound files are user assets (userAssetsUrl("skins/" + _id + ...), deob:225205)
+    // a custom skin's sound files are user assets (userAssetsUrl("skins/" + _id + ...), deob:225205), and v10.0.7's captured
+    // thumbnail.png (deob-10.0.7.js:124964); any other name is not
     CHECK(user_asset_rel_ok("skins/64f0c1a2b3/sound.mp3") && user_asset_rel_ok("skins/64f0c1a2b3/sound_swap.mp3") &&
-          user_asset_rel_ok("skins/a-b_c/sound_inspect.mp3") && !user_asset_rel_ok("skins/64f0/thumbnail.png") &&
+          user_asset_rel_ok("skins/a-b_c/sound_inspect.mp3") && user_asset_rel_ok("skins/64f0/thumbnail.png") &&
+          !user_asset_rel_ok("skins/64f0/notes.txt") && !user_asset_rel_ok("skins/64f0/sound.wav") &&
           !user_asset_rel_ok("skins/../sound.mp3") && !user_asset_rel_ok("skins//sound.mp3") && user_asset_rel_ok("30431/sound.mp3"),
           "custom skin sounds as user assets");
 }

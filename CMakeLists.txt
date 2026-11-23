@@ -2112,6 +2112,7 @@ else ()
         client/src/gltf_meshopt.c
         client/src/pets.c
         client/src/skin_fx.c
+        client/src/mod_shader_graph.c # skin_fx's customShader graphs (graph_material)
         client/src/skin_video.c
         client/src/cosmetics.c
         client/src/viewer/viewer_store.c
