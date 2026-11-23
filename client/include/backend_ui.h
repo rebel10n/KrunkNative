@@ -326,6 +326,7 @@ const char *ranked_ui_ready(void);    // queueReadyMessage
 void ranked_ui_class_changed(int index);
 int  ranked_ui_in_ranked(void);       // queued or in a ranked match (v7 config.isComp: custom.host.ranked)
 void ranked_ui_left_match(void);      // the ranked match's lobby was left
+int  ranked_ui_escape(void);          // Escape: the open popup's overlay takes it (its button's action); 0 = not shown
 void ranked_ui_account_changed(void); // $account changed: a Login Required popup hides (v10:111598-111600)
 int  ranked_ui_queue_action_state(void); // the announcement card's ranked-queue action: 0 on, 1 In Queue, 2 Requires Level 10
 void ranked_ui_queue_action(void);    // its click (v10 'ranked-queue': the search, or the login for a guest)

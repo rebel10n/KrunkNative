@@ -829,6 +829,7 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
         if (v10_wallet_key(ev->key)) return 0; // the Wallet and Inventory modal (and the Quick Sell / item page over it)
         if (v10_studios_key(ev->key)) return 0; // the Studios window, a studio, its dialog and prompts
         if (v10_skin_manager_key(ev->key)) return 0; // the Skin Manager and its delete prompt
+        if (ranked_ui_escape()) return 0; // the ranked popup's overlay (Cooldown, Level Required, ...): its button
         if (ui->menu_open && menu_window_is_open()) {
             if (object_manager_ui_escape()) return 0; // the Object Manager opened in game: straight back to it
             menu_toggle_window(0);

@@ -98,7 +98,32 @@ static struct {
     int buying;                   // a purchase in flight
     int tick_timer;
     int scenario;
-} R = {.board_page = 1, .history_page = 1};
+    int start_sound;              // the start button began this search: its QUEUED plays tick + select (deob-10.0.7.js:114975)
+    int all_regions_loaded;       // s_rankedAllRegions read (v10's persistent store, read at load, deob-10.0.7.js:113760)
+    struct {                      // a queue error while the popup is closed: v10 keeps $rankedMatchMakingStatus.error
+        int set;                  // until the component mounts and its effect opens the overlay (deob-10.0.7.js:113927-113970)
+        char code[32];
+        double cooldown;
+    } pending;
+    double shown_rp;              // the shop's RP balance as last drawn (the currency display's tween, deob-10.0.7.js:25754-25775)
+    int rp_tween_timer;
+    double rp_from, rp_to, rp_t0;
+    int countdown_timer;          // the shop's countdowns redraw every second (deob-10.0.7.js:113326-113329)
+} R = {.board_page = 1, .history_page = 1, .shown_rp = -1};
+
+// v10's start button sounds: playTick(0.5) then playSelect(0.1) (deob-10.0.7.js:114975)
+static void play_tick_select(void) {
+    audio_play("hover_0", 0.5f, 0, 1.0f);
+    audio_play("select_0", 0.1f, 0, 1.0f);
+}
+
+// $rankedAllRegions (deob-10.0.7.js:113760, iîiìííí): the stored setting, read once, before any queue start
+static void load_all_regions(void) {
+    if (R.all_regions_loaded) return;
+    R.all_regions_loaded = 1;
+    char v[8] = "";
+    R.all_regions = html_storage_get("s_rankedAllRegions", v, sizeof(v)) >= 0 && (v[0] == '1' || v[0] == 't');
+}
 
 static const AccountInfo *acc(void) { return active_account(); }
 
@@ -378,8 +403,9 @@ static int rp_balance(double *out) {
         krunker_account_ranked_points(out);
         return 1;
     }
-    *out = v10_num(get_profile(current_season())->json, "rankedPoints", 0);
-    return 1;
+    const V10Req *pr = get_profile(current_season());
+    *out = v10_num(pr->json, "rankedPoints", 0);
+    return pr->status == 200 && pr->json; // 0: the profile is (re)loading, the balance is not known
 }
 
 static void invalidate(void) {
@@ -439,26 +465,53 @@ static void banner_error(const char *message) {
     update_banner();
 }
 
+// The banner's text is MatchmakingService.updateGlobalStatus's (deob-10.0.7.js:99060-99068), called by the 1 s interval
+// while searching only: a MATCHED leaves the last "Searching for match... (m:ss)" up (handleQueueStatus never calls it
+// before acceptMatch, deob-10.0.7.js:99179-99200), and acceptMatch shows "Connecting to match..." until its join is under
+// way, then clearState empties it (deob-10.0.7.js:99364-99370).
+static char g_banner_searching[64];
+static int g_banner_connecting;
+static int g_connecting_timer;
+
 static void update_banner(void) {
     const HtmlElem holder = html_dom_by_id("matchmakingStatusEl");
     if (!holder) return;
     char text[160] = "";
     if (g_banner_error[0]) {
         snprintf(text, sizeof(text), "%s", g_banner_error);
+    } else if (g_banner_connecting) {
+        snprintf(text, sizeof(text), "Connecting to match...");
     } else if (R.state == MM_SEARCHING) {
         char t[16];
         fmt_time(t, sizeof(t), (int) ((double) time(NULL) - R.queued_at));
-        snprintf(text, sizeof(text), "Searching for match... (%s)", t);
+        snprintf(g_banner_searching, sizeof(g_banner_searching), "Searching for match... (%s)", t);
+        snprintf(text, sizeof(text), "%s", g_banner_searching);
     } else if (R.state == MM_FOUND) {
-        snprintf(text, sizeof(text), "Match found!");
+        snprintf(text, sizeof(text), "%s", g_banner_searching[0] ? g_banner_searching : "Match found!");
     }
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class=\"ranked-matchmaking-status svelte-3k0h7w%s\">", R.state != MM_IDLE || g_banner_error[0] ? " show" : "");
+    sb_appendf(&sb, "<div class=\"ranked-matchmaking-status svelte-3k0h7w%s\">", R.state != MM_IDLE || g_banner_error[0] || g_banner_connecting ? " show" : "");
     sb_append_esc(&sb, text);
     sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
     html_dom_set_html(holder, html);
     free(html);
+}
+
+static void connecting_done(void *user) {
+    (void) user;
+    g_connecting_timer = 0;
+    if (!g_banner_connecting) return;
+    g_banner_connecting = 0;
+    update_banner();
+}
+
+// acceptMatch's "Connecting to match..." (on until the join is applied or left; 15 s at most)
+static void banner_connecting(const int on) {
+    g_banner_connecting = on;
+    if (g_connecting_timer) html_timer_cancel(g_connecting_timer);
+    g_connecting_timer = on ? html_timer_add(15000, connecting_done, NULL) : 0;
+    update_banner();
 }
 
 // ------------------------------------------------------------------ queue session (MatchmakingService)
@@ -474,6 +527,8 @@ static void clear_state(void) { // clearState (v10 closes its socket here)
         krunker_ranked_queue_stop();
     }
     g_banner_error[0] = 0; // (v10 clearState: message '', show false, v10:98416)
+    g_banner_searching[0] = 0;
+    if (g_banner_connecting) banner_connecting(0);
     R.state = MM_IDLE;
     R.key[0] = 0;
     R.queued_at = 0;
@@ -501,22 +556,71 @@ static void overlay_timer_restart(void) {
     R.overlay.timer = html_timer_add(200, overlay_done, NULL);
 }
 
+// v10 merges each popup into the last one ({...state, visible: true, ...popup}, deob-10.0.7.js:113868-113874): a field the
+// popup leaves out (NULL color / icon, force_close < 0) keeps the previous popup's, from the mount's initial state
+// (buttonColor #5ce05a, icon null, forceClose false, deob-10.0.7.js:113806-113814). Only Cooldown leaves them out.
+static void overlay_reset(void) {
+    snprintf(R.overlay.color, sizeof(R.overlay.color), "#5ce05a");
+    R.overlay.icon[0] = 0;
+    R.overlay.force_close = 0;
+}
+
 static void show_overlay(const char *title, const char *text, const char *button, const char *color, const char *icon, const int force_close) {
     R.overlay.visible = 1;
     snprintf(R.overlay.title, sizeof(R.overlay.title), "%s", title);
     snprintf(R.overlay.text, sizeof(R.overlay.text), "%s", text);
     snprintf(R.overlay.button, sizeof(R.overlay.button), "%s", button ? button : "OK");
-    snprintf(R.overlay.color, sizeof(R.overlay.color), "%s", color ? color : "#5ce05a");
-    snprintf(R.overlay.icon, sizeof(R.overlay.icon), "%s", icon ? icon : "");
-    R.overlay.force_close = force_close;
+    if (color) snprintf(R.overlay.color, sizeof(R.overlay.color), "%s", color);
+    else if (!R.overlay.color[0]) snprintf(R.overlay.color, sizeof(R.overlay.color), "#5ce05a");
+    if (icon) snprintf(R.overlay.icon, sizeof(R.overlay.icon), "%s", icon);
+    if (force_close >= 0) R.overlay.force_close = force_close;
     R.overlay.intro = 1;
     R.overlay.outro = 0;
     overlay_timer_restart();
 }
 
-static void internal_error(void) {
+static void internal_error_overlay(void) {
     show_overlay("Internal Error", "An internal error occurred. Please try again later.", "OK", "#ff3939", "\xe2\x9d\x8c", 0);
 }
+
+// The component's effect on $rankedMatchMakingStatus.error (deob-10.0.7.js:113927-113970): the popup for error.code. The
+// error stays in the store until a mounted component takes it, so an error of a queue started with the popup closed (the
+// play card, the chat's Join Queue) opens its popup when the Ranked popup next mounts (open_popup replays R.pending).
+static void apply_error_overlay(const char *code, const double cooldown_ms) {
+    if (!strcmp(code, "MIN_LEVEL_REQUIREMENT")) {
+        char text[96];
+        snprintf(text, sizeof(text), "You must be level %d or higher to access Ranked Mode.", g_min_level);
+        show_overlay("Level Required", text, "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
+    } else if (!strcmp(code, "LOGIN_REQUIRED"))
+        show_overlay("Login Required", "You must be logged in to access Ranked Mode.", "GOT IT", "#5ce05a", "\xf0\x9f\x94\x92", 1);
+    else if (!strcmp(code, "NO_RANK_DATA"))
+        show_overlay("Rank Data Missing", "We could not retrieve your ranked data. Please try again later.", "OK", "#ff3939", "\xe2\x9d\x8c", 0);
+    else if (!strcmp(code, "COOLDOWN")) {
+        char t[16], text[160];
+        fmt_time(t, sizeof(t), (int) (cooldown_ms / 1000.0));
+        snprintf(text, sizeof(text), "You are on cooldown and cannot queue for ranked matches. Cooldown will end in %s", t);
+        show_overlay("Cooldown", text, "OK", NULL, NULL, -1); // v10 gives only the title, text and button (deob-10.0.7.js:113953-113958)
+    } else if (!strcmp(code, "ALREADY_IN_MATCH")) {
+        R.status_lock = 1; // "You are already in a Ranked game." + REJOIN (_37948)
+    } else {
+        internal_error_overlay();
+    }
+}
+
+static void queue_error_overlay(const char *code, const double cooldown_ms) {
+    R.start_sound = 0;
+    if (!v10_popup_open(POPUP_CLASS)) {
+        R.pending.set = 1;
+        snprintf(R.pending.code, sizeof(R.pending.code), "%s", code && code[0] ? code : "INTERNAL_ERROR");
+        R.pending.cooldown = cooldown_ms;
+        if (!strcmp(R.pending.code, "ALREADY_IN_MATCH")) R.status_lock = 1;
+        return;
+    }
+    R.pending.set = 0;
+    apply_error_overlay(code ? code : "INTERNAL_ERROR", cooldown_ms);
+}
+
+static void internal_error(void) { queue_error_overlay("INTERNAL_ERROR", 0); }
 
 static void join_assignment(const cJSON *as) {
     const char *host = v10_str(as, "host"), *game = v10_str(as, "gameId"), *ticket = v10_str(as, "clientId");
@@ -554,13 +658,16 @@ static void accept_fire(void *user) { // acceptMatch: "Connecting to match..."
     R.assignment = NULL;
     const int kio = g_kio_queue; // (clear_state ends the krunker.io queue)
     clear_state();
+    // (the banner after the join call: joining leaves the previous game first, ranked_ui_left_match)
     if (kio) {
         join_kio_match(v10_str(as, "connection"), v10_str(as, "gameId"));
+        banner_connecting(1);
         cJSON_Delete(as);
         render();
         return;
     }
     join_assignment(as);
+    banner_connecting(1);
     cJSON_Delete(as);
     render();
 }
@@ -595,28 +702,13 @@ static void handle_message(const cJSON *msg) {
         clear_state();
         banner_error(v10_str(p, "message")); // v10: message = payload.message || "Unknown error", show true
         R.busy = 0;
-        if (!strcmp(code, "MIN_LEVEL_REQUIREMENT")) {
-            char text[96];
-            snprintf(text, sizeof(text), "You must be level %d or higher to access Ranked Mode.", g_min_level);
-            show_overlay("Level Required", text, "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
-        } else if (!strcmp(code, "LOGIN_REQUIRED"))
-            show_overlay("Login Required", "You must be logged in to access Ranked Mode.", "GOT IT", "#5ce05a", "\xf0\x9f\x94\x92", 1);
-        else if (!strcmp(code, "NO_RANK_DATA"))
-            show_overlay("Rank Data Missing", "We could not retrieve your ranked data. Please try again later.", "OK", "#ff3939", "\xe2\x9d\x8c", 0);
-        else if (!strcmp(code, "COOLDOWN")) {
-            char t[16], text[160];
-            fmt_time(t, sizeof(t), (int) (v10_num(inner, "cooldown", 0) / 1000.0));
-            snprintf(text, sizeof(text), "You are on cooldown and cannot queue for ranked matches. Cooldown will end in %s", t);
-            show_overlay("Cooldown", text, "OK", "#5ce05a", NULL, 0);
-        } else if (!strcmp(code, "ALREADY_IN_MATCH")) {
+        if (!strcmp(code, "ALREADY_IN_MATCH")) {
             snprintf(R.rejoin, sizeof(R.rejoin), "%s", v10_str(inner, "serverUrl"));
             cJSON_Delete(R.rejoin_as);
             const cJSON *as = cJSON_GetObjectItem(inner, "assignment");
             R.rejoin_as = as ? cJSON_Duplicate(as, 1) : NULL;
-            R.status_lock = 1;
-        } else {
-            internal_error();
         }
+        queue_error_overlay(code, v10_num(inner, "cooldown", 0));
         render();
         return;
     }
@@ -630,6 +722,12 @@ static void handle_message(const cJSON *msg) {
             R.queued_at = (double) time(NULL);
             set_status("Looking for match... (0:00)", "\xf0\x9f\x94\x8d", "#5ce05a");
             if (!R.tick_timer) R.tick_timer = html_timer_add(1000, status_tick, NULL);
+        }
+        // the start button's startMatchmaking() resolved success (its socket open): playTick(0.5), playSelect(0.1)
+        // (deob-10.0.7.js:114975). KrunkNative's search is on once QUEUED comes; the play card's start has no sound.
+        if (R.start_sound) {
+            R.start_sound = 0;
+            play_tick_select();
         }
         R.busy = 0;
     } else if (!strcmp(status, "MATCHED")) {
@@ -778,6 +876,8 @@ static void fetch_kio_connection(void) { // fetchIsPlayerInRankedMatch
 static void start_matchmaking(void) { // startMatchmaking(allRegions)
     const RankedBackend be = ranked_active_backend();
     if (R.state != MM_IDLE || be == RANKED_BACKEND_NONE) return;
+    load_all_regions(); // the play card and the chat's Join Queue read the stored setting too (deob-10.0.7.js:119224, 228060)
+    R.pending.set = 0;  // startMatchmaking: error null (deob-10.0.7.js:99227-99231)
     if (be == RANKED_BACKEND_KRUNKER) return start_kio_queue();
     char t[256], path[512];
     token(t, sizeof(t));
@@ -889,12 +989,14 @@ void ranked_ui_on_init(Client *client) {
     if (!R.join_pending || !client) return;
     R.join_pending = 0;
     R.in_game_match = 1;
+    banner_connecting(0);
     uint8_t buf[NET_EXT_HEADER_SIZE];
     const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_JOINED_RANK, NULL, 0);
     if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, buf, n);
 }
 
 void ranked_ui_left_match(void) {
+    if (g_banner_connecting && !R.join_pending) banner_connecting(0);
     if (R.in_match) invalidate(); // the profile changed
     R.in_match = 0;
     R.in_game_match = 0;
@@ -921,21 +1023,70 @@ static int next_milestone_reward(const RankedBackend be) {
     return (int) v10_num(cJSON_GetArrayItem(cJSON_GetObjectItem(pr->json, "milestones"), last + 1), "reward", 0);
 }
 
+// The claim's FlyingCurrency (svelte-cow1ce, deob-10.0.7.js:99551-99597, mounted at 114409-114440): "+N" with RP's
+// emoji_events in #4caf50 flies on a quadratic curve from the marker's centre to the centre of the "Shop" menu item
+// (window centre / 100 px without one), the control point half way across and 50 px above the higher end; 1200 ms,
+// then it is destroyed.
+#define FLY_MS 1200
+static int g_fly_seq;
+static void fly_remove(void *user) {
+    char id[32];
+    snprintf(id, sizeof(id), "knRkFly%d", (int) (intptr_t) user);
+    const HtmlElem e = html_dom_by_id(id);
+    if (e) html_dom_remove(e);
+}
+static void fly_animate(void *user) { // onMount: animated = true (the class starts the keyframes)
+    char id[32];
+    snprintf(id, sizeof(id), "knRkFly%d", (int) (intptr_t) user);
+    const HtmlElem e = html_dom_by_id(id);
+    if (e) html_dom_set_class(e, "animated", 1);
+}
+static void flying_currency(const HtmlElem from, const int value) {
+    HtmlRect fr, br = {0};
+    const HtmlElem body = html_dom_body();
+    if (!from || !body || !html_dom_get_rect(from, &fr)) return;
+    html_dom_get_rect(body, &br);
+    const float fx = fr.x + fr.w / 2.0f, fy = fr.y + fr.h / 2.0f;
+    float tx = br.w / 2.0f, ty = 100.0f;
+    HtmlElem items[16];
+    const int n = html_dom_query_all(0, ".menu-item", items, 16);
+    for (int i = 0; i < n; i++) {
+        char text[32] = "";
+        html_dom_get_text(items[i], text, sizeof(text));
+        char *t = text;
+        while (*t == ' ' || *t == '\n' || *t == '\t') t++;
+        size_t len = strlen(t);
+        while (len && (t[len - 1] == ' ' || t[len - 1] == '\n' || t[len - 1] == '\t')) t[--len] = 0;
+        HtmlRect r;
+        if (!strcmp(t, "Shop") && html_dom_get_rect(items[i], &r)) {
+            tx = r.x + r.w / 2.0f, ty = r.y + r.h / 2.0f;
+            break;
+        }
+    }
+    const float mx = fx + 0.5f * (tx - fx), my = (fy < ty ? fy : ty) - 50.0f;
+    char amount[48], html[1024];
+    v10_fmt_int(amount, sizeof(amount), value);
+    const int seq = ++g_fly_seq;
+    snprintf(html, sizeof(html),
+             "<div id=\"knRkFly%d\" class=\"flying-currency svelte-cow1ce\" style=\"--duration: %dms; --currency-color: #4caf50; --start-x: %.6gpx; "
+             "--start-y: %.6gpx; --mid-x: %.6gpx; --mid-y: %.6gpx; --end-x: %.6gpx; --end-y: %.6gpx;\"><div class=\"currency-content svelte-cow1ce\">"
+             "<span class=\"currency-value svelte-cow1ce\">+%s</span> <div class=\"currency-symbol svelte-cow1ce\"><span class=\"material-icons svelte-cow1ce\">"
+             "emoji_events</span></div></div></div>",
+             seq, FLY_MS, fx, fy, mx, my, tx, ty, amount);
+    html_dom_insert_html(body, HTML_INSERT_BEFORE_END, html);
+    html_timer_add(0, fly_animate, (void *) (intptr_t) seq);
+    html_timer_add(FLY_MS, fly_remove, (void *) (intptr_t) seq);
+}
+
 static void on_claim(void *user, const int status, const cJSON *json) {
     (void) user;
     // v10 (onClaimMilestone, v10:112238-112240): a failed claim is silent, nothing is refetched (v10:98757-98764)
     if (status != 200 || !cJSON_IsTrue(cJSON_GetObjectItem(json, "success"))) return;
-    // v10 (v10:98744): the balance grows by the reward at once, then the profile is fetched again. A krunker.io
-    // account's balance is the account row (on_kio_claim changes it). The brain's is the cached profile's: it is bumped
-    // in place and the answers are expired, not dropped, so the bumped profile stays up until the new one comes.
-    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) {
-        invalidate(); // _33975.clear(): the profile (and RP balance) again
-    } else {
-        const V10Req *pr = get_profile(current_season());
-        cJSON *rp = pr->json ? cJSON_GetObjectItem(pr->json, "rankedPoints") : NULL;
-        if (cJSON_IsNumber(rp) && g_claim_reward > 0) cJSON_SetNumberValue(rp, rp->valuedouble + g_claim_reward);
-        v10_expire("/mm/ranked/");
-    }
+    // v10: the balance grows by the reward, the request cache is cleared (claimMilestone, deob-10.0.7.js:99417-99432),
+    // then the home fetches the profile again with its loading flag up, so the home reads "Loading profile data..."
+    // until it comes (onClaimMilestone -> loadData, deob-10.0.7.js:114296-114310, 114565). A krunker.io account's
+    // balance is the account row (on_kio_claim adds the reward); the brain's comes with the new profile.
+    invalidate();
     render();
 }
 
@@ -996,9 +1147,23 @@ static void on_kio_purchase(void *user, const int status, const cJSON *body) {
     cJSON_Delete(res);
 }
 
+static const cJSON *shop_row_of_skin(int skin);
+
 static void confirm_closed(const int accepted, void *user) {
     (void) user;
     if (!accepted || R.buying) return;
+    // after the confirm, v10 looks the item up in the shop it holds now, by its skin (rankedShopSkins.find(s => s.skin_id
+    // === item.index), deob-10.0.7.js:113520-113525): gone meanwhile, "Item not found in shop" and no request
+    const cJSON *row = shop_row_of_skin(g_buy.skin);
+    const V10Req *shop = get_shop();
+    if (!row && shop->status == 200 && shop->json) {
+        v10_view_push(v10_io_error("Error", "Item not found in shop. Please refresh and try again."), NULL, NULL, NULL);
+        return;
+    }
+    if (row) { // (a shop answer still loading keeps the row the dialog was opened for)
+        g_buy.id = (int) v10_num(row, "id", g_buy.id);
+        g_buy.price = (int) v10_num(row, "price", g_buy.price);
+    }
     R.buying = 1;
     render();
     if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) { // purchaseSkin({skin_id: the shop row's id}) (v10:111039)
@@ -1057,20 +1222,51 @@ static int mmr_restricted(const cJSON *s) {
     return !strcmp(v10_str(s, "restricted_by"), "mmr");
 }
 
-static void countdown(StrBuf *sb, const double expires_ms, const char *hash) {
+// The Countdown component (svelte-68lwmp): its text, recomputed every second by its setInterval(.., 1000)
+// (deob-10.0.7.js:113305-113333): "Nd Nh Nm", "Nh Nm Ns", "Nm Ns", "Ns", then "Expired" and the expired class.
+static int countdown_text(char *text, const size_t n, const double expires_ms) {
     const double left = expires_ms - (double) time(NULL) * 1000.0;
-    char text[48];
-    if (left <= 0) snprintf(text, sizeof(text), "Expired");
-    else {
-        const long long ms = (long long) left, d = ms / 86400000, h = ms % 86400000 / 3600000, m = ms % 3600000 / 60000, s = ms % 60000 / 1000;
-        if (d > 0) snprintf(text, sizeof(text), "%lldd %lldh %lldm", d, h, m);
-        else if (h > 0) snprintf(text, sizeof(text), "%lldh %lldm %llds", h, m, s);
-        else if (m > 0) snprintf(text, sizeof(text), "%lldm %llds", m, s);
-        else snprintf(text, sizeof(text), "%llds", s);
+    if (left <= 0) {
+        snprintf(text, n, "Expired");
+        return 0;
     }
+    const long long ms = (long long) left, d = ms / 86400000, h = ms % 86400000 / 3600000, m = ms % 3600000 / 60000, s = ms % 60000 / 1000;
+    if (d > 0) snprintf(text, n, "%lldd %lldh %lldm", d, h, m);
+    else if (h > 0) snprintf(text, n, "%lldh %lldm %llds", h, m, s);
+    else if (m > 0) snprintf(text, n, "%lldm %llds", m, s);
+    else snprintf(text, n, "%llds", s);
+    return 1;
+}
+
+// The 1 s tick of every countdown on the page (the shop grid's and the item view's): each container carries its
+// expiry (data-kn-expires, epoch ms); the tick stops once none is left.
+static void countdown_tick(void *user) {
+    (void) user;
+    R.countdown_timer = 0;
+    HtmlElem els[64];
+    const int n = html_dom_query_all(0, ".countdown-container.svelte-68lwmp", els, 64);
+    int live = 0;
+    for (int i = 0; i < n; i++) {
+        char v[32];
+        if (html_dom_get_attr(els[i], "data-kn-expires", v, sizeof(v)) < 0) continue;
+        live++;
+        char text[48];
+        const int running = countdown_text(text, sizeof(text), atof(v));
+        const HtmlElem t = html_dom_query(els[i], ".time-text");
+        if (t) html_dom_set_text(t, text);
+        html_dom_set_class(els[i], "expired", !running);
+    }
+    if (live) R.countdown_timer = html_timer_add(1000, countdown_tick, NULL);
+}
+
+static void countdown(StrBuf *sb, const double expires_ms, const char *hash) {
+    char text[48];
+    const int running = countdown_text(text, sizeof(text), expires_ms);
     (void) hash;
-    sb_appendf(sb, "<div class=\"countdown-container svelte-68lwmp%s\"><span class=\"material-icons svelte-68lwmp\">schedule</span> <span class=\"time-text svelte-68lwmp\">%s</span></div>",
-               left <= 0 ? " expired" : "", text);
+    sb_appendf(sb, "<div class=\"countdown-container svelte-68lwmp%s\" data-kn-expires=\"%.0f\"><span class=\"material-icons svelte-68lwmp\">schedule</span> "
+                   "<span class=\"time-text svelte-68lwmp\">%s</span></div>",
+               running ? "" : " expired", expires_ms, text);
+    if (!R.countdown_timer) R.countdown_timer = html_timer_add(1000, countdown_tick, NULL);
 }
 
 // _35204 with _37868: the item showcase (KrunkNative: its preview image, v10 a 3D viewer iframe) and
@@ -1130,13 +1326,19 @@ static void item_view(const cJSON *s) {
     v10_view_push(sb_finish(&sb), NULL, NULL, NULL);
 }
 
-static void buy(const int id) { // _37823: the confirm dialog, then /ranked/purchase
-    const cJSON *s = shop_row(id);
-    if (!s) {
-        v10_view_push(v10_io_error("Error", "Item not found in shop. Please refresh and try again."), NULL, NULL, NULL);
-        return;
+static const cJSON *shop_row_of_skin(const int skin) {
+    const V10Req *r = get_shop();
+    const cJSON *s;
+    cJSON_ArrayForEach(s, cJSON_GetObjectItem(r->json, "skins")) {
+        if ((int) v10_num(s, "skin_id", -1) == skin) return s;
     }
-    if (R.buying) return;
+    return NULL;
+}
+
+// _37823: the confirm dialog first, then the shop row of its skin and /ranked/purchase (deob-10.0.7.js:113512-113525)
+static void buy(const int id) {
+    const cJSON *s = shop_row(id);
+    if (!s || R.buying) return; // (a button of a row the shop no longer lists: nothing to confirm)
     g_buy.id = id;
     g_buy.skin = (int) v10_num(s, "skin_id", -1);
     g_buy.price = (int) v10_num(s, "price", 0);
@@ -1226,6 +1428,14 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
             R.history_page = 1;
             mh_reset(&R.mh);
         }
+        // every other tab is a fresh component too: it fetches on mount (Home / Profile getPlayerProfile, Leaderboard
+        // page 1 getLeaderboard, Shop getShop) with its loading view up (deob-10.0.7.js:113998-114015, 114123-114140,
+        // 114282-114310, 114664-114669); the request cache keeps nothing (TTL 0)
+        if (arg0 >= 0 && arg0 < TAB_COUNT && arg0 != R.tab) {
+            if (arg0 == TAB_LEADERBOARD) R.board_page = 1;
+            if (arg0 == TAB_SHOP) R.shown_rp = -1; // a new CurrencyDisplay
+            if (arg0 != TAB_HISTORY) invalidate();
+        }
         if (arg0 >= 0 && arg0 < TAB_COUNT) R.tab = arg0;
     } else if (!strcmp(name, "knRkOverlay")) { // the overlay's button / Escape
         const int was_shown = R.overlay.visible;
@@ -1244,6 +1454,7 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         int on = !R.all_regions;
         if (argc > 0 && (args[0].kind == HTML_ARG_THIS_CHECKED || args[0].kind == HTML_ARG_BOOL)) on = ev && args[0].kind == HTML_ARG_THIS_CHECKED ? ev->checked : (int) args[0].num;
         R.all_regions = on != 0;
+        R.all_regions_loaded = 1;
         html_storage_set("s_rankedAllRegions", R.all_regions ? "true" : "false");
     } else if (!strcmp(name, "knRkStart")) { // the start button: REJOIN / FIND MATCH / CANCEL
         if (ranked_active_backend() == RANKED_BACKEND_NONE || R.busy || R.state == MM_FOUND) return 1;
@@ -1271,14 +1482,22 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
             fetch_connection();
             return 1;
         }
-        if (R.state == MM_IDLE) start_matchmaking();
-        else if (R.state == MM_SEARCHING) cancel_matchmaking();
+        if (R.state == MM_IDLE) {
+            R.start_sound = 1; // played when the search starts (QUEUED); a failed start is silent (deob-10.0.7.js:114975)
+            start_matchmaking();
+        } else if (R.state == MM_SEARCHING) {
+            cancel_matchmaking();
+            play_tick_select(); // cancelMatchmaking() success: playTick(0.5), playSelect(0.1) (deob-10.0.7.js:114975)
+        }
     } else if (!strcmp(name, "knRkClaim")) { // onClaimMilestone(index): the next one, in order
         const RankedBackend be = ranked_active_backend();
         if (be == RANKED_BACKEND_NONE) return 1;
         // v10 (v10:112105-112116): the next milestone's reward flies off its marker before the request
         g_claim_reward = next_milestone_reward(be);
-        if (g_claim_reward > 0 && ev) v10_flying_number(ev->target, g_claim_reward);
+        if (g_claim_reward > 0 && ev) {
+            const HtmlElem marker = html_dom_closest(ev->target, ".milestone-marker"); // the click's currentTarget
+            flying_currency(marker ? marker : ev->target, g_claim_reward);
+        }
         if (be == RANKED_BACKEND_KRUNKER) { // claimMilestone(index) (v10:25974): the region index
             char path[96];
             snprintf(path, sizeof(path), "/player-profile/me/claim-milestone/region/%d", ranked_region_index(my_region()));
@@ -1334,6 +1553,15 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     return 1;
 }
 
+// Escape while the ranked popup's overlay is up (svelte-jxc66d, deob-10.0.7.js:114883-114896): a window keydown that
+// does what the button does (playTick(0.5), playSelect(0.1), then onaccept or onclose).
+int ranked_ui_escape(void) {
+    if (!R.overlay.visible || !v10_popup_open(POPUP_CLASS)) return 0;
+    play_tick_select();
+    ranked_ui_handle("knRkOverlay", NULL, NULL, 0);
+    return 1;
+}
+
 // ------------------------------------------------------------------ v10 markup
 
 static void rank_img(StrBuf *sb, const int rank, const char *cls, const char *alt) {
@@ -1367,11 +1595,19 @@ static Derived derive(const cJSON *p) {
     return d;
 }
 
+// A profile's or leaderboard row's match count as the modal reads it. v10 derives total_matches = wins + losses
+// (iiiìîîí, deob-10.0.7.js:99014-99017; getPlayerProfile and getLeaderboard run it, :99280), so krunker.io's rows
+// are counted that way; the brain's own total_matches counts draws on purpose (doc/v10/ranked-impl.md) and stays.
+static int row_matches(const cJSON *p) {
+    if (ranked_active_backend() == RANKED_BACKEND_KRUNKER) return (int) (v10_num(p, "wins", 0) + v10_num(p, "losses", 0));
+    return (int) v10_num(p, "total_matches", 0);
+}
+
 // _34236: the Ranked Progression component (svelte-6hxhl0)
 static void gen_progression(StrBuf *sb, const cJSON *profile_res) {
     const cJSON *p = cJSON_GetObjectItem(profile_res, "profile");
     const cJSON *ms = cJSON_GetObjectItem(profile_res, "milestones");
-    const int beta = current_season() == 0, matches = (int) v10_num(p, "total_matches", 0);
+    const int beta = current_season() == 0, matches = row_matches(p);
     const int last = (int) v10_num(p, "last_milestone_claimed", -1), max = RANKED_MAX_MATCHES, minm = RANKED_PLACEMENT_MATCHES;
     const double pct = matches * 100.0 / max > 100 ? 100 : matches * 100.0 / max;
     const double rate = beta ? (matches >= minm ? 1 : 0) : (matches >= minm ? (matches / 100.0 < 1 ? matches / 100.0 : 1) : 0);
@@ -1414,7 +1650,8 @@ static void gen_progression(StrBuf *sb, const cJSON *profile_res) {
         sb_appendf(sb, "<span class=\"next-reward svelte-6hxhl0\"><span class=\"highlight svelte-6hxhl0\">%d matches</span> until next reward</span>", next_at - matches);
     else sb_append(sb, "<span class=\"next-reward svelte-6hxhl0\">All milestones completed!</span>");
     sb_appendf(sb, "</div> <div class=\"summary-right svelte-6hxhl0\"><span class=\"estimated-points svelte-6hxhl0\"><span class=\"points-value svelte-6hxhl0\">%lld RP</span> estimated</span> "
-                   "<button class=\"details-toggle svelte-6hxhl0\" onclick=\"playTick(0.5);knRkDetails()\"><span class=\"material-icons svelte-6hxhl0\">%s</span></button></div></div> ",
+                   // the toggle only flips `expanded`, no sound (deob-10.0.7.js:99600, 114527)
+                   "<button class=\"details-toggle svelte-6hxhl0\" onclick=\"knRkDetails()\"><span class=\"material-icons svelte-6hxhl0\">%s</span></button></div></div> ",
                points, R.expanded ? "expand_less" : "expand_more");
     if (R.expanded) {
         char played[32];
@@ -1438,11 +1675,30 @@ static void gen_progression(StrBuf *sb, const cJSON *profile_res) {
     sb_append(sb, "</div>");
 }
 
+// The home container's has-scroll-bar (deob-10.0.7.js:114600-114620): an action on it toggles the class whenever its
+// content changes (MutationObserver) or the window resizes, from scrollHeight > clientHeight; the class adds 10 px of
+// right padding so the content clears the scroll bar. KN measures after every render (the engine lays out on the
+// query) and keeps the last answer in the markup so a re-render does not drop it.
+static int g_home_scroll;
+
+static void measure_home(void) {
+    const HtmlElem pop = v10_popup_open(POPUP_CLASS) ? html_dom_by_id("genericPop") : 0;
+    const HtmlElem home = pop ? html_dom_query(pop, ".home-container.svelte-17kea4i") : 0;
+    if (!home) return;
+    HtmlScroll sc;
+    if (!html_dom_get_scroll(home, &sc)) return;
+    const int has = sc.height > sc.client_h + 0.5f;
+    if (has != g_home_scroll) {
+        g_home_scroll = has;
+        html_dom_set_class(home, "has-scroll-bar", has);
+    }
+}
+
 // _34252 home (svelte-17kea4i)
 static void gen_home(StrBuf *sb) {
     const int season = current_season();
     const V10Req *r = get_profile(season);
-    sb_append(sb, "<div class=\"home-container svelte-17kea4i\">");
+    sb_appendf(sb, "<div class=\"home-container svelte-17kea4i%s\">", g_home_scroll ? " has-scroll-bar" : "");
     if (r->status == 0 && !r->json) {
         sb_append(sb, "<div class=\"loading svelte-17kea4i\">Loading profile data...</div></div>");
         return;
@@ -1607,9 +1863,9 @@ static void gen_leaderboard(StrBuf *sb) {
         sb_append(sb, "')\">");
         sb_append_esc(sb, name);
         sb_appendf(sb, "</button></td><td class=\"rank-cell svelte-1enb567\"><div class=\"rank-display svelte-1enb567\"><img class=\"rank-icon %ssvelte-1enb567\" src=\"./%s\" alt=\"%s\"> "
-                       "<span class=\"rank-text svelte-1enb567\" style=\"color: %s\">%s</span></div></td><td class=\"rank-cell svelte-1enb567\">%d</td><td class=\"stat-cell svelte-1enb567\">%.0f</td></tr>",
+                       "<span class=\"rank-text svelte-1enb567\" style=\"color: %s\">%s</span></div></td><td class=\"rank-cell svelte-1enb567\">%d</td><td class=\"stat-cell svelte-1enb567\">%d</td></tr>",
                    rank == RANK_KRACKED ? "kracked-icon " : "", ranked_rank_icon(rank), ranked_rank_name(rank), ranked_rank_color(rank), ranked_rank_name(rank),
-                   ranked_display(v10_num(p, "conservative_rating", 0)), v10_num(p, "total_matches", 0));
+                   ranked_display(v10_num(p, "conservative_rating", 0)), row_matches(p));
     }
     sb_append(sb, "</tbody></table></div></div> <div class=\"pagination svelte-1enb567\">");
     if (pages > 0)
@@ -1657,6 +1913,52 @@ static void schedule_expiry(const double expires_ms) {
     html_timer_add(left + 1000, shop_expired, NULL); // (a second over: the countdown reads 0 by then)
 }
 
+// The balance's CurrencyDisplay (showFlyingNumbers, deob-10.0.7.js:25732-25780, mounted at 114676-114686): it shows the
+// value from mount, and a change tweens the shown number to the new one over 800 ms (ease-out cubic, floored,
+// 25782-25805) and, when the old number was above 0, flies the difference off it (FlyingNumber at its centre, 10 px
+// above). A purchase (rankedPoints -= price) or a claim changes it while the shop is up.
+static void rp_tween_tick(void *user) {
+    (void) user;
+    R.rp_tween_timer = 0;
+    const double now = html_timer_now_ms(), t = R.rp_t0 > 0 && now > R.rp_t0 ? (now - R.rp_t0) / 800.0 : 0;
+    const double k = t >= 1 ? 1 : 1 - pow(1 - t, 3);
+    double v = floor(R.rp_from + (R.rp_to - R.rp_from) * k);
+    if (v < 0) v = 0;
+    if (t >= 1) v = R.rp_to;
+    R.shown_rp = v;
+    const HtmlElem amount = v10_popup_open(POPUP_CLASS) ? html_dom_query(html_dom_by_id("genericPop"), ".rp-balance .currency-amount") : 0;
+    if (amount) {
+        char text[48];
+        v10_fmt_int(text, sizeof(text), v);
+        html_dom_set_text(amount, text);
+    }
+    if (t < 1 && amount) R.rp_tween_timer = html_timer_add(16, rp_tween_tick, NULL);
+    else R.shown_rp = R.rp_to;
+}
+
+static void rp_fly(void *user) {
+    const double diff = (double) (intptr_t) user;
+    const HtmlElem bal = v10_popup_open(POPUP_CLASS) ? html_dom_query(html_dom_by_id("genericPop"), ".rp-balance .currency-display") : 0;
+    if (bal) v10_flying_number(bal, diff);
+}
+
+static double rp_display(const double rp, const int known) {
+    if (!known) return R.shown_rp >= 0 ? R.shown_rp : rp; // (a reload keeps the last number up)
+    if (R.shown_rp < 0) { // mount: the value as it is
+        R.shown_rp = R.rp_to = rp;
+        return rp;
+    }
+    if (rp != R.rp_to) {
+        const double from = R.shown_rp;
+        if (from > 0) html_timer_add(0, rp_fly, (void *) (intptr_t) (rp - from));
+        R.rp_from = from;
+        R.rp_to = rp;
+        R.rp_t0 = html_timer_now_ms();
+        if (!R.rp_tween_timer) R.rp_tween_timer = html_timer_add(16, rp_tween_tick, NULL);
+    }
+    return R.shown_rp;
+}
+
 static void gen_shop(StrBuf *sb) {
     const V10Req *r = get_shop();
     const cJSON *expiring;
@@ -1665,8 +1967,8 @@ static void gen_shop(StrBuf *sb) {
     sb_append(sb, "<div class=\"shop-container svelte-1gtpoav\"><div class=\"shop-header svelte-1gtpoav\"><div class=\"header-top svelte-1gtpoav\">"
                   "<div class=\"header-subtitle svelte-1gtpoav\">Spend your Ranked Points on exclusive items.</div> <div class=\"rp-balance svelte-1gtpoav\">");
     double rp = 0;
-    rp_balance(&rp);
-    v10_currency(sb, rp, "RP", "large", 0);
+    const int known = rp_balance(&rp);
+    v10_currency(sb, rp_display(rp, known), "RP", "large", 0);
     sb_append(sb, "</div></div></div> <div class=\"shop-grid svelte-1gtpoav\">");
     const cJSON *s;
     cJSON_ArrayForEach(s, cJSON_GetObjectItem(r->json, "skins")) {
@@ -1692,7 +1994,7 @@ static void gen_shop(StrBuf *sb) {
         sb_append(&c, "</div> <div class=\"buy-button-wrapper svelte-1q06uv7\">");
         if (restricted && req[0]) sb_appendf(&c, "<div class=\"mmr-requirement svelte-1q06uv7\">%s</div>", req);
         else sb_append(&c, "<!---->");
-        sb_appendf(&c, " <button class=\"buy-button svelte-1q06uv7\"%s onclick=\"knRkBuy(%d)\">", R.buying || sold || restricted ? " disabled" : "", id);
+        sb_appendf(&c, " <button class=\"buy-button svelte-1q06uv7\"%s onclick=\"knRkBuy(%d)\">", (R.buying && g_buy.id == id) || sold || restricted ? " disabled" : "", id);
         if (R.buying && g_buy.id == id) sb_append(&c, "<span class=\"material-icons svelte-1q06uv7\">hourglass_empty</span> <span class=\"svelte-1q06uv7\">Buying...</span>");
         else sb_append(&c, "<span class=\"material-icons svelte-1q06uv7\">shopping_cart</span> <span class=\"svelte-1q06uv7\">Buy</span>");
         sb_append(&c, "</button></div></div></div>");
@@ -1775,16 +2077,13 @@ static void render(void) {
     char *html = gen_popup();
     v10_popup_set(POPUP_CLASS, html);
     free(html);
+    measure_home();
 }
 
 static void open_popup(void) {
-    static int once;
-    if (!once) {
-        once = 1;
-        char v[8] = "";
-        R.all_regions = html_storage_get("s_rankedAllRegions", v, sizeof(v)) >= 0 && (v[0] == '1' || v[0] == 't');
-    }
+    load_all_regions();
     R.overlay.visible = 0;
+    overlay_reset(); // the component's popup state starts fresh on every mount (deob-10.0.7.js:113806-113814)
     if (ranked_active_backend() == RANKED_BACKEND_NONE && !R.scenario)
         show_overlay("Login Required", "You must be logged in to access Ranked Mode.", "GOT IT", "#5ce05a", "\xf0\x9f\x94\x92", 1);
     else if (active_level() >= 0 && active_level() < g_min_level) { // (krunker.io: the level is known once its game server said so)
@@ -1792,14 +2091,21 @@ static void open_popup(void) {
         snprintf(text, sizeof(text), "You must be level %d or higher to access Ranked Mode.", g_min_level);
         show_overlay("Level Required", text, "OK", "#ff3939", "\xf0\x9f\x94\x92", 1);
     }
+    if (R.pending.set) { // the stored queue error: the mounted component's effect opens its popup, then clears it
+        R.pending.set = 0;
+        apply_error_overlay(R.pending.code, R.pending.cooldown);
+    }
     invalidate(); // v10's component fetches on mount, nothing kept from an earlier visit (v10:98587-98639)
     R.tab = TAB_HOME; // the component starts on Home every time it mounts
+    R.shown_rp = -1;
     R.board_page = R.history_page = 1;
     mh_reset(&R.mh);
     if (R.state == MM_IDLE && !R.status_lock) fetch_connection();
+    g_home_scroll = 0; // a new home container
     char *html = gen_popup();
     v10_popup_show(POPUP_CLASS, html, render);
     free(html);
+    measure_home();
 }
 
 // windows[26].gen() returns '' in v10 (the Ranked UI is the popup)

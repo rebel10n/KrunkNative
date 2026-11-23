@@ -19,13 +19,18 @@ The client's script (KRUNKNATIVE_INPUT_SCRIPT, text checks from the [input_scrip
      "Failed to connect to matchmaking server" text
 
   H. the Home tab's map carousel is v10's markup (ranked_ui.c gen_home, v10:111965-111969): every pool map
-     is a plain .map-card with an unlabelled .map-image, none greyed, even one the brain marks unavailable.
+     is a plain .map-card whose .map-image alt is the map name (v10.0.7), none greyed, even one the brain marks unavailable.
      A --render-scenario run of tools/uidiff/scenarios/ranked-home.json (no brain) dumps the document
      (KRUNKNATIVE_SCENARIO_HTML) and checks it.
 
   I. the Shop's item view (ranked_ui.c item_view, v10's ShareButton, v10:103485-103520): Share copies the
      item's link and the button reads Copied! (title, the check icon, .share-copied) for 1.5 s, then
      Copy link again
+  K. sounds (the null audio's [audio] log, in order with the script's lines): the progression's details toggle
+     plays nothing (v10 only flips `expanded`, deob-10.0.7.js:99600); the search start plays playTick(0.5) and
+     playSelect(0.1) when its QUEUED comes (v10:99075-99080), not on the click; Escape with the error overlay up
+     does the overlay button's action with its sounds (svelte-jxc66d keydown, v10:114883-114896) and the popup stays
+
   J. the game announcement card with a ranked-queue action (v10:116880-117013): the node's console
      `announce ranked-queue <label>` shows the card to a joining player; the action starts the search
      (the button reads In Queue while it runs); an account under level 10 sees Requires Level 10, disabled
@@ -144,11 +149,17 @@ SCRIPT = """0 menu
 15100 scroll menuWindow
 15500 call openRankedMenu
 17000 nodes @rk .rankedMenuModal .start-button
+17500 clicksel .details-toggle
+17800 text @details .details-toggle
 20000 call knRkStart
 22000 text @err .overlay-title
 22050 text @errtext .overlay-description
 22100 nodes @still .rankedMenuModal .start-button
 22200 text @banner .ranked-matchmaking-status
+22300 down ESC
+22350 up ESC
+22800 nodes @esc_overlay .overlay-title
+22850 nodes @esc_popup .rankedMenuModal .start-button
 23500 quit
 """
 
@@ -281,6 +292,8 @@ def start_client(name, brain_port, storage, script=None):
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                 "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port, "KRUNKNATIVE_NET_TRANSPORT": "tcp",
+                # K: the null audio's plays as "[audio] ... play2d <clip>" lines (level 2)
+                "KRUNKNATIVE_AUDIO_LOG": "1", "KRUNKNATIVE_DEBUG": "2",
                 "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port, "KRUNKNATIVE_UPDATES_URL": "off"})
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -318,6 +331,16 @@ def scroll_of(text, element):
         if k == element and v != "-":
             return float(v)
     return None
+
+
+def plays_between(text, start, end):
+    """the clips played between the script line of probe @start and that of probe @end (the [audio] lines and the
+    [input_script] lines share stdout, in order); None when a probe line is missing"""
+    a = re.search(r"\[input_script\] \w+ t=\d+ @%s " % re.escape(start), text)
+    b = re.search(r"\[input_script\] \w+ t=\d+ @%s " % re.escape(end), text)
+    if not a or not b or b.start() < a.end():
+        return None
+    return re.findall(r"\[audio\] t=[\d.]+ play\w* (\S+)", text[a.end():b.start()])
 
 
 def attr_of(text, label, name):
@@ -362,8 +385,9 @@ def home_map_cards(build):
     greyed = [c for c in cards if "style" in c[0]]
     check("no map card is greyed, even the one the brain marks unavailable (v10 has no greying)", not greyed,
           "%d greyed" % len(greyed))
-    labelled = [c for c in cards if "alt=" in c[1]]
-    check("the map images carry no alt text (v10's markup: a broken image shows nothing)", not labelled, "%d with alt" % len(labelled))
+    unlabelled = [c for c in cards if not re.search(r'alt="[^"]+"', c[1])]
+    check("every map image's alt is the map's name (v10.0.7 sets alt = map.name, deob-10.0.7.js:114582)", not unlabelled,
+          "%d without" % len(unlabelled))
     if all(results):
         shutil.rmtree(work, ignore_errors=True)
     else:
@@ -475,6 +499,12 @@ def main():
               nodes(stext, "late") == 1, str(nodes(stext, "late")))
         check("after QUEUED the footer reads Looking for match...",
               "Looking for match" in (text_of(stext, "late_foot")[1] or ""), repr(text_of(stext, "late_foot")[1])[:80])
+        before_q = plays_between(stext, "rk", "early_foot")
+        after_q = plays_between(stext, "early_foot", "late_foot")
+        check("K: FIND MATCH plays nothing until QUEUED (v10 plays on QUEUED, v10:99075-99080)",
+              before_q is not None and "hover_0" not in before_q and "select_0" not in before_q, repr(before_q))
+        check("K: QUEUED plays playTick + playSelect once (v10 startSound)",
+              after_q is not None and after_q.count("hover_0") == 1 and after_q.count("select_0") == 1, repr(after_q))
 
         p, log = start_client("player", port, {"krunker_username": acc["name"], "krunker_token": acc["token"]})
         # the harness takes the brain away once the popup is up: FIND MATCH cannot reach the queue
@@ -510,6 +540,16 @@ def main():
         banner = text_of(text, "banner")[1] or ""
         check("an unreachable queue keeps v10's banner text (v10 socket onerror: Failed to connect to matchmaking server)",
               banner == "Failed to connect to matchmaking server", repr(banner)[:120])
+        details = text_of(text, "details")[1] or ""
+        check("K: the details toggle opens the progression details", "expand_less" in details, repr(details)[:80])
+        toggle = plays_between(text, "rk", "details")
+        check("K: the details toggle plays no sound (v10 only flips expanded, deob-10.0.7.js:99600)",
+              toggle is not None and "hover_0" not in toggle and "select_0" not in toggle, repr(toggle))
+        check("K: Escape closes the error overlay (v10 svelte-jxc66d keydown)", nodes(text, "esc_overlay") == 0, str(nodes(text, "esc_overlay")))
+        check("K: Escape on the overlay leaves the Ranked popup up", nodes(text, "esc_popup") == 1, str(nodes(text, "esc_popup")))
+        esc = plays_between(text, "banner", "esc_overlay")
+        check("K: Escape plays the overlay button's playTick(0.5) + playSelect(0.1)",
+              esc is not None and esc.count("hover_0") == 1 and esc.count("select_0") == 1, repr(esc))
     finally:
         for q in procs:
             if q.poll() is None:
