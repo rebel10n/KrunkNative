@@ -2099,6 +2099,7 @@ int krunker_net_account(KrunkerNetAccount *out) {
         out->level = K.link.account_level;
         out->role = K.link.account_role;
         out->dev = K.link.account_dev;
+        out->admin = K.link.account_admin;
         out->job_rating = K.link.account_job_rating;
         out->job_rating_pos = K.link.account_job_rating_pos;
     }
@@ -2589,6 +2590,10 @@ KrunkerHostBlock krunker_net_host_block(void) {
 }
 
 int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, void *user) {
+    return krunker_net_host_custom_ex(config, 0, done, user);
+}
+
+int krunker_net_host_custom_ex(const cJSON *config, const int rehost, const KrunkerHostDoneFn done, void *user) {
     if (!done || !cJSON_IsObject(config)) return 0;
     switch (krunker_net_host_block()) {
     case KRUNKER_HOST_NOT_CONNECTED:
@@ -2618,7 +2623,7 @@ int krunker_net_host_custom(const cJSON *config, const KrunkerHostDoneFn done, v
     hosting.config = copy;
     hosting.pool = pool;
     hosting.value = config_value(copy, &next);
-    if (K.state == KS_OPEN) sent = krunker_link_host_custom(&K.link, &hosting.value, 0, guest);
+    if (K.state == KS_OPEN) sent = krunker_link_host_custom(&K.link, &hosting.value, rehost ? 1 : 0, guest);
     if (!sent || !guest) hosting_free_config(); // sent at once (an account) or not at all: the values are done
     if (sent) {
         hosting.active = 1;

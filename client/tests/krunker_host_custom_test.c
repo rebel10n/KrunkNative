@@ -245,6 +245,24 @@ static void test_request_frame(void) {
     cJSON_Delete(cfg);
 }
 
+// (a') Rehost: createPrivateRoom(true) sends ["custom", config, rid, true] (deob-10.0.7.js:204803)
+static void test_rehost_frame(void) {
+    reset_all();
+    cJSON *cfg = sample_config();
+    CHECK(krunker_net_host_custom_ex(cfg, 1, on_done, NULL) == 1, "a rehost over an open official socket is sent");
+    if (K.out_head) {
+        KrunkerFrame f;
+        const int err = krunker_proto_decode(K.out_head->data, K.out_head->len, 0, &f);
+        CHECK(err == KRUNKER_PROTO_OK && f.argc == 3, "the rehost frame decodes with three args");
+        if (err == KRUNKER_PROTO_OK && f.argc == 3)
+            CHECK(krunker_frame_arg(&f, 2) && krunker_frame_arg(&f, 2)->type == KRUNKER_BOOL && krunker_frame_arg(&f, 2)->u.boolean,
+                  "rehost is true");
+        if (err == KRUNKER_PROTO_OK) krunker_frame_free(&f);
+    }
+    drain_out();
+    cJSON_Delete(cfg);
+}
+
 // the refusals: no official connection, a config that is not an object, no done, a second request
 static void test_refusals(void) {
     cJSON *cfg = sample_config();
@@ -454,6 +472,7 @@ int viewer_skin_define(const int index, const cJSON *skin) { (void) index; (void
 int main(void) {
     link_setup();
     test_request_frame();
+    test_rehost_frame();
     test_refusals();
     test_reply_game();
     test_reply_error();

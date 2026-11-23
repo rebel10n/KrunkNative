@@ -4094,7 +4094,7 @@ def run_native_kio_connect():
 def run_native_host_gate():
     """Start Game on Box Office while the brain's answer is still out, then a krunker.io game joined: the brain gate closes
     while the host request is in flight ("native-host-gate"). The late answer is not joined (its lobby would take the player
-    out of the krunker.io game) and it leaves no spinner: "Creating Game..." is shown only while the request is out, and the
+    out of the krunker.io game) and it leaves no spinner: v10's "Please wait..." is shown only while the request is out, and the
     answer is dropped with v10's failure text in #hostGameMsg (an open Host window; the krunker.io join closes it). Before the
     fix the answer joined the Box Office game and "[krunker] leaving the official game" followed."""
     label = "native-host-gate"
@@ -4141,8 +4141,8 @@ def run_native_host_gate():
     text = "\n".join(lines)
     sent = re.search(r"\[input_script\] text t=\d+ @sent n=\d+ checked=\d value=.*? text=(.*)", text)
     late = re.search(r"\[input_script\] text t=\d+ @late n=\d+ checked=\d value=.*? text=(.*)", text)
-    check(f"{label}: the Start Game request went out and showed 'Creating Game...' while it was out",
-          len(hosts) == 1 and sent and sent.group(1).strip() == "Creating Game...", (len(hosts), sent and sent.group(1)))
+    check(f"{label}: the Start Game request went out and showed 'Please wait...' while it was out",
+          len(hosts) == 1 and sent and sent.group(1).strip() == "Please wait...", (len(hosts), sent and sent.group(1)))
     joined_kio = next((i for i, l in enumerate(lines) if "[krunker] joining official game FRA:bbbbb" in l), None)
     # the answer's disposition: dropped (the fix) or joined (before it), whichever the log names
     answer = next((i for i, l in enumerate(lines) if "[mm] host answer not joined" in l or "[mm] joining CH2:late1" in l), None)
@@ -4155,8 +4155,8 @@ def run_native_host_gate():
     check(f"{label}: the krunker.io game is not left for the late answer",
           answer is not None and not any("[krunker] leaving the official game" in l for l in lines[answer:]),
           [l for l in lines[answer or 0:] if "leaving" in l][:2])
-    check(f"{label}: no 'Creating Game...' outlives the answer (the Host window shows none)",
-          not (late and late.group(1).strip() == "Creating Game..."), late and late.group(1))
+    check(f"{label}: no 'Please wait...' outlives the answer (the Host window shows none)",
+          not (late and late.group(1).strip() == "Please wait..."), late and late.group(1))
 
 
 def run_native_kio_region_only():

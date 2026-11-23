@@ -28,11 +28,20 @@ void host_flow_browse_community(void);
 char *host_flow_window_gen(void);
 // windows[7].switchTab(n) on the page: the tab and its body (the Start Game step refreshes the command)
 void host_flow_switch_tab(int tab);
-// The Host Game window opened from a Servers tab's "+ Host Game" (windows.1.hostGame): krunker (1) = krunker.io's
-// hosting, 0 = Box Office's. The window's backend is this one (not the session's): the session backend is not changed.
-void host_flow_open_backend(int host_type, int krunker);
-// Start Game (the choice's first option; createPrivateRoom, ui_handlers.c): hosts on the window's backend
-// (its tab's; the active one when it was opened from elsewhere)
-void host_flow_start(void);
+// createPrivateRoom(rehost) (ui_handlers.c, deob-10.0.7.js:204669-204811): v10's checks (a map, then the rows), then
+// "Please wait..." with Start Game / Rehost greyed, and the request on the window's backend (its tab's; the active one
+// when it was opened from elsewhere). rehost: a krunker.io dev / admin's Rehost on the game it hosts.
+void host_flow_create(int rehost);
+void host_flow_start(void); // host_flow_create(0)
+// customRoomResponse (deob-10.0.7.js:204617-204631): the hosting's answer gives Start Game / Rehost back; created (a
+// game was made) also empties the Raw Game Data field. servers_ui.c calls it for Box Office's answers.
+void host_flow_room_response(int created);
+// "+ Host Game" on a Servers tab: the chooser (window 42), whose server type then opens the Host Game window with
+// that tab's backend (krunker 1 = krunker.io, 0 = Box Office)
+void host_flow_set_chooser_backend(int krunker);
+// menu_show_window's hook: leaving the chooser for another window forgets the tab's backend
+void host_flow_on_show_window(int id);
+// openHostWindow(true): the chosen game's trash: no game, host type Custom, the window again
+void host_flow_clear_map(void);
 // knHostFlow(action, ...) (ui_handlers.c's module chain). -1 when the name is not the flow's.
 int host_flow_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

@@ -3213,6 +3213,7 @@ static void on_account(KrunkerLink *l, const KrunkerFrame *f) {
     // constructor's object form (player_role, ...) when the row has no such index
     l->account_role = (int) krunker_num(row_field(data, 18, "player_role"), 0);
     l->account_dev = (int) krunker_num(row_field(data, 12, "player_developer"), 0); // ~~row[12]
+    l->account_admin = krunker_num(row_field(data, 35, "player_admin"), 0) != 0;    // isAdmin = row[35] (deob-10.0.7.js:115186)
     l->account_job_rating = (int) krunker_num(row_field(data, 27, "jobrating"), 0);
     l->account_job_rating_pos = (int) krunker_num(row_field(data, 28, "jobratingpositive"), 0);
     const KrunkerValue *points = row_points(data);

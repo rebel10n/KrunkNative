@@ -8,7 +8,8 @@
     (krunk.io while no official krunker.io game is joined); switchTab 0 / 1 select them;
   - each tab is v10's layout of its own list: the map carousel of its published-map customs, Official Customs,
     Custom Games, then the regions. krunk.io never shows a krunker.io row and krunker.io never one of ours;
-  - "+ Host Game" on a tab opens the Host Game window on that tab's backend: krunker.io's Start Game says it needs
+  - "+ Host Game" on a tab opens v10's server type chooser (window 42), whose Custom card opens the Host Game window
+    on that tab's backend: krunker.io's Start Game says it needs
     a krunker.io game first (no official connection; the session stays Box Office's), krunk.io's goes to the brain
     (no brain here: "Box Office servers are unavailable").
 Exit code 0 when every check passed; the input-script log is kept in ~/.cache/kn-server-tabs-e2e-* on failure.
@@ -183,10 +184,12 @@ def grep(log, label):
 
 
 def host_steps(t, tab):
-    """From the tab's "+ Host Game": the Host Game window, the map, Start Game (v10's button in the tab row), the
-    message read back, and the Servers window again. Returns the time after the last step."""
-    script = ("%d clickid hostGameBtn\n%d call knHostFlow \"map\" \"kanji\"\n%d clickid startServBtn\n%d text @%s_msg [id=hostGameMsg]\n"
-              "%d call showWindow 2\n" % (t, t + 300, t + 400, t + 600, tab, t + 800))
+    """From the tab's "+ Host Game": v10's server type chooser (showWindow(42)), its Custom card (openHostWindow(false,
+    0)): the Host Game window, the map, Start Game (v10's button in the tab row), the message read back, and the
+    Servers window again. Returns the time after the last step."""
+    script = ("%d clickid hostGameBtn\n%d text @%s_chooser [id=menuWindow] .serverHostOpH\n%d call openHostWindow 0 0\n"
+              "%d call knHostFlow \"map\" \"kanji\"\n%d clickid startServBtn\n%d text @%s_msg [id=hostGameMsg]\n"
+              "%d call showWindow 2\n" % (t, t + 100, tab, t + 200, t + 300, t + 400, t + 600, tab, t + 800))
     return script, t + 1000
 
 
@@ -274,11 +277,14 @@ def main():
     check(n_ks >= 0 and n_ke >= 0 and fold(soc_k) == "" and fold(ed_k) == "",
           f"krunk.io without a brain: its Social and Editor counts are blank, never a 0 ({fold(soc_k)!r}, {fold(ed_k)!r})")
 
-    # + Host Game: the window's backend is the tab's
+    # + Host Game: v10's chooser first (showWindow(42)), then the window, whose backend is the tab's
+    for tab in ("krunk", "kio"):
+        _, chooser = text(log, "@%s_chooser" % tab)
+        check(fold(chooser) == "Select a Server Type to Host", f"{tab}: + Host Game opens the server type chooser ({fold(chooser)!r})")
     _, msg_k = text(log, "@krunk_msg")
     # no brain here: the request went to the brain (/mm/host-game) and its refusal shows v10's generic line
     check("/mm/host-game" in log and any(s in fold(msg_k or "") for s in ("Box Office servers are unavailable", "Could not reach the matchmaker",
-          "Creating Game", "Please try again")),
+          "Please wait", "Please try again")),
           f"krunk.io's Start Game goes to the brain ({fold(msg_k)!r})")
     _, msg_o = text(log, "@kio_msg")
     check("Join a krunker.io game first" in fold(msg_o or ""),

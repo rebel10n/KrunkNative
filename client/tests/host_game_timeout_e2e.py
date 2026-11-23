@@ -6,7 +6,8 @@
 A stub brain answers /mm/status (so the Host window's Start Game is sent to it) and holds /mm/host-game without an
 answer. The client's brain timeout (backend_native.c BACKEND_HTTP_TIMEOUT_MS, 8 s) then ends the request with status 0,
 and the Host window's error line is v10's failure text, "Please try again." (on_host -> host_not_created, custom.tryagain),
-not "Creating Game..." left behind. The brain sees the Start Game once: a /mm/host-game is never retried (it may have
+not v10's "Please wait..." left behind; Start Game is greyed (pointer-events none) while the request is out and given
+back after it (createPrivateRoom / customRoomResponse, deob-10.0.7.js:204800-204802, :204627). The brain sees the Start Game once: a /mm/host-game is never retried (it may have
 created a game already).
 
 Exit code 0 when every check passed; the input-script log is kept in ~/.cache/kn-hostgame-timeout-e2e-* on failure.
@@ -104,8 +105,10 @@ SCRIPT = """
 1695 call knHostFlow "map" "kanji"
 1700 clickid startServBtn
 1750 text @creating [id=hostGameMsg]
+1760 style @busy startServBtn:pointer-events
 1800 waitfor [id=hostGameMsg] span.error
 1850 text @msg [id=hostGameMsg]
+1860 style @free startServBtn:pointer-events
 1900 quit
 """
 
@@ -120,10 +123,14 @@ def main():
         release.set()
         brain.shutdown()
 
-    check(fold(text(log, "@creating")) == "Creating Game...", f"the request is out: the Host window says Creating Game... ({text(log, '@creating')!r})")
+    check(fold(text(log, "@creating")) == "Please wait...", f"the request is out: the Host window says Please wait... ({text(log, '@creating')!r})")
+    busy = re.search(r"\[input_script\] style t=\d+ @busy \S+?=(\S*)", log)
+    free = re.search(r"\[input_script\] style t=\d+ @free \S+?=(\S*)", log)
+    check(busy and busy.group(1) == "none", f"... and Start Game is greyed, no clicks ({busy and busy.group(1)!r})")
+    check(free and free.group(1) == "all", f"the answer gives Start Game back ({free and free.group(1)!r})")
     msg = fold(text(log, "@msg"))
     check(msg == "Please try again.", f"no answer by the timeout: the Host window says v10's Please try again. ({msg!r})")
-    check("Creating Game" not in msg, "the spinner does not outlive the request")
+    check("Please wait" not in msg, "the wait does not outlive the request")
     host_asks = [p for p in handler.paths if p == "/mm/host-game"]
     check(len(host_asks) == 1, f"the brain sees the Start Game once, never retried ({len(host_asks)} asks)")
 

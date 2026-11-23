@@ -60,7 +60,7 @@ does not stop a solver that pays that cost. The sign-in's per-IP limits stay in 
 | --- | --- | --- | --- |
 | Sign-in with a password (login card, hub login) | `login` | the social frame `["a", 1, [name, pass, null], <payload>]` (sendAccountRequest's captcha slot) | `social_ws.c` `sh_auth` |
 | Registration | `register` | `["a", 0, [name, pass, ref, email], <payload>]` | `social_ws.c` `sh_auth` |
-| Hosting a game on Box Office servers | `hosting` | `GET /mm/host-game?...&captcha=<payload>` | `public_routes.c` `h_host_game` (also a POST body's `captcha`) |
+| Hosting a game on Box Office servers (guests only: an account sends directly, deob-10.0.7.js:204803) | `hosting` | `GET /mm/host-game?...&captcha=<payload>` | `public_routes.c` `h_host_game` (also a POST body's `captcha`) |
 | Seeking a game (only after `CaptchaRequired`) | `seek` | `GET /mm/seek-game?...&validationToken=<fresh>&captchaToken=<payload>`, at most twice | `public_routes.c` `h_seek_game` |
 | In the game (the server's `cpt`) | `game` | `NET_EXT_CAPTCHA_ANSWER` [payload] to the game server, which asks the brain | `captcha_node_op` (internal WS), bound to that connection's challenge |
 | HTTP sign-in (tools, the coordinator API) | `login` / `register` | `POST /auth/login`, `/auth/register` `{captcha}` | `auth.c` `password_auth` |
@@ -139,14 +139,16 @@ krunker.io's secret). It never solves, farms or proxies Turnstile; the player do
   404, an error, no answer, a challenge it refuses: not SHA-256 / -384 / -512 or over the cap, no solution, 30 s,
   `KN_CAPTCHA_DEADLINE_MS`). The request then goes without one, as v10.0.3 sends `loginUsername` without `b` when
   Turnstile gave none. Old brains keep working with new clients; the brain decides.
-- Nothing is shown: the sign-in's "Please wait..." and the host's "Creating Game..." stay up, as v10.0.3's
+- Nothing is shown: the sign-in's "Please wait..." and the host's "Please wait..." (generic.wait, Start Game greyed) stay up, as v10.0.3's
   interaction-only Turnstile shows nothing. The sign-in's answer timeout (8 s, `account_ui.c`) starts when the frame is
   sent, not while the proof of work runs. A second Login click replaces the first; a logout drops one in flight.
 - `kn_captcha_send_frame(purpose, frame, slot, send)`: the social frame helper (`account_ui.c`'s
   `send_account_request_email`, `social_ui.c`'s hub login): the payload in `frame[slot]` (null without one), sent, then
   the frame's strings (the password) wiped.
-- Hosting: `servers_ui.c` `servers_ui_host_game` asks for the `hosting` captcha, then sends `/mm/host-game` with
-  `&captcha=` (`host_captcha_done`); a request that cannot go ends like an unanswered one (`custom.tryagain`).
+- Hosting: `servers_ui.c` `servers_ui_host_game` asks a guest for the `hosting` captcha (v10.0.7's createPrivateRoom:
+  an account sends at once, a guest solves "hosting" first, deob-10.0.7.js:204803-204805), then sends `/mm/host-game`
+  with the captcha (`host_captcha_done`; a POST body when the config is too long for the request line); the brain
+  asks a captcha of guests only; a request that cannot go ends like an unanswered one (`custom.tryagain`).
 
 ### Tests
 

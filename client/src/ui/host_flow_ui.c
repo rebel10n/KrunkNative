@@ -5,9 +5,9 @@
 // on the page only), so every value stays in the page until a step reads it back (sync_page). The state
 // (g_flow) keeps them across a trip to the Dedicated Server window and back (knHostFlow 'reopen').
 //
-// The last step offers, by the window's backend: the Servers tab it was opened from (host_flow_open_backend,
-// the "+ Host Game" of krunk.io or krunker.io), else the active one (krunker_net_active(): the official krunker.io
-// connection). The session's backend is never changed here.
+// The last step offers, by the window's backend: the Servers tab it was opened from (host_flow_set_chooser_backend,
+// the "+ Host Game" of krunk.io or krunker.io, then the chooser), else the active one (krunker_net_active(): the
+// official krunker.io connection). The session's backend is never changed here.
 //   krunker.io  -> krunker.io's official hosting: v10's CUSTOM_SERVER request (krunker_net_host_custom); a map
 //                  chosen on krunker.io's Games window goes by its name (customMap), a Box Office one is refused
 //   krunk.io    -> Box Office servers: the brain hosts the game (/mm/host-game, servers_ui_host_game)
@@ -30,6 +30,9 @@
 #include <shared.h>
 #include <ui_host_config.h>
 #include <ui_logic.h>
+#include <backend.h>             // the brain's getMapPreset (/webhooks/general/maps/config)
+#include <krunker_account.h>     // krunker_host_url: krunker.io's getMapPreset
+#include <krunker_kio_routes.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -60,7 +63,24 @@ static struct {
     int public_port;                       // --public-port (0: none)
     int headless;                          // --headless
     char message[192];                     // #hostGameMsg's text when the window is generated
+    char *raw;                             // the Raw Game Data field's text (rawMapData; Custom with no community map)
+    int busy;                              // a hosting request is out: Start Game / Rehost greyed (deob-10.0.7.js:204800-204802)
 } g_flow;
+
+// windows[7].presets[name] (deob-10.0.7.js:219690-219700): the chosen community map's preset, asked once per name
+// (getMapPreset, /webhooks/general/maps/config?mn=<name> -> {da, fu}). v10 keeps one per name for the session;
+// KrunkNative keeps the last one asked.
+static struct {
+    char name[96];   // the map it is for ("" none asked)
+    int loaded;      // presetLoaded ran (0 while the request is out: "Loading preset...")
+    cJSON *data;     // JSON.parse(da) as the rows' preset ({modes, classes, ..., settings}); NULL = 'DEFAULT'
+    double funds;    // fu: the map's KR funds (KR Rewards is offered while > 0)
+    unsigned gen;    // the request's, so a stale answer is dropped
+} g_preset;
+
+// The "+ Host Game" of a Servers tab opens the chooser (window 42, deob-10.0.7.js:218502: showWindow(42)); the tab's
+// backend waits there for the server type picked next (host_flow_open). -1: none.
+static int g_chooser_backend = -1;
 
 // Krunker's own map (the Select tab's checkboxes): official and hostable in the catalogue
 static int official_hostable(const MapCatalogEntry *e) {
@@ -135,12 +155,11 @@ static int read_field(const char *id, char *out, const size_t size) {
     return 1;
 }
 
-// The page's values into the state (the window open only): the Select tab's checkboxes, the self-host
-// fields, the password and the rows (ui_host_config_collect). Returns 0 with `err` set when the rows are
-// not valid (no mode, no class, a long password); the state then keeps the rows it had.
-static int sync_page(char *err, const size_t err_size) {
-    if (err_size) err[0] = 0;
-    if (!page_open()) return 1;
+#define RAW_DATA_MAX (1 << 20) // a pasted game (the editor's export; the published maps' limit is 500k characters)
+
+// The Select tab's values into the state (the window open only): the map checkboxes and the Raw Game Data field
+static void sync_maps(void) {
+    if (!page_open()) return;
     for (size_t i = 0; i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
         if (!listed_map(e)) continue;
@@ -149,6 +168,21 @@ static int sync_page(char *err, const size_t err_size) {
         const HtmlElem box = html_dom_by_id(id);
         if (box) g_flow.maps[e->index] = html_dom_get_checked(box) ? 1 : 0;
     }
+    char *raw = malloc(RAW_DATA_MAX);
+    if (raw && read_field("rawMapData", raw, RAW_DATA_MAX)) {
+        free(g_flow.raw);
+        g_flow.raw = raw[0] ? strdup(raw) : NULL;
+    }
+    free(raw);
+}
+
+// The page's values into the state (the window open only): the Select tab's (sync_maps), the self-host
+// fields, the password and the rows (ui_host_config_collect). Returns 0 with `err` set when the rows are
+// not valid (no mode, no class, a long password); the state then keeps the rows it had.
+static int sync_page(char *err, const size_t err_size) {
+    if (err_size) err[0] = 0;
+    if (!page_open()) return 1;
+    sync_maps();
     read_field("passCode", g_flow.password, sizeof(g_flow.password));
     cJSON *request = ui_host_config_collect(g_flow.host_type, err, err_size);
     if (!request) return 0;
@@ -249,7 +283,7 @@ static void host_config_fields(cJSON *config) {
         if (!cJSON_HasObjectItem(config, "passCode")) cJSON_AddNullToObject(config, "passCode");
         return;
     }
-    const size_t raw_size = 1 << 20; // a pasted map
+    const size_t raw_size = RAW_DATA_MAX;
     char *raw = malloc(raw_size);
     cJSON_DeleteItemFromObjectCaseSensitive(config, "rawMapData");
     if (raw && read_field("rawMapData", raw, raw_size)) cJSON_AddStringToObject(config, "rawMapData", raw);
@@ -296,15 +330,18 @@ static cJSON *host_config(void) {
     }
     if (g_flow.custom_key[0]) cJSON_AddStringToObject(config, "customMap", g_flow.custom_key);
     else cJSON_AddNullToObject(config, "customMap"); // customMap: the picked map's name || null (deob-10.0.3.js:229831)
-    cJSON_AddBoolToObject(config, "krRewards", 0);
-    cJSON_AddBoolToObject(config, "defaultSetts", 0);
+    // krRewards / defaultSetts: the community map's switches, !!el && el.checked (deob-10.0.7.js:204703-204709)
+    const HtmlElem kr = html_dom_by_id("krRewards"), def = html_dom_by_id("defaultSetts");
+    cJSON_AddBoolToObject(config, "krRewards", kr && html_dom_get_checked(kr));
+    cJSON_AddBoolToObject(config, "defaultSetts", def && html_dom_get_checked(def));
     if (!cJSON_HasObjectItem(config, "share")) cJSON_AddBoolToObject(config, "share", 0); // the Share on Hub row's (ui_host_config_collect)
     host_config_fields(config);
     return config;
 }
 
+// createPrivateRoom's first check: a checked map, the chosen game or Raw Game Data (deob-10.0.7.js:204675)
 static int any_map(void) {
-    if (g_flow.custom_key[0]) return 1;
+    if (g_flow.custom_key[0] || (g_flow.raw && g_flow.raw[0])) return 1;
     for (size_t i = 0; i < FLOW_MAP_MAX; i++)
         if (g_flow.maps[i]) return 1;
     return 0;
@@ -312,8 +349,50 @@ static int any_map(void) {
 
 // ------------------------------------------------------------------ Start Game (the choice's first option)
 
+// The community map's preset is still being asked for (v10's iiIiiíî, deob-10.0.7.js:219845): "Loading preset...",
+// tabs 1-3 greyed out and Start Game greyed with no onclick
+static int preset_loading(void) { return g_flow.custom_key[0] && !(g_preset.loaded && !strcmp(g_preset.name, g_flow.custom_name)); }
+
+// Force Default Settings starts on (v10's iìÍiììí: a community map whose preset came, :219841-219843)
+static int default_forced(void) { return g_flow.custom_key[0] && !preset_loading(); }
+
+// canRehost (deob-10.0.7.js:115245: isDev || isAdmin) on a game this socket hosts (iíîïîïî): krunker.io's only, the
+// one backend with a rehost (CUSTOM_SERVER's 4th argument). Box Office's brain has none.
+static int can_rehost(void) {
+#ifdef __EMSCRIPTEN__
+    return 0;
+#else
+    KrunkerNetAccount account;
+    return krunker_backend() && krunker_net_is_host() && krunker_net_account(&account) && (account.dev || account.admin);
+#endif
+}
+
+// createPrivateRoom's "Please wait..." (deob-10.0.7.js:204800-204802): Start Game and Rehost greyed, no clicks; the
+// answer gives them back (customRoomResponse, :204627-204628). v10 asks getElementById: the first element with the id.
+static void set_buttons_busy(const int busy) {
+    g_flow.busy = busy;
+    static const char *const ids[] = {"startServBtn", "rehostServBtn"};
+    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        const HtmlElem el = html_dom_by_id(ids[i]);
+        if (!el) continue;
+        html_dom_set_style(el, "background", busy ? "#595959" : i ? "var(--red)" : "#4582d1");
+        html_dom_set_style(el, "pointer-events", busy ? "none" : "all");
+    }
+}
+
+void host_flow_room_response(const int created) {
+    set_buttons_busy(0);
+    if (!created) return;
+    // a game was made: the Raw Game Data field is emptied (deob-10.0.7.js:204630)
+    const HtmlElem raw = html_dom_by_id("rawMapData");
+    if (raw) html_dom_set_value(raw, "");
+    free(g_flow.raw);
+    g_flow.raw = NULL;
+}
+
 static void on_krunker_hosted(void *user, const char *game_id, const char *region, const char *error) {
     (void) user;
+    host_flow_room_response(game_id != NULL);
     if (!game_id) {
         set_message(error && *error ? error : I18N("custom.tryagain", "Please try again."), 1);
         return;
@@ -323,16 +402,25 @@ static void on_krunker_hosted(void *user, const char *game_id, const char *regio
     krunker_net_join(menu_ui()->client, game_id, region ? region : "");
 }
 
-// Start Game on the active backend: krunker.io's official hosting or Box Office's brain. The rows are
-// checked first (v10's messages); a refused hosting says so in #hostGameMsg.
-void host_flow_start(void) {
+// A refusal before anything was sent: the buttons come back with the reason
+static void refused(const char *text) {
+    host_flow_room_response(0);
+    set_message(text, 1);
+}
+
+// createPrivateRoom(rehost) (deob-10.0.7.js:204669-204811) on the window's backend: krunker.io's official hosting or
+// Box Office's brain. v10's checks in its order: a map (a checked one, the chosen game or Raw Game Data), then the
+// rows (a mode, a class, the password's length); then "Please wait..." with the buttons greyed until the answer.
+void host_flow_create(int rehost) {
+    if (preset_loading() || g_flow.busy) return; // the greyed button has no onclick / no pointer events (:219942)
+    sync_maps();
+    if (!any_map()) {
+        set_message(I18N("custom.map.missing", "Select at least one Game or Map"), 1);
+        return;
+    }
     char err[160] = "";
     if (!sync_page(err, sizeof(err)) || !g_flow.request) {
         set_message(err[0] ? err : I18N("kn.host.invalidSettings", "Invalid game settings"), 1);
-        return;
-    }
-    if (!any_map()) {
-        set_message(I18N("custom.map.missing", "Select at least one Game or Map"), 1);
         return;
     }
     cJSON *config = host_config();
@@ -340,13 +428,15 @@ void host_flow_start(void) {
         set_message(I18N("kn.host.invalidSettings", "Invalid game settings"), 1);
         return;
     }
-    int sent = 0;
+    rehost = rehost && can_rehost(); // iíîïîïî && rehost && account.canRehost (:204672)
+    set_message(I18N("generic.wait", "Please wait..."), 0);
+    set_buttons_busy(1);
     if (krunker_backend()) {
 #ifdef __EMSCRIPTEN__
-        set_message(I18N("kn.hostflow.kio.web", "Hosting on krunker.io is not available in the browser build"), 1);
+        refused(I18N("kn.hostflow.kio.web", "Hosting on krunker.io is not available in the browser build"));
 #else
         if (g_flow.custom_key[0] && !g_flow.custom_official) { // a Box Office (kn_brain) community map is not on krunker.io
-            set_message(I18N("kn.hostflow.kio.community", "Community maps are hosted on Box Office servers or on your own server."), 1);
+            refused(I18N("kn.hostflow.kio.community", "Community maps are hosted on Box Office servers or on your own server."));
         } else {
             // a krunker.io map is hosted by its name, as v10.0.7's createPrivateRoom sends it (customMap: the chosen
             // map's name, deob-10.0.7.js:204711); its data comes with the game's init (krunker_map_source.h)
@@ -354,30 +444,31 @@ void host_flow_start(void) {
             // the refusals say why (krunker_net_host_block): the player can act on each one
             switch (krunker_net_host_block()) {
             case KRUNKER_HOST_NOT_CONNECTED:
-                set_message(I18N("kn.hostflow.kio.notConnected", "Join a krunker.io game first: a game hosted on krunker.io starts from your official connection."), 1);
+                refused(I18N("kn.hostflow.kio.notConnected", "Join a krunker.io game first: a game hosted on krunker.io starts from your official connection."));
                 break;
             case KRUNKER_HOST_BUSY:
-                set_message(I18N("kn.hostflow.kio.busy", "krunker.io is still answering the last game. Wait for it, then try again."), 1);
+                refused(I18N("kn.hostflow.kio.busy", "krunker.io is still answering the last game. Wait for it, then try again."));
                 break;
             case KRUNKER_HOST_READY:
-                set_message(I18N("generic.wait", "Please wait..."), 0);
-                sent = krunker_net_host_custom(config, on_krunker_hosted, NULL);
-                if (!sent) set_message(I18N("kn.hostflow.kio.unavailable", "krunker.io servers are unavailable right now. Try again, or host it yourself."), 1);
+                if (!krunker_net_host_custom_ex(config, rehost, on_krunker_hosted, NULL))
+                    refused(I18N("kn.hostflow.kio.unavailable", "krunker.io servers are unavailable right now. Try again, or host it yourself."));
                 break;
             }
         }
 #endif
     } else if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
         // one backend per session: the brain sends nothing while krunker.io is the active backend (account_ui.c)
-        set_message(I18N("kn.hostflow.box.gated", "Box Office servers are not reachable while you play on krunker.io. Leave that game first."), 1);
+        refused(I18N("kn.hostflow.box.gated", "Box Office servers are not reachable while you play on krunker.io. Leave that game first."));
     } else {
         char *json = cJSON_PrintUnformatted(config);
-        sent = json ? servers_ui_host_game(json) : 0; // "Creating Game..." until the brain answers
+        const int sent = json ? servers_ui_host_game(json) : 0; // the brain's answer gives the buttons back
         free(json);
-        if (!sent) set_message(I18N("kn.hostflow.box.unavailable", "Box Office servers are unavailable right now. Host it yourself with the dedicated server."), 1);
+        if (!sent) refused(I18N("kn.hostflow.box.unavailable", "Box Office servers are unavailable right now. Host it yourself with the dedicated server."));
     }
     cJSON_Delete(config);
 }
+
+void host_flow_start(void) { host_flow_create(0); }
 
 // ------------------------------------------------------------------ Play this map offline (KrunkNative only)
 
@@ -485,18 +576,184 @@ static char *command_html(const int shown) {
 }
 
 // The v10 tab bar: Select, Game Settings, Advanced, Server (windows[7].switchTab) and Start Game, the choice.
-// The host type's disTabs are bigMenTabDis (greyed, pointer-events:none; deob-10.0.5.js:218023, :218112).
+// bigMenTabDis (greyed, pointer-events:none; deob-10.0.7.js:219935-219939): the host type's disTabs, Game Settings and
+// Advanced while a community map's defaults are forced, and those and Server while its preset loads (:219846-219849).
 static void append_tabs(StrBuf *sb, const int active) {
     static const char *const names[] = {"Select", "Game Settings", "Advanced", "Server"};
-    const unsigned int dis = host_window()->dis_tabs;
+    const int loading = preset_loading();
+    unsigned int dis = host_window()->dis_tabs;
+    if (default_forced()) dis |= 1u << 1 | 1u << 2;
+    if (loading) dis |= 1u << 1 | 1u << 2 | 1u << 3;
     sb_append(sb, "<div class=\"bigMenTabs\" style=\"margin-top:30px !important;margin-left:0px;\">");
     for (int t = 0; t < 4; t++) {
         sb_appendf(sb, "<div id=\"hstTab%d\" class=\"bigMenTab%s\" onclick=\"playSelect();windows[7].switchTab(%d)\" onmouseenter=\"playTick(0.1);\">%s</div>",
                    t, t == active ? " bigMenTabA" : dis & 1u << t ? " bigMenTabDis" : "", t, names[t]);
     }
-    // v10.0.2's startServBtn (captured host window): a button of the tab row, no tab of its own
-    sb_appendf(sb, "<div class=\"bigMenTab\" id=\"startServBtn\" style=\"background:#4582d1!important;border-top-right-radius:6px;border-bottom-right-radius:6px;\" "
-                   "onclick=\"playSelect(0.1);createPrivateRoom();\">%s</div></div>", I18N("kn.hostflow.start", "Start Game"));
+    // startServBtn, a button of the tab row (deob-10.0.7.js:219941-219944): greyed with no onclick while the preset
+    // loads (and, here, while a request is out: createPrivateRoom greyed it). A dev / admin hosting this game gets
+    // Rehost too (createPrivateRoom(true)), which v10 gives Start Game's id.
+    const int rehost = can_rehost();
+    const int grey = loading || g_flow.busy;
+    sb_appendf(sb, "<div class=\"bigMenTab\" id=\"startServBtn\" style=\"background:%s!important;%s%s\" onclick=\"%s\">%s</div>",
+               grey ? "#595959" : "#4582d1", rehost ? "" : "border-top-right-radius:6px;border-bottom-right-radius:6px;",
+               g_flow.busy ? "pointer-events:none;" : "", loading ? "" : "playSelect(0.1);createPrivateRoom();", I18N("kn.hostflow.start", "Start Game"));
+    if (rehost) {
+        sb_appendf(sb, "<div class=\"bigMenTab\" id=\"startServBtn\" style=\"background:%s!important;border-top-right-radius:6px;border-bottom-right-radius:6px;%s\" "
+                       "onclick=\"%s\">Rehost</div>",
+                   grey ? "#595959" : "var(--red)", g_flow.busy ? "pointer-events:none;" : "", loading ? "" : "playSelect(0.1);createPrivateRoom(true);");
+    }
+    sb_append(sb, "</div>");
+}
+
+// ------------------------------------------------------------------ the community map (deob-10.0.7.js:219949-219950)
+
+// iîìíïïí: a number with thousands commas
+static void commas(char *out, const size_t size, const double value) {
+    char digits[32];
+    snprintf(digits, sizeof(digits), "%.0f", value > 0 ? value : 0);
+    const size_t n = strlen(digits);
+    size_t k = 0;
+    for (size_t i = 0; i < n && k + 2 < size; i++) {
+        if (i && (n - i) % 3 == 0) out[k++] = ',';
+        out[k++] = digits[i];
+    }
+    out[k] = 0;
+}
+
+// The chosen game's card: its thumbnail with Change Game (showGames(1)), the trash (openHostWindow(true)), its name
+// (#commMap) and the Players / Minutes / Gamemodes / Likes lines, which v10.0.7 leaves at "..."
+static void append_map_card(StrBuf *sb) {
+    char thumb[48] = "";
+    const int index = map_catalog_index_of_key(g_flow.custom_key);
+    const MapCatalogEntry *e = index >= 0 ? map_catalog_at((size_t) index) : NULL;
+    const char *image = e && map_catalog_thumb(e, thumb, sizeof(thumb)) ? thumb : "./img/noimg.png";
+    sb_append(sb, "<div style='margin-top:30px;'><div style=\"width:360px;display:inline-block;margin-left:10px;margin-right:20px;\">"
+                  "<div class=\"setSugBox sugBoxSelCus blackShad\" style=\"background:url(");
+    sb_append_esc(sb, image);
+    sb_append(sb, ")\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect();showGames(1)\"><div class=\"segSugIH\"><div class=\"setSugInf\">Change Game</div></div></div>"
+                  "<div id=\"hostGameNameHolder\"><span><i style=\"color:#eb5656;font-size:30px;vertical-align:-3px;cursor:pointer\" onclick=\"openHostWindow(true)\" "
+                  "class=\"material-icons\">delete</i> </span><span id=\"commMap\" style=\"color:white\">");
+    sb_append_esc(sb, g_flow.custom_name);
+    sb_append(sb, "</span></div></div><div class=\"setBodH\" style=\"width:745px;display:inline-block;margin-top:0px;vertical-align:top\">"
+                  "<div class=\"settNameSmall\" style=\"font-size:19px\">Players<span id=\"customSetPrev0\" style=\"color:white;float:right\">...</span></div>"
+                  "<div class=\"settNameSmall\" style=\"font-size:19px\">Minutes<span id=\"customSetPrev2\" style=\"color:white;float:right\">...</span></div>"
+                  "<div class=\"settNameSmall\" style=\"font-size:19px\">Gamemodes<span id=\"gameModesC\" style=\"max-width:480px;color:white;float:right;overflow:hidden;"
+                  "text-overflow:ellipsis;white-space:nowrap;\" class=\"textOverflow\">...</span></div>"
+                  "<div class=\"settNameSmall\" style=\"font-size:19px\">Likes<span id=\"gameLikesC\" style=\"color:white;float:right\">...</span></div></div></div>");
+    if (preset_loading()) return;
+    // Force Default Settings (checked) and, while the map has funds, KR Rewards (:219950)
+    const int funds = g_preset.funds > 0;
+    sb_append(sb, "<div class='setBodH' style='padding-top:10px'>");
+    if (!(game_host_type_flags(g_flow.host_type) & (GAME_HOST_FLAG_COMP | GAME_HOST_FLAG_RESTRICT))) { // !noCustM: Custom
+        sb_appendf(sb, "<div class='settNameSmall' style='margin:0px;margin-top:10px;border-bottom:none;padding-bottom: 0px;'>%s<label class='switch'>"
+                       "<input id='defaultSetts' type='checkbox' onclick='windows[7].toggleDefault()' checked><span class='slider'></span></label></div>"
+                       "<div id='defaultSettsInfo' style='margin-top:15px;margin-bottom:15px;'><div style='padding:10px;background-color:rgba(0,0,0,0.6);"
+                       "border: 3px solid rgba(255, 255, 255, 0.4);margin-bottom:0px;margin-top:10px;padding-left:15px;font-size:18px'>%s</div></div>",
+                   I18N("server.config.forceDefault", "Force Default Settings"),
+                   I18N("windows.host.default.settings", "Enabling Default Settings allows for storing Player Progress and Highscores"));
+    }
+    if (funds) {
+        char amount[40];
+        commas(amount, sizeof(amount), g_preset.funds);
+        sb_appendf(sb, "<div class='settNameSmall' style='margin:0px;margin-top:20px;border-bottom:none;padding-top:0px;padding-bottom:0px;'>%s<div class='krIconHost'>KR</div> "
+                       "<label class='switch'><input id='krRewards' type='checkbox' onclick='windows[7].toggleKRRew()' checked><span class='slider'></span></label></div>"
+                       "<div id='krRewardsInfo' style='margin-top:15px;margin-bottom:5px;'><div style='padding:10px;background-color:rgba(0,0,0,0.4);"
+                       "border: 3px solid rgba(255, 255, 255, 0.4);margin-bottom:0px;margin-top:10px;padding-left:15px;font-size:18px'>%s"
+                       "<div style='margin-top:20px;'>Available <span style='float:right;color:rgba(255,255,255,0.4)'>%s <span style='color:rgba(255,255,255,0.8)'>KR</span>"
+                       "</span></div></div></div><div style='height:10px;'></div>",
+                   I18N("server.config.krRewards", "KR Rewards"),
+                   I18N("windows.host.rewards", "Enabling KR Rewards forces the Server to use Default Settings & allows players to earn KR from the map funds:"), amount);
+    }
+    sb_append(sb, "</div>");
+}
+
+static void on_preset(void *user, const int status, const char *body, const size_t length) {
+    if ((unsigned) (uintptr_t) user != g_preset.gen) return;
+    (void) status; // apiRequest reads any answer's JSON (deob-10.0.7.js:133166): no status check
+    cJSON *res = body && length ? cJSON_ParseWithLength(body, length) : NULL;
+    const char *da = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(res, "da"));
+    const cJSON *fu = cJSON_GetObjectItemCaseSensitive(res, "fu");
+    cJSON *data = da && da[0] ? cJSON_Parse(da) : NULL; // JSON.parse(da); 'DEFAULT' when there is none or it throws
+    if (data && !cJSON_IsObject(data)) {
+        cJSON_Delete(data);
+        data = NULL;
+    }
+    // the brain's da is the map's config read flat (game_config_from_map): the rows' preset form has its settings
+    // under "settings", as krunker.io's does
+    if (data && !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(data, "settings"))) {
+        cJSON *rows = preset_of(data);
+        cJSON_Delete(data);
+        data = rows;
+    }
+    cJSON_Delete(g_preset.data);
+    g_preset.data = data;
+    g_preset.funds = cJSON_IsNumber(fu) ? fu->valuedouble : 0; // fu || 0
+    g_preset.loaded = 1;
+    cJSON_Delete(res);
+    if (!strcmp(g_preset.name, g_flow.custom_name)) { // the rows are the preset's (presetLoaded: updateWindow(8))
+        cJSON_Delete(g_flow.request);
+        g_flow.request = NULL;
+    }
+    menu_rerender_if_open(MENU_WINDOW_HOST);
+}
+
+// getMapPreset(name, presetLoaded) once per name (deob-10.0.7.js:220155): krunker.io's data client for a map of its
+// Games window, else the brain's (services/brain/creations.c: the catalogue map's config, no funds)
+static void preset_request(void) {
+    if (!g_flow.custom_key[0] || !strcmp(g_preset.name, g_flow.custom_name)) return;
+    snprintf(g_preset.name, sizeof(g_preset.name), "%s", g_flow.custom_name);
+    cJSON_Delete(g_preset.data);
+    g_preset.data = NULL;
+    g_preset.funds = 0;
+    g_preset.loaded = 0;
+    const unsigned gen = ++g_preset.gen;
+    char enc[300], path[400];
+    backend_url_encode(enc, sizeof(enc), g_flow.custom_name);
+    snprintf(path, sizeof(path), "mn=%s", enc);
+    int sent = 0;
+#ifndef __EMSCRIPTEN__
+    if (g_flow.custom_official) {
+        char base[256], url[640];
+        krunker_host_url(KRUNKER_HOST_API, "", base, sizeof(base));
+        sent = krunker_kio_webhook_url(url, sizeof(url), base, "maps/config", path) &&
+               backend_http_get_remote(url, KRUNKER_KIO_READ_TIMEOUT_MS, on_preset, (void *) (uintptr_t) gen);
+    } else
+#endif
+    {
+        char full[440];
+        snprintf(full, sizeof(full), "/webhooks/general/maps/config?%s", path);
+        sent = backend_http_get(full, on_preset, (void *) (uintptr_t) gen);
+    }
+    if (!sent) g_preset.loaded = 1; // no request: presetLoaded(name) with no data, 'DEFAULT'
+}
+
+// windows[7].toggleDefault(forced) (deob-10.0.7.js:219764-219779): clicking Force Default Settings turns KR Rewards
+// off; the switch shows or hides the rows and the presets and greys Game Settings / Advanced (setTabs' rd)
+static void toggle_default(const int forced) {
+    const HtmlElem def = html_dom_by_id("defaultSetts");
+    if (!def) return;
+    if (!forced) {
+        const HtmlElem kr = html_dom_by_id("krRewards");
+        if (kr) html_dom_set_checked(kr, 0);
+    }
+    const int on = html_dom_get_checked(def);
+    const HtmlElem rows = html_dom_by_id("forcedSettings"), presets = html_dom_by_id("hostGamePreset");
+    if (rows) html_dom_set_style(rows, "display", on ? "none" : "block");
+    if (presets) html_dom_set_style(presets, "display", on ? "none" : "block");
+    for (int t = 1; t <= 2; t++) {
+        char id[16];
+        snprintf(id, sizeof(id), "hstTab%d", t);
+        const HtmlElem tab = html_dom_by_id(id);
+        if (tab) html_dom_set_class(tab, "bigMenTabDis", on);
+    }
+}
+
+// windows[7].toggleKRRew(skip) (:219757-219763): clicking KR Rewards forces the default settings on
+static void toggle_kr_rewards(const int skip) {
+    if (!html_dom_by_id("krRewards") || skip) return;
+    const HtmlElem def = html_dom_by_id("defaultSetts");
+    if (def) html_dom_set_checked(def, 1);
+    toggle_default(1);
 }
 
 // ------------------------------------------------------------------ the template splices (ui/windows/8.html)
@@ -576,7 +833,10 @@ char *host_flow_window_gen(void) {
     const char *tpl = ui_windows_html("8");
     if (!tpl || !*tpl) return strdup("");
     const char *title = game_host_type_name(g_flow.host_type);
-    cJSON *preset = preset_of(g_flow.request);
+    preset_request(); // a community map: its preset is asked for the first time here (gen's getMapPreset)
+    const int loading = preset_loading(), forced = default_forced();
+    // the rows' values: the ones read back last, else the community map's preset (presets[name].data, :219964-219965)
+    cJSON *preset = g_flow.request ? preset_of(g_flow.request) : g_flow.custom_key[0] && g_preset.data ? cJSON_Duplicate(g_preset.data, 1) : NULL;
     char *html = strdup(tpl);
     if (!html) {
         cJSON_Delete(preset);
@@ -613,24 +873,40 @@ char *host_flow_window_gen(void) {
         snprintf(img, sizeof(img), "gamecats/c_%d.png", cat);
         html = replace_once(html, "gamecats/c_9.png", img);
     } else {
-        StrBuf name = {0};
-        sb_append_esc(&name, g_flow.custom_name);
-        char *esc = sb_finish(&name);
-        html = replace_once(html, "Browse Community Games", esc ? esc : "");
-        free(esc);
+        // a chosen game: its card and switches in place of topHedr (deob-10.0.7.js:219949-219950)
+        const char *pick = strstr(html, "<div id=\"hostCMapPickr\"");
+        const char *end = pick ? div_end(pick) : NULL;
+        StrBuf card = {0};
+        append_map_card(&card);
+        char *text = sb_finish(&card);
+        if (end) html = splice(html, (size_t) (pick - html), (size_t) (end - html), text ? text : "");
+        free(text);
     }
     {
+        // Raw Game Data (windows.host.raw, :219951): Custom's (no noCustM) with no game chosen, its value kept
         const char *raw = strstr(html, "Raw Game Data");
         const char *start = NULL, *at = html;
         while (raw && (at = strstr(at, "<div class=\"setBodH\">")) && at < raw) start = at++;
         const char *end = start ? div_end(start) : NULL;
-        if (start && end && end > raw) html = splice(html, (size_t) (start - html), (size_t) (end - html), "");
+        const int shown = g_flow.host_type == GAME_HOST_CUSTOM && !g_flow.custom_key[0];
+        if (start && end && end > raw && !shown) html = splice(html, (size_t) (start - html), (size_t) (end - html), "");
+        else if (shown && g_flow.raw && g_flow.raw[0]) {
+            StrBuf value = {0};
+            sb_append(&value, "value=\"");
+            sb_append_esc(&value, g_flow.raw);
+            sb_append(&value, "\"");
+            char *text = sb_finish(&value);
+            html = replace_once(html, "placeholder=\"Raw Game Data\"", text ? text : "");
+            free(text);
+        }
     }
     {
         const char *anchor = "<div class=\"mapListCat\">Default Krunker Maps</div>";
         const char *m = strstr(html, anchor);
         const char *n = m ? strstr(m, "</div></div><div id=\"forcedSettings\"") : NULL;
-        if (m && n) {
+        if (m && n && g_flow.custom_key[0]) {
+            html = splice(html, (size_t) (m - html), (size_t) (n - html), ""); // a chosen game: no map list (:219954)
+        } else if (m && n) {
             StrBuf cards = {0};
             append_map_cards(&cards);
             char *list = sb_finish(&cards);
@@ -647,6 +923,17 @@ char *host_flow_window_gen(void) {
     if (g_flow.step != 0) html = replace_once(html, "<div class=\"hostTb0\">", "<div class=\"hostTb0 hide\">");
     html = config_bodies(html, g_flow.step, preset, g_flow.host_type);
     cJSON_Delete(preset);
+    if (loading) {
+        // no preset yet: no rows at all (gen's `if (haveData)`, :219964; getMapPreset instead, :220155)
+        const char *a = strstr(html, "<div id=\"forcedSettings\"");
+        const char *b = a ? strstr(a, "<div style=\"margin-top:40px\"></div><div id=\"stickyHostH\">") : NULL;
+        if (b) html = splice(html, (size_t) (a - html), (size_t) (b - html), "");
+    } else if (forced) {
+        // the defaults forced: the rows and the presets hidden (:219967, the hostGamePreset style)
+        html = replace_once(html, "<div id=\"forcedSettings\" style=\"display:block\">", "<div id=\"forcedSettings\" style=\"display:none\">");
+        html = replace_once(html, "<div id='hostGamePreset' style='text-align:left;margin-top:20px;margin-bottom:10px;display:block'>",
+                            "<div id='hostGamePreset' style='text-align:left;margin-top:20px;margin-bottom:10px;display:none'>");
+    }
     // the dedicated-server command (Server tab), before the sticky Server Cost line
     {
         const char *anchor = "<div style=\"margin-top:40px\"></div><div id=\"stickyHostH\">";
@@ -663,7 +950,7 @@ char *host_flow_window_gen(void) {
     {
         StrBuf msg = {0};
         sb_append(&msg, "id=\"hostGameMsg\">");
-        sb_append_esc(&msg, g_flow.message);
+        sb_append_esc(&msg, loading ? "Loading preset..." : g_flow.message); // :219945
         sb_append(&msg, "</span>");
         char *text = sb_finish(&msg);
         html = replace_once(html, "id=\"hostGameMsg\"></span>", text ? text : "");
@@ -678,6 +965,7 @@ static void flow_show(void) { menu_show_window(MENU_WINDOW_HOST, 1); }
 
 static void flow_reset(const int host_type) {
     cJSON_Delete(g_flow.request);
+    free(g_flow.raw);
     memset(&g_flow, 0, sizeof(g_flow));
     g_flow.backend = -1;
     g_flow.host_type = game_host_type_name(host_type) ? host_type : GAME_HOST_CUSTOM;
@@ -692,18 +980,32 @@ static void flow_ensure(void) {
     if (!g_flow.ready) flow_reset(GAME_HOST_CUSTOM);
 }
 
-// openHostWindow(false, type): the chooser's server-type cards (window 42)
+// openHostWindow(false, type): the chooser's server-type cards (window 42). Opened from a Servers tab's "+ Host Game",
+// the window's backend is that tab's (host_flow_set_chooser_backend).
 void host_flow_open(const int host_type) {
+    const int backend = g_chooser_backend;
+    g_chooser_backend = -1;
     flow_reset(host_type);
+    if (backend >= 0) g_flow.backend = backend;
     if (g_flow.host_type == GAME_HOST_RENT) rent_servers_ui_open();
     flow_show();
 }
 
-// "+ Host Game" on a Servers tab (windows.1.hostGame): the window's backend is the tab's (krunker: 1 = krunker.io,
-// 0 = Box Office), whatever the session's is
-void host_flow_open_backend(const int host_type, const int krunker) {
-    flow_reset(host_type);
-    g_flow.backend = krunker ? 1 : 0;
+void host_flow_set_chooser_backend(const int krunker) {
+    g_chooser_backend = krunker ? 1 : 0;
+    menu_show_window(42, 0); // showWindow(42) (deob-10.0.7.js:218502)
+}
+
+void host_flow_on_show_window(const int id) {
+    if (id != 42 && id != MENU_WINDOW_HOST) g_chooser_backend = -1; // the chooser was left for another window
+}
+
+// openHostWindow(true): the trash on the chosen game's card (deob-10.0.7.js:225502-225511): no game, no raw data,
+// host type 0 (Custom), the window again. The window's backend stays.
+void host_flow_clear_map(void) {
+    const int backend = g_flow.ready ? g_flow.backend : -1;
+    flow_reset(GAME_HOST_CUSTOM);
+    g_flow.backend = backend;
     flow_show();
 }
 
@@ -715,6 +1017,10 @@ void host_flow_open_map(const int catalog_index) {
     if (e && official_hostable(e)) {
         g_flow.maps[e->index] = 1;
     } else if (e) {
+        free(g_flow.raw); // selectHostMap: rawMapData = null (deob-10.0.7.js:225345)
+        g_flow.raw = NULL;
+        cJSON_Delete(g_flow.request); // the rows come from the new game's preset (gen, :219832)
+        g_flow.request = NULL;
         snprintf(g_flow.custom_key, sizeof(g_flow.custom_key), "%s", e->key);
         snprintf(g_flow.custom_name, sizeof(g_flow.custom_name), "%s", e->name);
         g_flow.custom_official = account_backend() == ACCOUNT_BACKEND_KRUNKER;
@@ -730,6 +1036,10 @@ void host_flow_open_published(const char *name, const char *creator) {
     flow_ensure();
     char spec[256] = "";
     if (community_published_spec(spec, sizeof(spec), name, creator)) {
+        free(g_flow.raw); // selectHostMap: rawMapData = null (deob-10.0.7.js:225345)
+        g_flow.raw = NULL;
+        cJSON_Delete(g_flow.request); // the rows come from the new game's preset (gen, :219832)
+        g_flow.request = NULL;
         snprintf(g_flow.custom_key, sizeof(g_flow.custom_key), "%s", spec);
         snprintf(g_flow.custom_name, sizeof(g_flow.custom_name), "%s", name);
         g_flow.custom_official = account_backend() == ACCOUNT_BACKEND_KRUNKER;
@@ -837,6 +1147,14 @@ static void open_dedicated(void) {
 
 int host_flow_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
+    if (name && !strcmp(name, "windows.7.toggleDefault")) {
+        toggle_default(arg_number(args, argc, 0, 0));
+        return 1;
+    }
+    if (name && !strcmp(name, "windows.7.toggleKRRew")) {
+        toggle_kr_rewards(arg_number(args, argc, 0, 0));
+        return 1;
+    }
     if (!name || strcmp(name, "knHostFlow")) return -1;
     char action[24] = "";
     arg_text(args, argc, 0, action, sizeof(action));

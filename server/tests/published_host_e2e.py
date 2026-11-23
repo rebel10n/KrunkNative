@@ -176,7 +176,7 @@ CLIENT_SCRIPT = """0 menu
 1700 call selectHostMap "{good}" "" "1" "{account}" 0
 4000 grep @cmd {spec} [id=hostFlowCommand]
 4100 call knHostFlow "go" 0
-5500 grep @card {good} [id=hostCMapPickr]
+5500 grep @card {good} [id=commMap]
 5600 call knHostFlow "map" "kanji"
 6000 call knHostFlow "go" 3
 6500 grep @cmd2 published:{account}/ [id=hostFlowCommand]
@@ -268,7 +268,7 @@ def main():
         check("the client joined A and plays GOOD", playing.endswith("on " + good), playing)
         check("Games window Host button on GOOD: the Host Game window opens with it", "selectHostMap: %s -> host flow" % good in text)
         check("the flow's server command names it (gameserver.maps=%s)" % spec, grep_hits(text, "cmd") == 1, script_line(text, "grep", "cmd"))
-        check("the Host window's Select banner names GOOD (the community map)", grep_hits(text, "card") == 1, script_line(text, "grep", "card"))
+        check("the Host window's chosen-game card (#commMap, v10.0.7 deob-10.0.7.js:219949) names GOOD (the community map)", grep_hits(text, "card") == 1, script_line(text, "grep", "card"))
         check("clicking a published map's card in the map step puts it in the command (not the catalogue map before it)",
               grep_hits(text, "cmd2") == 1 and grep_hits(text, "cmd3") == 0, script_line(text, "grep", "cmd2") + " / " + script_line(text, "grep", "cmd3"))
         stop(a)

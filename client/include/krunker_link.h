@@ -299,6 +299,7 @@ typedef struct {
     // the account row's K.P.D fields (Account :112781-112904): player_role (2 isMod "Marshal", 3
     // isDeputy), player_developer, jobrating / jobratingpositive (the Helpful Reports)
     int account_role, account_dev, account_job_rating, account_job_rating_pos;
+    int account_admin;              // row[35] isAdmin (deob-10.0.7.js:115186): canRehost = isDev || isAdmin (:115245)
     // the account row's rankedPoints (v10 Account.setData, row[47] = rankedPoints, v10:112873) from "a" or
     // "ua": account_rp_known = 1 once a frame carried it
     int account_rp_known;

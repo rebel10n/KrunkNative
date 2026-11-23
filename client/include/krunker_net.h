@@ -143,6 +143,7 @@ typedef struct {
     int level;
     int role;                       // player_role: 2 isMod (Marshal), 3 isDeputy
     int dev;                        // player_developer
+    int admin;                      // isAdmin (row[35]): with dev, v10's canRehost (deob-10.0.7.js:115245)
     int job_rating, job_rating_pos; // jobrating / jobratingpositive (Helpful Reports)
 } KrunkerNetAccount;
 int krunker_net_account(KrunkerNetAccount *out);
@@ -195,6 +196,9 @@ void krunker_net_tick(Client *client);      // main thread, once per frame: noti
 // waiting, or a config that is not an object. 1 = sent.
 typedef void (*KrunkerHostDoneFn)(void *user, const char *game_id, const char *region, const char *error);
 int krunker_net_host_custom(const cJSON *config, KrunkerHostDoneFn done, void *user);
+// The same with v10's 4th CUSTOM_SERVER argument: rehost (createPrivateRoom(true), deob-10.0.7.js:204803) brings
+// the open lobby's players to the new game
+int krunker_net_host_custom_ex(const cJSON *config, int rehost, KrunkerHostDoneFn done, void *user);
 // Why krunker_net_host_custom sends nothing now: the window says it instead of failing silently.
 typedef enum {
     KRUNKER_HOST_READY = 0,

@@ -33,6 +33,7 @@
 #include <game_config.h> // Game.config.classes / isCustom (the class list)
 #include <client_settings.h> // Exit menu item + Settings > Client (client/src/ui/ui_client_settings.c)
 #include <lobby_ui.h> // the comp menu (comp_ui.c)
+#include <host_flow_ui.h> // the chooser's Servers tab backend (host_flow_on_show_window)
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -1339,6 +1340,7 @@ static void close_window_state(void) { g_ui.active_window = MENU_WINDOW_NONE; }
 void menu_show_window(int id, const int force) {
     id = v10_customize_window_alias(id); // v10 page: showWindow(53) is window 3's Customize tab
     if (id != MENU_WINDOW_NONE) menu_idle_reset(); // showWindow(id >= 0): CONTROLS.idleTimer = 0
+    host_flow_on_show_window(id); // the Host Game chooser forgets the "+ Host Game" tab when left
     if (id == MENU_WINDOW_NONE) {
         menu_toggle_window(0);
         return;

@@ -164,10 +164,12 @@ H(h_open_url) {
 }
 
 // openHostWindow(false, type): the chooser's server-type cards (window 42) open the Host Game window
-// (host_flow_ui.c, v10's host_games) for that config.hostTypes index.
+// (host_flow_ui.c, v10's host_games) for that config.hostTypes index. openHostWindow(true): the chosen game's
+// trash, the window again with no game as Custom (deob-10.0.7.js:225502-225511).
 H(h_open_host_window) {
     UNUSED;
-    host_flow_open(arg_int(args, argc, 1, GAME_HOST_CUSTOM));
+    if (arg_bool(ev, args, argc, 0, 0)) host_flow_clear_map();
+    else host_flow_open(arg_int(args, argc, 1, GAME_HOST_CUSTOM));
     return 1;
 }
 // v10 Invite / Join (v10_party.c): openJoinWindow(a, skipClipboard), copyInviteLink(toast)
@@ -224,21 +226,13 @@ void host_catalog_map(const int catalog_index, const int mode) {
     community_host_slot(client, slot, mode); // community_maps.c: the Host Game seam
 }
 
-// createPrivateRoom(): Krunker collects the checked #gameMap<i> boxes and creates the room;
-// here the first checked map becomes the selection and the embedded server is started.
+// createPrivateRoom(rehost): the Host Game window's Start Game (and Rehost: createPrivateRoom(true)) on krunker.io's
+// hosting or Box Office servers (host_flow_ui.c). v10.0.7 has no ranked check here (deob-10.0.7.js:204669-204811;
+// custom.host.ranked is a string of its table that no code reads): v7's is gone.
 H(h_create_private_room) {
     UNUSED;
-    // v7: if (config.isComp) custom.host.ranked
-    if (ranked_ui_in_ranked()) {
-        HtmlElem msg = html_dom_by_id("hostGameMsg");
-        if (msg) {
-            char html[256];
-            snprintf(html, sizeof(html), "<span class='error'>%s</span>", I18N("custom.host.ranked", "Can't host match while in ranked."));
-            html_dom_set_html(msg, html);
-        }
-        return 1;
-    }
-    host_flow_start(); // the Start Game step: krunker.io's hosting or Box Office servers (host_flow_ui.c)
+    const int rehost = argc > 0 && (args[0].kind == HTML_ARG_BOOL || args[0].kind == HTML_ARG_NUM) && args[0].num != 0;
+    host_flow_create(rehost);
     return 1;
 }
 

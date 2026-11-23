@@ -3008,8 +3008,9 @@ void servers_ui_menu_setup(void) {
 // server in KrunkNative (doc/backend.md 8.7), so natively the link is hidden like the menu's
 // Host Game button; --render-scenario keeps it for uidiff. (Direct connects: the menu's
 // Connect button, servers_ui_menu_setup.)
-// The tab's "+ Host Game" (windows[1].hostGame): the Host Game window on this tab's backend, never the session's
-// (host_flow_open_backend). v10's header link, shown on both tabs.
+// The tab's "+ Host Game" (windows[1].hostGame): v10's showWindow(42), the server type chooser (deob-10.0.7.js:218502);
+// the Host Game window it opens is on this tab's backend, never the session's (host_flow_set_chooser_backend). v10's
+// header link, shown on both tabs.
 static void append_host_game_button(StrBuf *sb) {
     sb_append(sb, "<div style='display:inline-block'><a id='hostGameBtn' onclick='playSelect(0.1);windows[1].hostGame()'>");
     sb_append_esc(sb, I18N("kn.servers.hostGame", "+ Host Game"));
@@ -3669,8 +3670,8 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         menu_rerender_if_open(2); // updateWindow(2)
         return 1;
     }
-    if (!strcmp(name, "windows.1.hostGame")) { // + Host Game: the Host Game window on the tab's backend
-        host_flow_open_backend(GAME_HOST_CUSTOM, g_server_tab == SERVER_TAB_KRUNKER);
+    if (!strcmp(name, "windows.1.hostGame")) { // + Host Game: the chooser, then the Host Game window on the tab's backend
+        host_flow_set_chooser_backend(g_server_tab == SERVER_TAB_KRUNKER);
         return 1;
     }
     if (!strcmp(name, "knCarousel")) { // the carousel's prev / next (PureJSCarousel's buttons)
@@ -4750,6 +4751,7 @@ void servers_ui_query(const char *query) {
 // not joined ends here, so "Creating Game..." never outlives its request. A Host window already closed (the player is
 // in a lobby or a krunker.io game) has no #hostGameMsg, and nothing is shown.
 static void host_not_created(const HtmlElem msg) {
+    host_flow_room_response(0); // customRoomResponse: Start Game / Rehost back (deob-10.0.7.js:204627-204628)
     if (!msg) return;
     StrBuf sb = {0};
     sb_append(&sb, "<span class='error'>");
@@ -4790,6 +4792,7 @@ static void on_host(void *user, const int status, const char *body, const size_t
             host_not_created(msg);
             return;
         }
+        host_flow_room_response(1); // the buttons back, the Raw Game Data field emptied (deob-10.0.7.js:204627-204630)
         if (msg) html_dom_set_text(msg, I18N("kn.host.created", "Game Created")); // customRoomResponse(message, gameId)
         g_last_load_ms = -1e18; // windows[1].lastLoadTime = 0
         cJSON_Delete(res);
@@ -4801,6 +4804,7 @@ static void on_host(void *user, const int status, const char *body, const size_t
         return;
     }
     const cJSON *err = cJSON_GetObjectItem(res, "error");
+    host_flow_room_response(0);
     if (msg) {
         StrBuf sb = {0};
         sb_append(&sb, "<span class='error'>");
@@ -4813,83 +4817,101 @@ static void on_host(void *user, const int status, const char *body, const size_t
     cJSON_Delete(res);
 }
 
-// A host request waiting for its captcha (kn_captcha.h): the /mm/host-game path and its matchmaking action
+// A host request (and the captcha it may wait for, kn_captcha.h): the /mm/host-game path, or for a config too long for a
+// request line (Raw Game Data: a whole map) the path's account part and the POST body {region, flavor, config}, and
+// its matchmaking action
 typedef struct {
     char *path;
+    cJSON *body; // NULL: a GET of path
     unsigned action;
 } HostCaptcha;
 
-// The hosting captcha is done: /mm/host-game with &captcha=<payload> (none without one). A request that cannot go
-// now ends like one without an answer (on_host: custom.tryagain), so "Creating Game..." is never left behind.
-static void host_captcha_done(void *user, const char *payload) {
-    HostCaptcha *hc = user;
-    char *path = hc->path;
-    if (payload) {
-        const size_t n = strlen(path) + strlen(payload) * 3 + 16;
-        char *full = malloc(n);
-        if (full) {
-            const int len = snprintf(full, n, "%s&captcha=", path);
-            backend_url_encode(full + len, n - (size_t) len, payload);
-            free(path);
-            path = full;
+#define HOST_GET_MAX 16000 // the brain reads a request line up to 32 KiB (services/brain/main.c max_header_bytes)
+
+// The request goes, with &captcha=<payload> (body.captcha for a POST) when the hosting captcha was solved. A request
+// that cannot go now ends like one without an answer (on_host: custom.tryagain), so "Please wait..." never outlives it.
+static void host_send(HostCaptcha *hc, const char *payload) {
+    int ok = 0;
+    if (hc->body) {
+        if (payload) cJSON_AddStringToObject(hc->body, "captcha", payload);
+        char *json = cJSON_PrintUnformatted(hc->body);
+        char url[1024];
+        snprintf(url, sizeof(url), "%s%s", backend_url(), hc->path);
+        ok = json && backend_http_request("POST", url, json, on_host, (void *) (uintptr_t) hc->action);
+        free(json);
+    } else {
+        char *path = hc->path;
+        char *full = NULL;
+        if (payload) {
+            const size_t n = strlen(path) + strlen(payload) * 3 + 16;
+            full = malloc(n);
+            if (full) {
+                const int len = snprintf(full, n, "%s&captcha=", path);
+                backend_url_encode(full + len, n - (size_t) len, payload);
+                path = full;
+            }
         }
+        ok = backend_http_get(path, on_host, (void *) (uintptr_t) hc->action);
+        free(full);
     }
-    if (!backend_http_get(path, on_host, (void *) (uintptr_t) hc->action)) on_host((void *) (uintptr_t) hc->action, 0, NULL, 0);
-    free(path);
+    if (!ok) on_host((void *) (uintptr_t) hc->action, 0, NULL, 0);
+    free(hc->path);
+    cJSON_Delete(hc->body);
     free(hc);
 }
 
-// Start Game on Box Office servers (host_flow_ui.c's choice): the brain's /mm/host-game with the
-// request's config (the game is created on a server it finds; "Game Created" then the join), after the
-// hosting captcha (host_captcha_done). 0 when the brain is not available or the request cannot be sent.
+static void host_captcha_done(void *user, const char *payload) { host_send(user, payload); }
+
+// Start Game on Box Office servers (host_flow_ui.c's choice): the brain's /mm/host-game with the request's config (the
+// game is created on a server it finds; "Game Created" then the join). A guest solves the hosting captcha first; an
+// account's request goes at once (createPrivateRoom: account ? send(CUSTOM_SERVER) : captcha("hosting"),
+// deob-10.0.7.js:204803). 0 when the brain is not available or the request cannot be sent.
 int servers_ui_host_game(const char *config_json) {
     if (backend_available() != 1 || !config_json) return 0;
     if (!g_region[0]) snprintf(g_region, sizeof(g_region), "%s", servers_ui_auto_region()); // a confirmed race result only
     const size_t n = strlen(config_json) * 3 + 512;
     char *path = malloc(n), *enc = malloc(strlen(config_json) * 3 + 1), region[96];
-    if (!path || !enc) {
+    HostCaptcha *hc = calloc(1, sizeof(*hc));
+    if (!path || !enc || !hc) {
         free(path);
         free(enc);
+        free(hc);
         return 0;
+    }
+    const int account = active_account() && account_session_token()[0];
+    char who[320] = "";
+    if (account) {
+        char tok[256];
+        backend_url_encode(tok, sizeof(tok), account_session_token());
+        snprintf(who, sizeof(who), "token=%s", tok);
+    } else if (v10_rewards_guest_id()[0]) {
+        // a guest hosts too (v10): the device's guest id is the host's identity on the server (32 hex, no escaping)
+        snprintf(who, sizeof(who), "guest=%s", v10_rewards_guest_id());
     }
     backend_url_encode(enc, strlen(config_json) * 3 + 1, config_json);
     backend_url_encode(region, sizeof(region), g_region[0] ? g_region : "local");
     int len = snprintf(path, n, "/mm/host-game?region=%s&config=%s", region, enc);
     len += snprintf(path + len, n - (size_t) len, "%s", mm_flavor_param(path));
-    if (active_account() && account_session_token()[0]) {
-        char tok[256];
-        backend_url_encode(tok, sizeof(tok), account_session_token());
-        snprintf(path + len, n - (size_t) len, "&token=%s", tok);
-    } else if (v10_rewards_guest_id()[0]) {
-        // a guest hosts too (v10): the device's guest id is the host's identity on the server (32 hex, no escaping)
-        snprintf(path + len, n - (size_t) len, "&guest=%s", v10_rewards_guest_id());
+    if (who[0]) snprintf(path + len, n - (size_t) len, "&%s", who);
+    if (strlen(path) > HOST_GET_MAX) { // the POST form (services/brain/public_routes.c h_host_game)
+        cJSON *config = cJSON_Parse(config_json);
+        hc->body = cJSON_CreateObject();
+        cJSON_AddStringToObject(hc->body, "region", g_region[0] ? g_region : "local");
+        if (flavor_get() != FLAVOR_BASE) cJSON_AddStringToObject(hc->body, "flavor", flavor_current()->key);
+        cJSON_AddItemToObject(hc->body, "config", config ? config : cJSON_CreateObject());
+        snprintf(path, n, "/mm/host-game%s%s", who[0] ? "?" : "", who);
     }
+    hc->path = path;
+    free(enc);
     // a matchmaking action of its own (seek_claim.h): a seek still in flight is overtaken by its lobby. A Quick
     // Play search goes on no more: the player chose a game (the startup seek is not needed either)
-    const unsigned action = seek_claim_start(&g_claims);
-    // the hosting captcha first (v10.0.3's rpc("bCpt", "hosting") before "custom", deob-10.0.3.js:229992-229998):
-    // the request goes once it is solved (host_captcha_done); a captcha that cannot start: the request at once
-    HostCaptcha *hc = malloc(sizeof(*hc));
-    int ok = 0;
-    if (hc) {
-        hc->path = path;
-        hc->action = action;
-        ok = kn_captcha_request("hosting", host_captcha_done, hc) != 0;
-        if (ok) path = NULL; // the captcha's now
-        else free(hc);
-    }
-    if (!ok) ok = backend_http_get(path, on_host, (void *) (uintptr_t) action);
-    if (ok) {
-        // "Creating Game..." only while the request is out: on_host's answer or failure replaces it. A request the
-        // brain gate refused (0 here) shows nothing: host_flow_start says why, so no spinner is left behind
-        HtmlElem msg = html_dom_by_id("hostGameMsg");
-        if (msg) html_dom_set_text(msg, I18N("kn.host.creating", "Creating Game..."));
-        g_started = 1;
-        quick_play_retry_cancel();
-    }
-    free(path);
-    free(enc);
-    return ok;
+    hc->action = seek_claim_start(&g_claims);
+    g_started = 1;
+    quick_play_retry_cancel();
+    // a guest: the hosting captcha first (rpc("bCpt", "hosting") before "custom"); one that cannot start: at once
+    if (!account && kn_captcha_request("hosting", host_captcha_done, hc)) return 1;
+    host_send(hc, NULL); // a failure to send answers through on_host (custom.tryagain), which gives the buttons back
+    return 1;
 }
 
 // ------------------------------------------------------------------ lifecycle

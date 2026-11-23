@@ -64,7 +64,7 @@ def script(shots):
          "14400 down ESC", "14450 up ESC",
          '15000 call selectHostMap "%s" "" 4242 "StubCreator"' % MAP,
          "15010 waitfor [id=startServBtn]",
-         "15500 text @banner [id=hostCMapPickT]",
+         "15500 text @banner [id=commMap]",
          "15510 text @msg0 [id=hostGameMsg]",
          "15520 shot " + shots["host"],
          "16000 clicksel [id=startServBtn]",
@@ -113,7 +113,7 @@ def checks(text, stub, customs, shots):
     check("selectHostMap keeps the krunker.io map without a download (v10.0.7's {id, name})",
           ("selectHostMap: %s (krunker.io) -> host flow" % MAP) in text and "/api/map-data" not in text
           and "[community] %s" % MAP not in text, re.findall(r".*(?:selectHostMap|map-data|\[community\]).*", text)[:4])
-    check("the Host window's banner names the map", text_of(text, "banner") == MAP, text_of(text, "banner"))
+    check("the Host window's card names the map (#commMap, deob-10.0.7.js:219949)", text_of(text, "banner") == MAP, text_of(text, "banner"))
     config = customs[0][1] if customs and len(customs[0]) > 1 and isinstance(customs[0][1], dict) else {}
     check("Start Game sends CUSTOM_SERVER (\"custom\") on the official socket with customMap = the map's name",
           len(customs) == 1 and config.get("customMap") == MAP, [c[:2] for c in customs][:2])

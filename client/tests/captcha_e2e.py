@@ -4,7 +4,8 @@
 
   register through v10's login popup -> the client fetches GET /mm/captcha?for=register, solves it
   (client/src/net/kn_captcha.c) and the brain accepts the registration; logout; sign in by username -> the same for
-  "login"; Start Game in the Host Game window -> "hosting" (the brain has no game server here: its own answer, not a
+  "login"; Start Game in the Host Game window signed in -> no captcha (v10.0.7 asks a guest only: createPrivateRoom,
+  deob-10.0.7.js:204803); the same as a guest -> "hosting" (the brain has no game server here: its own answer, not a
   captcha refusal). And what a client from before the captcha gets from that brain: refused, with v10.0.3's text.
 
   python3 -I client/tests/captcha_e2e.py BUILD_DIR      (repository root)
@@ -54,14 +55,15 @@ def read(path):
         return ""
 
 
-def run_client(name, script, brain_url, game_port, timeout=150):
-    """One headless client_bin run of `script`; returns its log text."""
+def run_client(name, script, brain_url, game_port, timeout=150, cfg="cfg"):
+    """One headless client_bin run of `script` (its config dir WORK/<cfg>: the session a run signed in stays there);
+    returns its log text."""
     path = os.path.join(WORK, name + ".script")
     with open(path, "w") as f:
         f.write(script)
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, cfg),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_DEBUG": "1"})
     with open(log, "w") as out:
@@ -109,7 +111,9 @@ def scenario(brain_url, game_port, brain_log):
           "; ".join(re.findall(r"\[account\].*", log)[-3:]))
     check("the brain accepted it", re.search(r"register from \S+: captcha accepted", read(brain_log)))
 
-    # 2. logout (a fresh run starts as a guest), then sign in by username with Enter
+    # 2. logout (a fresh run starts as a guest), then sign in by username with Enter; then (3) Start Game on Box Office
+    # servers in the same run, signed in (a krunk.io session is not kept across runs): no hosting captcha
+    before = read(brain_log)
     log = run_client("login", OPEN + f"""800 clickid knV10LoginMode
 1000 clickid accName
 1100 type {NAME}
@@ -117,25 +121,41 @@ def scenario(brain_url, game_port, brain_log):
 1300 type {PASS}
 1400 down ENTER
 1410 up ENTER
-6000 quit
-""", brain_url, game_port)
+7000 call showWindow 2
+8000 clickid hostGameBtn
+8100 call openHostWindow 0 0
+8300 call knHostFlow "map" "kanji"
+8400 clickid startServBtn
+11500 text @msg [id=hostGameMsg]
+12000 quit
+""", brain_url, game_port, timeout=200)
     check("the client solved the login challenge", "[captcha] login: solved" in log,
           "; ".join(re.findall(r"\[captcha\].*", log)) or "no [captcha] line")
     check("sign in with captcha.enforce on", f"[account] logged in as {NAME}" in log, "; ".join(re.findall(r"\[account\].*", log)[-3:]))
     check("the brain accepted it", re.search(r"login from \S+: captcha accepted", read(brain_log)))
 
-    # 3. Start Game on Box Office servers: the hosting captcha, then /mm/host-game with &captcha=
-    log = run_client("host", """0 menu
+    # 3. Start Game on Box Office servers, signed in: no hosting captcha, /mm/host-game at once (the brain's answer is
+    # about servers: it has none here)
+    msg = re.search(r"\[input_script\] text t=\d+ @msg n=\d+ checked=\d value=\S* text=(.*)", log)
+    after = read(brain_log)[len(before):]
+    check("signed in: Start Game asks no hosting challenge", "[captcha] hosting" not in log,
+          "; ".join(re.findall(r"\[captcha\].*", log)))
+    check("signed in: the brain hosted without a captcha (its answer is about servers, not the captcha)",
+          msg and "Capacity" in msg.group(1) and not re.search(r"hosting from \S+", after), (msg.group(1) if msg else "no @msg") + " " + after[-300:])
+    host = """0 menu
 500 call showWindow 2
 1500 clickid hostGameBtn
+1600 call openHostWindow 0 0
 1800 call knHostFlow "map" "kanji"
 1900 clickid startServBtn
 5000 text @msg [id=hostGameMsg]
 5500 quit
-""", brain_url, game_port)
-    check("the client solved the hosting challenge", "[captcha] hosting: solved" in log,
+"""
+    # 3b. the same as a guest (a fresh config dir): the hosting captcha, then /mm/host-game with &captcha=
+    log = run_client("host-guest", host, brain_url, game_port, cfg="cfg-guest")
+    check("a guest solved the hosting challenge", "[captcha] hosting: solved" in log,
           "; ".join(re.findall(r"\[captcha\].*", log)) or "no [captcha] line")
-    check("the brain accepted the hosting captcha (its answer is about servers, not the captcha)",
+    check("the brain accepted the guest's hosting captcha (its answer is about servers, not the captcha)",
           re.search(r"hosting from \S+: captcha accepted", read(brain_log)) and not re.search(r"hosting from \S+ refused", read(brain_log)))
 
     # 4. a client from before the captcha (no b) against this brain: refused, with v10.0.3's text

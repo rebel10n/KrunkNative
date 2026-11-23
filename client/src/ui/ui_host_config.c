@@ -150,16 +150,31 @@ static void matrix(StrBuf *sb, const GameConfigTable table, const char *title, c
     sb_append(sb, "</div>");
 }
 
-// A server setting's label: v10 writes i18n "server.config.<varN>". Its English names differ
-// from the ones these rows carry in places (v7's "Warmup" for v10's "Warmup Time"), so English
-// keeps the row's own name; other languages take the table's translation of the setting, and
-// the row's name when there is none (KrunkNative's own settings).
+// A server setting's label: v10 writes t("server.config." + varN) (deob-10.0.7.js:220102), in English too ("Warmup
+// Time", "Auto Respawn Time", "Team 1 Name": not the option table's own v7 names). v10's noPvp and rampFix rows have no
+// such key, so v10 shows t()'s "UNLOCALIZED STRING" for them, and so does this. KrunkNative's own settings (kn*, no v10
+// row) keep the row's name.
 static const char *config_name(const GameConfigOption *o) {
-    if (!strcmp(i18n_locale(), I18N_DEFAULT_LOCALE)) return o->name;
     char key[96];
     snprintf(key, sizeof(key), "server.config.%s", o->var);
-    const char *v = i18n_has(key);
-    return v ? v : o->name;
+    if (!strncmp(o->var, "kn", 2) && !i18n_has(key)) return o->name;
+    return i18n_t(key);
+}
+
+// UTILS.getAccountType (deob-10.0.7.js:24544-24546) of the account the window hosts with: 3 featured, 2 premium,
+// 1 an account, 0 a guest
+static int account_type(void) {
+    const AccountInfo *acc = active_account();
+    return acc && acc->featured ? 3 : acc && acc->premium ? 2 : acc ? 1 : 0;
+}
+
+// A number row's slider max for the account type: 3 == type ? maxF : 2 == type ? maxP : 0 == type ? maxG : max, each
+// falling back to max (deob-10.0.7.js:220125-220126; the server clamps the same, :191282)
+static float type_max(const GameConfigOption *o, const int type) {
+    if (type == 3 && o->max_f) return o->max_f;
+    if (type == 2 && o->max_p) return o->max_p;
+    if (type == 0 && o->max_g) return o->max_g;
+    return o->max;
 }
 
 // Settings (serverConfig rows this host type offers), v7's "windows.host.settings" body.
@@ -167,6 +182,7 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
     const unsigned int flags = game_host_type_flags(host_type);
     const int comp = (flags & GAME_HOST_FLAG_COMP) != 0;
     const cJSON *settings = cJSON_GetObjectItemCaseSensitive(preset, "settings");
+    const int type = account_type();
     size_t count = 0;
     const GameConfigOption *options = game_config_options(GAME_CONFIG_SERVER, &count);
     // t("windows.host.settings") (deob-10.0.3.js:248977)
@@ -199,8 +215,8 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
             for (int i = 0; i < o->option_count; i++) sb_appendf(sb, "<option value='%d' %s>%s</option>", i, i == (int) def ? "selected" : "", o->options[i]);
             sb_append(sb, "</select></div>");
         } else {
-            // the slider max of a hosted game (UTILS.getAccountType 3 -> maxF), the preset clamped to it
-            const float max = o->max_f ? o->max_f : o->max;
+            // the slider max of the host's account type (type_max), the preset clamped to it
+            const float max = type_max(o, type);
             double v = def;
             if (cJSON_IsNumber(given)) v = given->valuedouble > max ? max : given->valuedouble;
             char value[32], min[32], top[32], step[32];
@@ -487,8 +503,8 @@ static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON 
                        "type='text' placeholder='Enter Password'style='border-radius:6px;border:none;background:#eee;padding:6px;padding-bottom:6px;float:right;margin-top:5px;"
                        "margin-bottom:5px;' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div></div>",
                    I18N("server.config.private", "Private"));
-        // Host Presets (deob-10.0.3.js:249058): hidden only for a community map whose preset forces the defaults,
-        // which Box Office has no map presets for
+        // Host Presets (deob-10.0.3.js:249058): hidden while a community map's defaults are forced (host_flow_ui.c
+        // writes that display, deob-10.0.7.js:219764-219779)
         sb_append(&sb, "<div id='hostGamePreset' style='text-align:left;margin-top:20px;margin-bottom:10px;display:block'>");
         presets_html(&sb);
         sb_append(&sb, "</div>");
@@ -679,8 +695,11 @@ cJSON *ui_host_config_collect(const int host_type, char *err, const size_t err_s
             snprintf(id, sizeof(id), "gameClass%d", c);
             if (checked(id)) cJSON_AddItemToArray(classes, cJSON_CreateNumber(c));
         }
+        // createPrivateRoom's checks after the maps' (host_flow_start): custom.mode.missing, custom.class.missing, the
+        // funds, custom.passcode.long (deob-10.0.7.js:204683-204698)
         if (!cJSON_GetArraySize(modes) || !cJSON_GetArraySize(classes)) {
-            snprintf(err, err_size, "%s", !cJSON_GetArraySize(modes) ? "Select at least one Mode" : "Select at least one Class");
+            snprintf(err, err_size, "%s", !cJSON_GetArraySize(modes) ? I18N("custom.mode.missing", "Select at least one Mode")
+                                                                     : I18N("custom.class.missing", "Select at least one Class"));
             cJSON_Delete(request);
             return NULL;
         }
@@ -693,7 +712,7 @@ cJSON *ui_host_config_collect(const int host_type, char *err, const size_t err_s
         }
         value_of("passCode", text, sizeof(text));
         if (strlen(text) > 16) {
-            snprintf(err, err_size, "Password too long (max 16)");
+            snprintf(err, err_size, "%s", I18N("custom.passcode.long", "Password too long"));
             cJSON_Delete(request);
             return NULL;
         }
@@ -810,7 +829,7 @@ static void auto_matrix(cJSON *request, const char *key, const GameConfigTable t
 cJSON *ui_host_config_auto(const char *map_name, const cJSON *preset, const int kr_rewards, const int private_game) {
     if (!map_name || !map_name[0]) return NULL;
     const AccountInfo *acc = active_account();
-    const int account_type = acc && acc->featured ? 3 : acc && acc->premium ? 2 : acc ? 1 : 0; // UTILS.getAccountType (:24545)
+    const int acc_type = account_type(); // UTILS.getAccountType (:24545)
     cJSON *request = cJSON_CreateObject();
     if (!request) return NULL;
     cJSON_AddBoolToObject(request, "private", private_game);
@@ -851,10 +870,7 @@ cJSON *ui_host_config_auto(const char *map_name, const cJSON *preset, const int 
         } else if (o->kind == GC_SELECT) {
             cJSON_AddNumberToObject(request, o->var, o->def);
         } else {
-            double max = o->max;
-            if (account_type == 3 && o->max_f) max = o->max_f;
-            else if (account_type == 2 && o->max_p) max = o->max_p;
-            else if (account_type == 0 && o->max_g) max = o->max_g;
+            const double max = type_max(o, acc_type);
             double v = o->def;
             if (has) {
                 v = cJSON_IsNumber(given) ? given->valuedouble : cJSON_IsString(given) ? atof(given->valuestring) : 0.0;
