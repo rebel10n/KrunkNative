@@ -975,6 +975,18 @@ static int g_hist_loaded;      // v11685
 static int g_hist_offset;      // vLN01921: rows fetched so far (the next "spinH" offset)
 static int g_hist_shown = -1;  // v11686: rows already in #spinHistoryList, -1 = rebuild it
 
+const cJSON *ui_loadout_skin_json(int index); // ui_loadout.c: store.skins[index] as skins.json has it
+
+// io_saveSpinHistory / the history item (deob-10.0.7.js:224535-224548): a Black Market item, a Raid item (limT "Raid")
+// and an Item Shop item are left out of the list (the offset still counts them), as is an index with no store skin
+static int history_hidden(const int ind) {
+    if (!viewer_skin(ind)) return 1;
+    const cJSON *j = ui_loadout_skin_json(ind);
+    const cJSON *bm = cJSON_GetObjectItemCaseSensitive(j, "blackM"), *shop = cJSON_GetObjectItemCaseSensitive(j, "itemShop");
+    const char *lim = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "limT"));
+    return cJSON_IsTrue(bm) || (cJSON_IsNumber(bm) && bm->valuedouble != 0) || (lim && !strcmp(lim, "Raid")) || (shop && !cJSON_IsNull(shop));
+}
+
 // f1838: a won item goes on top of a loaded history (with the wheel's price)
 static void history_add(const int item, const int kr) {
     if (!g_hist_loaded || !g_hist) return;
@@ -1003,7 +1015,7 @@ static void date_string(const double ms, char *out, const size_t n) {
 static void history_item(StrBuf *sb, const cJSON *row) {
     const int ind = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(row, "ind"));
     const ViewerSkin *k = viewer_skin(ind);
-    if (!k) return;
+    if (!k || history_hidden(ind)) return; // iíîíìiî draws nothing for them (:224535)
     char src[160];
     store_skin_preview(ind, src, sizeof(src));
     const char *col = k->rarity >= 0 && k->rarity < g_viewer_rarity_count ? g_viewer_rarities[k->rarity].color : "#fff";
@@ -1097,7 +1109,7 @@ static void history_response(const cJSON *frame) {
     const cJSON *r;
     cJSON_ArrayForEach(r, rows) {
         g_hist_offset++;
-        if (viewer_skin((int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "ind")))) cJSON_AddItemToArray(g_hist, cJSON_Duplicate(r, 1));
+        if (!history_hidden((int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "ind")))) cJSON_AddItemToArray(g_hist, cJSON_Duplicate(r, 1));
     }
     const int first = !g_hist_loaded;
     g_hist_loaded = 1;
