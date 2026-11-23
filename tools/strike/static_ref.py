@@ -9,8 +9,9 @@ the DOM KrunkNative renders for a scenario, drawn by Chrome with FRVR 1.37.2's o
 2. that document without KrunkNative's own parts: no <script> (FRVR's bundle never runs, nor does
    KrunkNative's shim), no css/kn-strike-overrides.css (the native engine's gap fixes), <base> at ui/strike/
    so FRVR's index-CJ_IUjn5.css, icons.css, fonts and images load from the tree
-3. Chrome headless screenshots it at the scenario's size; the page carries a Content-Security-Policy of
-   script-src 'none' (on top of having no <script> left), so nothing in it can run
+3. Chrome headless screenshots it at the scenario's size, under capture-strike.js's device emulation (the
+   scenario's size / 2 CSS px at deviceScaleFactor 2, tools/strike/static_ref_shot.js); the page carries a
+   Content-Security-Policy of script-src 'none' (on top of having no <script> left), so nothing in it can run
 
 So the reference checks the native engine's rendering of FRVR's markup against a browser's rendering of
 the same markup with FRVR's CSS; it says nothing about whether the transcription matches FRVR's own
@@ -21,12 +22,14 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHROMES = ("google-chrome", "chromium-browser", "chromium")
+DPR = 2  # capture-strike.js's deviceScaleFactor: the scenario's size is the device size, 2x the CSS viewport
 
 
 def chrome():
@@ -83,11 +86,31 @@ def main():
             with gzip.open(keep, "wt", encoding="utf-8") as f:
                 f.write(doc)
         shot = os.path.join(work, "ref.png")
-        cmd = [browser, "--headless=new", "--mute-audio", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
-               "--user-data-dir=" + os.path.join(work, "chrome"),
-               "--allow-file-access-from-files", "--force-device-scale-factor=1", "--window-size=%d,%d" % (w, h),
-               "--virtual-time-budget=3000", "--screenshot=" + shot, "file://" + page]
-        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+        # FRVR's captures (tools/uidiff/capture-strike.js) are Chrome under DevTools device emulation: 640 x 360 CSS px
+        # at deviceScaleFactor 2, mobile, --font-render-hinting=none. That lays the page out and rounds its text in CSS px,
+        # as the native client does for the Strike page (client/src/html/engine/paint.c glyph_to_quad); a plain
+        # 1280 x 720 window at scale 1 rounds in device px and drew item-selection's title 1 device px lower (2.56 %)
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        profile = os.path.join(work, "chrome")
+        cmd = [browser, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+               "--mute-audio", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check", "--font-render-hinting=none",
+               "--user-data-dir=" + profile, "--allow-file-access-from-files", "--window-size=%d,%d" % (w, h),
+               "--remote-debugging-port=%d" % port, "--remote-debugging-address=127.0.0.1", "about:blank"]
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            r = subprocess.run(["node", os.path.join(ROOT, "tools", "strike", "static_ref_shot.js"), str(port), "file://" + page,
+                                str(w // DPR), str(h // DPR), str(DPR), shot], stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            # Chrome's GPU / zygote children leave its process group: end whatever still runs on this profile
+            subprocess.run(["pkill", "-f", "--", "--user-data-dir=" + profile], check=False)
         if not os.path.exists(shot):
             sys.stderr.write(r.stderr.decode(errors="replace")[-2000:])
             print("static_ref: Chrome wrote no screenshot")
