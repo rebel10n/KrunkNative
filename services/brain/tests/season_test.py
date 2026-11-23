@@ -233,8 +233,11 @@ async def scenario(port):
 
         print("== claims")
         r = await s.call("bpclmr", "bpclm", free1[0][0])
-        check(r[3] == free1[0][3] and r[6]["id"] == free1[0][0] and r[6]["tier"] == 0 and r[6]["col"] == 0,
+        # v10.0.7 claimItemRes(_, funds, _, _, junk, items) (deob-10.0.7.js:219378): one card in the list, the balances
+        card = r[6][0] if isinstance(r[6], list) and len(r[6]) == 1 else {}
+        check(card.get("id") == free1[0][0] and card.get("sk") == free1[0][3] and card.get("tier") == 0 and card.get("col") == 0,
               "claimItemRes: the level 1 free skin %s" % r)
+        check(isinstance(r[2], (int, float)) and isinstance(r[5], (int, float)), "claimItemRes: funds and junk balances %s" % r)
         pr = await s.call("bppd")
         check(pr[1]["items_claimed"] == str(free1[0][0]), "items_claimed: %s" % pr[1]["items_claimed"])
         r = await s.call("po", "bpclm", free1[0][0])
@@ -300,7 +303,8 @@ async def scenario(port):
         check(r[2] == {"err": "You already own this Battle Pass"}, "a second VIP purchase: %s" % r)
         check(await funds_of(s, alice, token) == 100, "no second debit")
         r = await s.call("bpclmr", "bpclm", vip1[0][0])
-        check(r[3] == vip1[0][3], "the level 1 VIP card with the tier: %s" % r)
+        check(isinstance(r[6], list) and r[6] and r[6][0]["sk"] == vip1[0][3] and r[6][0]["tier"] == 1,
+              "the level 1 VIP card with the tier: %s" % r)
 
         print("== level skips in KR")
         r = await s.call("purbpl", "xstbpl", 1)
@@ -324,7 +328,7 @@ async def scenario(port):
         badges = nb[1] if nb else []
         check(count * per < 15000 or (27 in badges and 28 in badges), "S7 Battle Pass Master + S7 Badge Master: %s" % badges)
         r = await s.call("bpclmr", "bpclm", vip_last[0])
-        check(r[3] == vip_last[3], "the last VIP card after the skips: %s" % r)
+        check(isinstance(r[6], list) and r[6] and r[6][0]["sk"] == vip_last[3], "the last VIP card after the skips: %s" % r)
         r = await s.call("purbpl", "xstbpl", 1)
         check(r[2] == {"err": "Battle Pass already complete"}, "skip on a complete pass: %s" % r)
 

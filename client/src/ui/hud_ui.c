@@ -3614,9 +3614,10 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     const int score = me ? me->score : 0;
     const int kills = me ? (int) me->kills : 0;
     const int deaths = me ? (int) me->deaths : 0;
-    // v7.1.4 Battle Pass: #endBPLayout (account && !isCustom && bpData; battlepass_ui.c)
+    // Battle Pass: #endBPLayout only when account && !isCustom && bpData (deob-10.0.7.js:209967; battlepass_ui.c). A
+    // custom game's challenge can still bring a tmpBPData from kn_brain: the section stays hidden there.
     StrBuf bp = {0};
-    if (battlepass_ui_end_html(&bp)) {
+    if (!game_config_is_custom(&client->game) && battlepass_ui_end_html(&bp)) {
         char *html = sb_finish(&bp);
         hb_append(out, size, len, "%s", html);
         free(html);

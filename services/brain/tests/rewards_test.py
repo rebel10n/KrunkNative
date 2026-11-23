@@ -312,6 +312,19 @@ async def scenario(port):
               "the level 6 card pays 150 KR: %s" % r[1:])
         tx = query("SELECT amount FROM kr_transactions WHERE account_id = %d AND source = 'battlepass'" % alice_id)
         check(tx == ["150"], "kr_transactions: the card's KR: %s" % tx)
+        print("== jnkdata: a junk card, claimItemRes' junk balance")
+        jnk_card = free[6]
+        query("UPDATE battlepasses SET jnkdata = '%d:2.5' WHERE bp_id = 2" % jnk_card[0])
+        query("UPDATE battlepass_progress SET bpp = %d WHERE account_id = %d" % (per * 6 + 1, alice_id))  # level 7
+        j0 = float(query("SELECT player_junk FROM players WHERE player_id = %d" % alice_id)[0]) / 100.0
+        await s.call("bpdl", "bpdl")
+        await s.call("bppd")
+        await s.drain(0.3)
+        s.inbox.clear()
+        r = await s.call("bpclmr", "bpclm", jnk_card[0])
+        check(isinstance(r[6], list) and len(r[6]) == 1 and r[6][0]["jnk"] == 2.5 and abs(r[5] - (j0 + 2.5)) < 0.001,
+              "the level 7 card pays 2.5 junk; claimItemRes' junk is the balance: %s" % r[1:])
+        query("UPDATE battlepasses SET jnkdata = '' WHERE bp_id = 2")
         print("== leveldata: level 7 costs 1000 BPP")
         # levels 1-6: 300 each (1800), level 7: 1000 -> level 8 starts at 2800 (uniform: 2100)
         query("UPDATE battlepass_progress SET bpp = %d WHERE account_id = %d" % (per * 6 + 999, alice_id))
@@ -319,7 +332,7 @@ async def scenario(port):
         check(r[2] == "Level not reached", "2799 BPP: still level 7, the level 8 card waits: %s" % r)
         query("UPDATE battlepass_progress SET bpp = %d WHERE account_id = %d" % (per * 6 + 1000, alice_id))
         r = await s.call("bpclmr", "bpclm", free[7][0])
-        check(r[3] == free[7][3], "level 8 reached at 2800 BPP: %s" % r)
+        check(isinstance(r[6], list) and r[6] and r[6][0]["sk"] == free[7][3], "level 8 reached at 2800 BPP: %s" % r)
         query("UPDATE battlepasses SET krdata = '', leveldata = '' WHERE bp_id = 2")
 
     print("== the VIP tier gifted (v10 selectBPGift)")

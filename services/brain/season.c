@@ -6,12 +6,11 @@
  * pushes ("bppd", "bpEnd") come from the stats commit (accounts.c progress_done).
  *
  *   ["bpdl"]               -> ["bpdl", pass | null] then ["bppd", account.BP] (signed in)
- *   ["bpclm", itemId]      -> ["bpclmr", null, null, sk, null, null, {id, tier, col, sk}] +
- *                             ["bppd", account.BP] | ["po", null, err]   (v7.1.4 claimItemRes; the
- *                             v10 client reads it too)
- *   ["bpclmAll"]           -> ["bpclmr", null, funds, null, null, 0, [{id, tier, col, sk, kr, jnk}...]]
- *                             + "bppd" + "ua" | ["po", null, err]   (v10.0.2 BP_CLAIM_ALL /
- *                             claimItemRes(_, funds, _, _, junk, items))
+ *   ["bpclm", itemId]      -> ["bpclmr", null, funds, null, null, junk, [{id, tier, col, sk, kr, jnk}]]
+ *   ["bpclmAll"]           -> ["bpclmr", null, funds, null, null, junk, [{id, tier, col, sk, kr, jnk}...]]
+ *                             + "bppd" (+ "ua" when a KR / junk card changed the wallet) | ["po", null, err]
+ *                             (v10.0.7 claimItemRes(_, funds, _, _, junk, items), deob-10.0.7.js:219378;
+ *                             funds and junk are the balances after the claim)
  *   ["xstbp", tier, code, null, null, channel, giftName]
  *                          -> ["purbp", "kr", null, null, tier, price, "KR", txid] + "bppd" +
  *                             ["nbdgr", [badge...]] + "ua" (new KR) | ["purbp", "kr", {err}, "1"]
@@ -103,22 +102,12 @@ static void bp_claim_done(SocialSession *s, kn_db_result *res, void *extra) {
     }
     cJSON *v = acct_db_json(res);
     const cJSON *items = cJSON_GetObjectItemCaseSensitive(v, "items");
-    if (all) {
-        /* v10 claimItemRes(_, funds, _, _, junk, items) */
-        social_send_n(s, "bpclmr", 6, cJSON_CreateNull(), cJSON_CreateNumber((double) kn_json_int(v, "funds", 0)), cJSON_CreateNull(),
-                      cJSON_CreateNull(), cJSON_CreateNumber(0), items ? cJSON_Duplicate(items, 1) : cJSON_CreateArray());
-    } else {
-        const int sk = (int) kn_json_int(v, "sk", 0);
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddNumberToObject(item, "id", (double) kn_json_int(v, "id", 0));
-        cJSON_AddNumberToObject(item, "tier", (double) kn_json_int(v, "tier", 0));
-        cJSON_AddNumberToObject(item, "col", (double) kn_json_int(v, "col", 0));
-        cJSON_AddNumberToObject(item, "sk", sk);
-        const cJSON *first = cJSON_GetArrayItem(items, 0);
-        if (kn_json_int(first, "kr", 0) > 0) cJSON_AddNumberToObject(item, "kr", (double) kn_json_int(first, "kr", 0));
-        /* claimItemRes(_, _, skin, _, _, {id, tier, col, sk}) */
-        social_send_n(s, "bpclmr", 6, cJSON_CreateNull(), cJSON_CreateNull(), cJSON_CreateNumber(sk), cJSON_CreateNull(), cJSON_CreateNull(), item);
-    }
+    /* v10 claimItemRes(_, funds, _, _, junk, items) (deob-10.0.7.js:219378-219416) for "bpclm" and "bpclmAll" alike: the
+     * account's funds and junk balance after the claim, and the claimed cards [{id, tier, col, sk, kr, jnk}] */
+    const cJSON *junk = cJSON_GetObjectItemCaseSensitive(v, "junk");
+    social_send_n(s, "bpclmr", 6, cJSON_CreateNull(), cJSON_CreateNumber((double) kn_json_int(v, "funds", 0)), cJSON_CreateNull(),
+                  cJSON_CreateNull(), cJSON_IsNumber(junk) ? cJSON_CreateNumber(junk->valuedouble) : cJSON_CreateNull(),
+                  items ? cJSON_Duplicate(items, 1) : cJSON_CreateArray());
     const cJSON *pr = cJSON_GetObjectItemCaseSensitive(v, "progress");
     if (pr) social_send_n(s, "bppd", 1, cJSON_Duplicate(pr, 1));
     /* a KR card (v10 krdata) changed the wallet: the header's KR */

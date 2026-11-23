@@ -175,6 +175,9 @@ static void purchase_error(const char *provider, const char *err, const char *pr
     printf("[checkout] %s purchase of %s failed: %s\n", provider && provider[0] ? provider : "?", product && product[0] ? product : "?", text);
 }
 
+// window.purchaseError for the answers other modules read (battlepass_ui.c's "purbp" / "purbpl" on Box Office)
+void kio_checkout_purchase_error(const char *provider, const char *err, const char *product) { purchase_error(provider, err, product); }
+
 // the err argument of the answers: v10 reads error.err (an object); anything else is "Purchase Error"
 static const char *err_text(const cJSON *e) {
     const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(e, "err"));

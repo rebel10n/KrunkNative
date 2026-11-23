@@ -47,6 +47,9 @@ void kio_checkout_premium_popup(int index);
 // selectBPTier(_, tier, _, gift) (:212948-212966) / skipLevels (:212993-213011): the battle pass's Xsolla requests.
 void kio_checkout_bp_tier(int tier, const char *gift_to);
 void kio_checkout_bp_levels(int levels);
+// window.purchaseError(provider, error, product) (deob-10.0.7.js:216317-216331): closes the selector, #purchaseResponse
+// with err (NULL / "": "Purchase Error") and "click here" unless the message says the purchase limit was reached.
+void kio_checkout_purchase_error(const char *provider, const char *err, const char *product);
 
 // The page's handlers: XsollaPopup, StripePopup, purchaseCancel, cancelPurchase, closePurchaseSelector, selectPremium,
 // selectPremiumGift, giftPremium. Box Office keeps v10's empty XsollaPopup and the selector's close. -1 = not ours.

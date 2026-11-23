@@ -444,6 +444,7 @@ static kn_db_result *run_bp_claim(kn_dbconn *c, int n, const char *const *p) {
         cards = NULL;
         cJSON_AddNumberToObject(out, "funds",
                                 (double) dbx_int(&x, SQL(.any = "SELECT player_funds FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)), 0));
+        cJSON_AddNumberToObject(out, "junk", junk_value(junk_balance(&x, id))); /* claimItemRes' junk: account.junk = parseFloat(junk) */
     }
     cJSON_Delete(cards);
     cJSON_Delete(row);

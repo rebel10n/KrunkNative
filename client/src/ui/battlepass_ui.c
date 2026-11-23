@@ -39,6 +39,7 @@
 #include <html_ui.h>
 #include <i18n.h>
 #include <ui_logic.h>
+#include <v10_ui.h>     // the gift form on the popup stack (v10_view_push)
 #include <season.h>
 #include <math.h>
 #include <stdio.h>
@@ -212,31 +213,6 @@ static void gen_tabs(StrBuf *sb) {
     sb_append(sb, "</div>");
 }
 
-static void gen_card(StrBuf *sb, const int track, const int col, const int completed, const int vip) {
-    const BattlePassItem *it = bp_item_at(g_bp, track, col);
-    const int free_track = track == 0;
-    const int id = it ? it->id : -1;
-    const int claimed = it && bp_is_claimed(g_claimed, id);
-    const int claimable = (free_track || vip) && it && !claimed;
-    const int ad = free_track && !vip; // freeclaimItem (rewarded ad in v7)
-    const ViewerSkin *skin = it && it->skin > 0 ? viewer_skin(it->skin) : NULL;
-    sb_appendf(sb, "<div class=\"bpCard %s%s\">", free_track ? "free" : "vip", completed ? " completed" : "");
-    if (skin) {
-        char thumb[256];
-        store_skin_preview(it->skin, thumb, sizeof thumb);
-        const int r = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
-        sb_appendf(sb, "<div class=\"bpCardSlot\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);viewItem(%d);\">\n\t\t\t\t\t\t\t%s\n\t\t\t\t\t\t\t<div class=\"bpCardImgH\">\n\t\t\t\t\t\t\t\t<img class=\"bpCardImg\" loading=\"lazy\" draggable=\"false\" src=\"%s\" style=\"filter:drop-shadow(0 0 0.2rem %s88)\">\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t</div>\n\n\t\t\t\t\t\t\n\t\t\t\t\t\t",
-                   it->skin, vip || free_track ? "" : "<div class=\"bpCardLock\"></div>", thumb, g_viewer_rarities[r].color);
-        if (completed && claimable)
-            sb_appendf(sb, "<div class='bpClaimB' onclick=\"windows[5].%sclaimItem(%d)\"> %sCLAIM</div>", ad ? "free" : "", id,
-                       ad ? "<img style='vertical-align: bottom;margin-right:10px;display:inline' height='30px' src ='./img/frvr-ui/ad-icon.svg' class='frvr-button__icon'/>" : "");
-        sb_append(sb, "\n\n\t\t\t\t\t\t");
-        if (claimed) sb_append(sb, "<div class=\"bpClaimed\"><span class=\"material-icons\" style=\"font-size:160px;color:#38cd3a;line-height:256px\">done</span></div>");
-        sb_append(sb, "\n\n\t\t\t\t\t\t");
-    }
-    sb_append(sb, "</div>");
-}
-
 // ------------------------------------------------------------------ Krunker v10.0.2 windows[5].gen
 // (index.js:212116). Differences from v7.1.4: the levels' own costs
 // (leveldata, _52111) with "BP XP: x / need", the season countdown (#bpCountdownTimer,
@@ -329,11 +305,15 @@ static void gen_home_v10(StrBuf *sb) {
     const int need = bp_level_need(g_bp, g_lvl);
     const int vip = g_tier >= 1;
     const int64_t now = now_s();
-    // 500 * (floor((now - startdate) / 1 day) + 1); the BPP of levels 1 .. itemcount - 1
+    // 500 * (floor((now - startdate) / 1 day) + 1)
     const int64_t cap = bp_cap_total(g_bp, now);
     const int64_t avail = bp_available(g_bp, g_bpp, now);
+    // the Skip button's blockClick: the BPP of every level, 1 .. itemcount (deob-10.0.7.js:219256-219259 sums the level
+    // table below index itemcount + 1 - 1; :219375). On the last level a skip is still allowed (increaseSkip's
+    // max(1, itemcount - level), :219436).
     int64_t skip_cap = 0;
-    for (int l = 1; l < levels; l++) skip_cap += bp_level_need(g_bp, l);
+    for (int l = 1; l <= levels; l++) skip_cap += bp_level_need(g_bp, l);
+    KN_LOG_DEBUG1("[battlepass] home: level %d/%d complete=%d skip=%s\n", g_lvl, levels, complete, g_bpp >= skip_cap ? "blocked" : "open");
     char ends[64] = "";
     if (g_bp->end_s) readable_v10(ends, sizeof ends, (double) (g_bp->end_s - now) * 1000.0, 1);
     sb_append(sb, "<div style=\"display: inline-block;position: relative;\">");
@@ -386,14 +366,19 @@ static void gen_home_v10(StrBuf *sb) {
 
 static void generic_popup(const char *html, const char *cls);
 
-// windows[5].giftPop() -> selectBPGift(null, 1): the "Gift Battlepass" form (_6696 genericForm)
+// windows[5].giftPop() -> selectBPGift(null, 1) (deob-10.0.7.js:216058-216080): the generic form component (iìïíïíì,
+// :15102-15570) on the popup stack (iîïííií, :12089-12112: popup-container svelte-1wz7ymp, width 800): title "Gift
+// Battlepass", the description, one required text field "giftPlayerName", no cancel button and SEND GIFT (type submit,
+// disabled until the field has a value; Enter submits)
 static void gift_pop_v10(void) {
-    generic_popup("<div class=\"io-popup-container\"><div class=\"io-popup-header\">Gift Battlepass</div><div class=\"io-popup-content\">"
-                      "<p>Enter the player name below to send them this battlepass tier. We will let them know you have gifted it to them.</p>"
-                      "<input id=\"giftPlayerName\" class=\"accountInput\" type=\"text\" placeholder=\"Player Name\" value=\"\">"
-                      "<div class=\"io-button-group\"><button class=\"io-button io-button--accept\" onmouseenter=\"playTick(0.1)\" "
-                      "onclick=\"playSelect(0.1);knBpGiftSend()\">SEND GIFT</button></div></div></div>",
-                      "genericFormPop");
+    v10_view_push(strdup("<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 800px;\">"
+                         "<div class=\"io-popup-container\"><div class=\"io-popup-header\">Gift Battlepass</div> <div class=\"io-popup-content\">"
+                         "<div class=\"io-card\"><p>Enter the player name below to send them this battlepass tier. We will let them know you have gifted it to them.</p> "
+                         "<form><div class=\"io-input-container\"> <input class=\"io-input-field\" id=\"giftPlayerName\" type=\"text\" placeholder=\"Player Name\" "
+                         "value=\"\" required oninput=\"knBpGiftInput()\" onkeydown=\"knBpGiftKey()\"> <div class=\"io-button-group\"> "
+                         "<button type=\"submit\" class=\"io-button io-button--accept\" id=\"knBpGiftSendB\" onclick=\"knBpGiftSend()\" disabled>SEND GIFT</button>"
+                         "</div></div></form></div></div></div></div></div>"),
+                  NULL, NULL, NULL);
 }
 
 // windows[5].genDailyCard(challenge, marginTop)
@@ -576,36 +561,22 @@ static void skip_price_text(char *out, const size_t n, const int levels) {
     else snprintf(out, n, "%lld KR", (long long) g_bp->skip_price_kr * levels);
 }
 
-// windows[5].purchasePop()
+// windows[5].purchasePop() (deob-10.0.7.js:219574-219588): the header, "Unlock <tier> rewards" and the price button.
+// v10.0.7's popup has no creator code field (v7.1.4's battlepassCreatorH is gone), on either server.
 static void purchase_pop(void) {
     if (!g_bp) {
         g_after_purchase = 1;
         menu_show_window(BP_WINDOW, 0);
         return;
     }
-    char code[128] = "", price[32];
-    html_storage_get("krk_ccKN", code, sizeof code); // the Store's saved creator code
+    char price[32];
     tier_price_text(price, sizeof price);
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"bp-generic-img-holder\">\n\t\t\t<div class=\"bp-generic-img-back\"></div>\n\t\t\t<div class=\"bp-generic-img\"></div>\n\t\t</div>\n\t\t<div class=\"bp-generic-text\">\n\t\t\t<div class=\"bp-generic-header\" style=\"margin-bottom: 25px;\">Purchase ");
     for (const char *p = g_bp->tier1_name; *p; p++) sb_appendf(&sb, "%c", (*p >= 'a' && *p <= 'z') ? *p - 32 : *p);
     sb_append(&sb, " Battle Pass</div>\n\t\t\t<div class=\"bp-generic-info\">Unlock ");
     for (const char *p = g_bp->tier1_name; *p; p++) sb_appendf(&sb, "%c", (*p >= 'A' && *p <= 'Z') ? *p + 32 : *p);
-    if (official()) { // v10.0.3's popup has no creator code (Box Office keeps the Store's)
-        sb_append(&sb, " rewards\n\t\t\t</div>\n\t\t</div>");
-    } else {
-    sb_append(&sb, " rewards\n\t\t\t\t<div class='battlepassCreatorH'><div class='battlepassCreatorText'>Support your favorite Content Creator by using a Creator Code</div><div><input type='text' id='battlepassCreatorCode' class='smlInput' ");
-    if (code[0]) {
-        sb_append(&sb, "value='");
-        sb_append_esc(&sb, code);
-        sb_append(&sb, "'");
-    } else {
-        sb_append(&sb, "placeholder='Enter Creator Code'");
-    }
-    sb_appendf(&sb, " %s/><div id='battlepassCreatorCodeBtn' style='background-color:%s' onclick='creatorCodeAction(%d, 3)'>%s</div></div></div>\n\t\t\t</div>\n\t\t</div>",
-               code[0] ? "disabled" : "", code[0] ? "#eb5656" : "#41c300", code[0] ? 0 : 1, code[0] ? "Remove" : "Save");
-    }
-    sb_appendf(&sb, "\n\t\t<div class=\"bp-generic-btn-holder\">\n\t\t\t<div class='button bp-generic-btn' onmouseenter=\"playTick(0.1);\" onclick='playSelect(0.1);selectBPTier(this, 1);'>%s</div>\n\t\t</div>", price);
+    sb_appendf(&sb, " rewards</div>\n\t\t</div>\n\t\t<div class=\"bp-generic-btn-holder\">\n\t\t\t<div class='button bp-generic-btn' onmouseenter=\"playTick(0.1);\" onclick='playSelect(0.1);selectBPTier(this, 1);'>%s</div>\n\t\t</div>", price);
     char *html = sb_finish(&sb);
     generic_popup(html, "bp-purchase-pop");
     free(html);
@@ -660,16 +631,12 @@ static void increase_skip(const int delta) {
     }
 }
 
-// purchaseError(provider, error, product): #purchaseResponse with error.err
-static void purchase_error(const cJSON *err) {
-    const char *msg = cJSON_IsObject(err) ? jstr(err, "err") : cJSON_IsString(err) ? err->valuestring : "";
-    char html[512];
-    // + i18n "purchase.error.click" ("click here</a> and try again!") + "</a>"
-    snprintf(html, sizeof html, "%s <a href='javascript:;' onclick='cancelPurchase()'>click here</a> and try again!</a>", msg && msg[0] ? msg : "Purchase Error");
-    const HtmlElem h = html_dom_by_id("purchaseRespH");
-    if (h) html_dom_set_html(h, html);
-    const HtmlElem r = html_dom_by_id("purchaseResponse");
-    if (r) html_dom_set_display(r, "block");
+// purchaseError(provider, error, "battlepass_" + product) (deob-10.0.7.js:216317-216331, :219467, :219540): error.err
+// (an object's; anything else is "Purchase Error") on kio_checkout.c's page-wide #purchaseResponse: the selector closes
+// and "click here" is left out when the purchase limit was reached
+static void purchase_error(const cJSON *frame, const char *product) {
+    const cJSON *err = cJSON_GetArrayItem(frame, 2);
+    kio_checkout_purchase_error(cJSON_GetStringValue(cJSON_GetArrayItem(frame, 1)), cJSON_IsObject(err) ? jstr(err, "err") : "", product);
 }
 
 // The official krunker.io account's purchases (xstbp, xstbpl, the gift) go through kio_checkout.c: the payment provider's
@@ -714,6 +681,25 @@ static int arg_num(const HtmlArg *args, const int argc, const int i, const int d
     return def;
 }
 
+// selectBPTier(el, ..) / skipLevels(el): the price button takes no clicks for 3.5 s after one (el.style.pointerEvents
+// = "none", setTimeout(.., 3500); deob-10.0.7.js:216050-216052, :216098-216101, :219459-219462, :219533-219536), so a
+// double click sends one "xstbp" / "xstbpl" (one KR charge on Box Office), not two.
+#define BP_BUY_LOCK_MS 3500
+static int64_t g_tier_click_ms, g_skip_click_ms;
+
+static int64_t mono_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int click_unlocked(int64_t *last_ms) {
+    const int64_t now = mono_ms();
+    if (*last_ms && now - *last_ms < BP_BUY_LOCK_MS) return 0;
+    *last_ms = now;
+    return 1;
+}
+
 int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
     if (!strcmp(name, "windows.5.switchTab")) {
@@ -722,8 +708,9 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
     } else if (!strcmp(name, "windows.5.updateScroll")) {
         update_scroll(arg_num(args, argc, 0, 1), arg_num(args, argc, 1, 0));
     } else if (!strcmp(name, "windows.5.updateScrollWheel")) {
-        const double dy = ev && ev->value ? strtod(ev->value, NULL) : 0.0; // deltaY > 0 ? -1 : 1
-        if (dy != 0.0) update_scroll(dy > 0.0 ? -1 : 1, 0);
+        // updateScroll(window.event.deltaY > 0 ? -1 : 1) (deob-10.0.7.js:219207-219209): an inline onwheel's HtmlEvent.key is
+        // WheelEvent.deltaY in px (html_dom.h; ev->value is the element's value, "" for .bpCols). deltaY 0 scrolls right.
+        update_scroll(ev && ev->key > 0 ? -1 : 1, 0);
     } else if (!strcmp(name, "windows.5.showBalloon") || !strcmp(name, "windows.5.hideBalloon")) {
         const HtmlElem b = html_dom_query(0, ".bpInfoBalloon");
         if (b) html_dom_set_display(b, !strcmp(name, "windows.5.showBalloon") ? "block" : "none");
@@ -742,13 +729,23 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
             g_after_purchase = 2; // afterData = giftPop
             menu_show_window(BP_WINDOW, 0);
         } else gift_pop_v10();
-    } else if (!strcmp(name, "knBpGiftSend")) { // the form's SEND GIFT: selectBPTier(el, 1, undefined, name)
+    } else if (!strcmp(name, "knBpGiftInput")) { // the form's validity: SEND GIFT is disabled while the required field is empty
+        char who[64] = "";
+        const HtmlElem in = html_dom_by_id("giftPlayerName"), b = html_dom_by_id("knBpGiftSendB");
+        if (in) html_dom_get_value(in, who, sizeof who);
+        if (b) {
+            if (who[0]) html_dom_remove_attr(b, "disabled");
+            else html_dom_set_attr(b, "disabled", "");
+        }
+    } else if (!strcmp(name, "knBpGiftKey")) { // Enter in the field submits the form
+        if (ev && html_key_is_enter(ev->key)) return battlepass_ui_handle("knBpGiftSend", ev, NULL, 0);
+    } else if (!strcmp(name, "knBpGiftSend")) { // the form's submit: onClose(values), then selectBPTier(el, 1, undefined, name)
         char who[64] = "", frame[192];
         const HtmlElem in = html_dom_by_id("giftPlayerName");
         if (in) html_dom_get_value(in, who, sizeof who);
         if (!who[0] || !active_account()) return 1;
-        if (official()) { // the payment provider's checkout: selectBPTier(el, 1, _, name) -> "xstbp" (deob-10.0.4.js:212948-212966)
-            ui_loadout_clear_pops();
+        v10_view_pop(1);
+        if (official()) { // the payment provider's checkout: selectBPTier(el, 1, _, name) -> "xstbp" (deob-10.0.7.js:216035-216056)
             kio_checkout_bp_tier(1, who);
             return 1;
         }
@@ -771,23 +768,17 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
     } else if (!strcmp(name, "selectBPTier") || !strcmp(name, "windows.5.selectBPTier")) {
         char frame[64];
         snprintf(frame, sizeof frame, "[\"xstbp\",%d,null]", arg_num(args, argc, 1, 1)); // io.send("xstbp", tier, creatorCode)
-        if (active_account()) {
+        if (active_account() && click_unlocked(&g_tier_click_ms)) {
             if (official()) kio_checkout_bp_tier(arg_num(args, argc, 1, 1), NULL); // "xstbp" (:212959), the checkout
             else backend_social_send_text(frame);
         }
     } else if (!strcmp(name, "skipLevels") || !strcmp(name, "windows.5.skipLevels")) {
         char frame[48];
         snprintf(frame, sizeof frame, "[\"xstbpl\",%d]", skip_count()); // io.send("xstbpl", levels)
-        if (active_account() && html_dom_by_id("bp-skip-num")) {
+        if (active_account() && html_dom_by_id("bp-skip-num") && click_unlocked(&g_skip_click_ms)) {
             if (official()) kio_checkout_bp_levels(skip_count()); // "xstbpl" (:213007), the checkout
             else backend_social_send_text(frame);
         }
-    } else if (!strcmp(name, "creatorCodeAction") && arg_num(args, argc, 1, 0) == 3) { // the purchase popup's creator code
-        char code[128] = "";
-        const HtmlElem in = html_dom_by_id("battlepassCreatorCode");
-        if (in) html_dom_get_value(in, code, sizeof code);
-        html_storage_set("krk_ccKN", arg_num(args, argc, 0, 0) ? code : "");
-        purchase_pop();
     } else if (!strcmp(name, "cancelPurchase")) {
         const HtmlElem r = html_dom_by_id("purchaseResponse");
         if (r) html_dom_set_display(r, "none");
@@ -815,31 +806,34 @@ int battlepass_ui_frame(const char *label, const cJSON *frame) {
         set_progress(a1);
         menu_rerender_if_open(BP_WINDOW);
     } else if (!strcmp(label, "bpclmr")) {
-        // v7.1.4 claimItemRes(_, _, skin, _, _, {id, tier, col, sk}) and v10's (_, funds, _, _,
-        // junk, [{id, tier, col, sk, kr, jnk}...]): kn_brain sends the first for "bpclm" and the
-        // second for "bpclmAll"
-        const cJSON *funds = cJSON_GetArrayItem(frame, 2), *sk = cJSON_GetArrayItem(frame, 3), *item = cJSON_GetArrayItem(frame, 6);
+        // claimItemRes(_, funds, _, _, junk, [{id, tier, col, sk, kr, jnk}...]) (deob-10.0.7.js:219378-219416): funds =
+        // parseInt, junk = parseFloat when given (then updateMenuAccountData); every card goes into itemsClaimed, a skin
+        // card into the inventory. kn_brain answers "bpclm" and "bpclmAll" alike (services/brain/season.c).
+        const cJSON *funds = cJSON_GetArrayItem(frame, 2), *junk = cJSON_GetArrayItem(frame, 5), *items = cJSON_GetArrayItem(frame, 6);
         int count = 0;
-        if (cJSON_IsArray(item)) {
-            const cJSON *it;
-            cJSON_ArrayForEach(it, item) {
-                const int id = (int) jnum(it, "id");
-                if (!bp_is_claimed(g_claimed, id)) {
-                    char next[sizeof g_claimed];
-                    bp_add_claimed(g_claimed, id, next, sizeof next);
-                    snprintf(g_claimed, sizeof g_claimed, "%s", next);
-                }
-                if (active_account() && jnum(it, "sk") > 0) account_add_skin((int) jnum(it, "sk"));
-                count++;
-            }
-            if (active_account() && cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
-        } else {
-            if (active_account() && cJSON_IsNumber(sk) && sk->valueint > 0) account_add_skin(sk->valueint);
-            if (cJSON_IsObject(item)) {
+        const cJSON *it;
+        cJSON_ArrayForEach(it, (cJSON_IsArray(items) ? items : NULL)) {
+            const int id = (int) jnum(it, "id");
+            if (!bp_is_claimed(g_claimed, id)) {
                 char next[sizeof g_claimed];
-                bp_add_claimed(g_claimed, (int) jnum(item, "id"), next, sizeof next);
-                if (!bp_is_claimed(g_claimed, (int) jnum(item, "id"))) snprintf(g_claimed, sizeof g_claimed, "%s", next);
-                count = 1;
+                bp_add_claimed(g_claimed, id, next, sizeof next);
+                snprintf(g_claimed, sizeof g_claimed, "%s", next);
+            }
+            if (active_account() && jnum(it, "sk") > 0) account_add_skin((int) jnum(it, "sk"));
+            count++;
+        }
+        const int has_funds = cJSON_IsNumber(funds) || (cJSON_IsString(funds) && funds->valuestring[0]);
+        const int has_junk = cJSON_IsNumber(junk) || (cJSON_IsString(junk) && junk->valuestring[0]);
+        const double funds_v = (double) (int64_t) (cJSON_IsNumber(funds) ? funds->valuedouble : has_funds ? strtod(funds->valuestring, NULL) : 0.0);
+        const double junk_v = cJSON_IsNumber(junk) ? junk->valuedouble : has_junk ? strtod(junk->valuestring, NULL) : 0.0;
+        if (active_account() && official()) { // the krunker.io account's wallet
+            account_kio_set_balances(has_funds, funds_v, has_junk, junk_v);
+        } else if (active_account()) {
+            if (has_funds) account_set_funds(funds_v);
+            if (has_junk) {
+                char jtext[32];
+                snprintf(jtext, sizeof jtext, "%.2f", junk_v);
+                account_ui_set_junk(jtext);
             }
         }
         menu_rerender_if_open(BP_WINDOW);
@@ -850,7 +844,11 @@ int battlepass_ui_frame(const char *label, const cJSON *frame) {
     } else if (!strcmp(label, "purbp")) { // purchaseRes(provider, error, product, tier, ...)
         const cJSON *err = cJSON_GetArrayItem(frame, 2);
         if (err && !cJSON_IsNull(err)) {
-            purchase_error(err);
+            char product[48];
+            const cJSON *pr = cJSON_GetArrayItem(frame, 3);
+            if (cJSON_IsNumber(pr)) snprintf(product, sizeof product, "battlepass_%d", pr->valueint);
+            else snprintf(product, sizeof product, "battlepass_%s", cJSON_IsString(pr) ? pr->valuestring : "");
+            purchase_error(frame, product);
         } else if (cJSON_IsTrue(cJSON_GetArrayItem(frame, 10))) { // v10: gifted to the 11th argument
             char text[96];
             const char *who = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 11));
@@ -867,7 +865,9 @@ int battlepass_ui_frame(const char *label, const cJSON *frame) {
     } else if (!strcmp(label, "purbpl")) { // purchaseLvlRes(provider, error, _, levels, bpp, ...)
         const cJSON *err = cJSON_GetArrayItem(frame, 2), *levels = cJSON_GetArrayItem(frame, 4), *bpp = cJSON_GetArrayItem(frame, 5);
         if (err && !cJSON_IsNull(err)) {
-            purchase_error(err);
+            char product[48];
+            snprintf(product, sizeof product, "battlepass_levels_%d", cJSON_IsNumber(levels) ? levels->valueint : 0);
+            purchase_error(frame, product);
         } else {
             if (cJSON_IsNumber(bpp)) g_bpp = (int64_t) bpp->valuedouble;
             menu_rerender_if_open(BP_WINDOW);
