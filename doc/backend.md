@@ -1586,11 +1586,13 @@ and `kills` / `deaths` / `won` / `games` / `score` / `timePlayed` into `season_s
   link reuse / expiry / a replaced address, the resend cooldown and daily cap, `mail_log` (sent
   with the Message-ID, a 550 recipient as failed, no tokens), the 2FA lock after 10 wrong codes.
   `ctest -R brain_social_ws` covers the TOTP flows (`a2FA` .. `d2FAc`, the login step, replay).
-* `ctest -R brain_email_web_e2e` (`services/brain/tests/email_verify_web_e2e.py`, needs
-  `KN_WEB_DIST` = a `make web` dist dir, else skipped): the real web client in headless Chromium
-  registers with an email in the account window, the fake SMTP server gets the mail, its link
-  turns the open Account Security block "Verified", and Enable 2FA -> v7's popup with the QR code
-  -> six typed digits enable 2FA.
+* `ctest -R brain_email_web_e2e` (`services/brain/tests/email_verify_web_e2e.py`, needs a web build:
+  the checkout's own `dist/web` from `make web`, else `KN_WEB_DIST`, else skipped; the brain and
+  economy web tests and `v10_skin_capture_web_e2e` pick it the same way, so a worktree tests its own
+  client, not the main checkout's that test.env's `KN_WEB_DIST` names): the real web client in
+  headless Chromium registers with an email in the account window, the fake SMTP server gets the
+  mail, its link turns the open Account Security block "Verified", and Enable 2FA -> v10.0.7's
+  form popup with the QR code -> six typed digits enable 2FA.
 * `ctest -R brain_season` (`services/brain/tests/season_test.py`, every driver): the pass and
   account.BP, claims and their refusals, the match BPP and the daily cap (`bpEnd`), duplicate /
   left commits, the VIP tier and level skips in KR (`kr_transactions` rows, refusals without KR),

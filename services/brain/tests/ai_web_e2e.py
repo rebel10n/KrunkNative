@@ -12,7 +12,7 @@ Stop one size, a readable model dropdown), a prompt streams a reply, the stub th
 objects_create, which runs in the web editor against the open map, and its result goes back. Then
 the checkpoints: Restore checkpoint (the object undone, Redo brings it back), Edit + resend (undo
 the later edits), Rewind (+ Redo). Frames in the work directory (KN_KEEP=1 keeps it).
-Web dist: argument, else $KN_WEB_DIST. 77 = skip (no web build, Chromium or websockets).
+Web dist: the argument, else <repo root>/dist/web when it holds a build, else $KN_WEB_DIST. 77 = skip (no web build, Chromium or websockets).
 Ports from kn_proto.free_ports(); the profile, database and logs live in ~/.cache.
 """
 import asyncio
@@ -37,7 +37,11 @@ except ImportError:  # pragma: no cover
     sys.exit(77)
 
 BUILD, ROOT = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
-DIST = os.path.abspath(sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_WEB_DIST", ""))
+# the web dist: the argument, else the checkout's own `make web` output (<repo root>/dist/web, the client this tree builds),
+# else $KN_WEB_DIST. test.env's KN_WEB_DIST names the main checkout's build, which a worktree has not rebuilt.
+DIST = os.path.abspath(sys.argv[3] if len(sys.argv) > 3 else
+                       os.path.join(ROOT, "dist", "web") if os.path.isfile(os.path.join(ROOT, "dist", "web", "client.wasm")) else
+                       os.environ.get("KN_WEB_DIST", ""))
 BRAIN = os.path.join(BUILD, "services", "brain", "kn_brain")
 CHROME = os.environ.get("KN_CHROME") or shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
 HERE = os.path.dirname(os.path.abspath(__file__))

@@ -4,7 +4,7 @@ in headless Chromium against kn_brain (sqlite).
 
   python3 -I client/tests/v10_skin_capture_web_e2e.py <native build dir> <repo root> [<web dist dir>]
 
-Web dist: the argument, else $KN_WEB_DIST. 77 = skip (no web build, Chromium, websockets or kn_brain).
+Web dist: the argument, else <repo root>/dist/web when it holds a build, else $KN_WEB_DIST. 77 = skip (no web build, Chromium, websockets or kn_brain).
 
 As in v10.0.7, the editor's preview is the viewer page in an iframe (#knSmPreview). Capture Thumbnail posts
 {type: 'capturePreview', size: 256} to it (deob-10.0.7.js:124565-124568), and the viewer page answers its parent with
@@ -42,7 +42,11 @@ except ImportError:  # pragma: no cover
     sys.exit(77)
 
 BUILD, ROOT = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
-DIST = os.path.abspath(sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_WEB_DIST", ""))
+# the web dist: the argument, else the checkout's own `make web` output (<repo root>/dist/web, the client this tree builds),
+# else $KN_WEB_DIST. test.env's KN_WEB_DIST names the main checkout's build, which a worktree has not rebuilt.
+DIST = os.path.abspath(sys.argv[3] if len(sys.argv) > 3 else
+                       os.path.join(ROOT, "dist", "web") if os.path.isfile(os.path.join(ROOT, "dist", "web", "client.wasm")) else
+                       os.environ.get("KN_WEB_DIST", ""))
 BRAIN = os.path.join(BUILD, "services", "brain", "kn_brain")
 CHROME = os.environ.get("KN_CHROME") or shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
 sys.path.insert(0, os.path.join(ROOT, "server", "tests"))

@@ -9,7 +9,7 @@ services/common/tests/fake_smtp.py.
   popup (act2FA) with the QR code -> the six code boxes (typed into, as a player would) enable it -> "Disable".
 
   email_verify_web_e2e.py <native build dir> <repo root> [<web dist dir>]
-Web dist: argument, else $KN_WEB_DIST. 77 = skip (no web build, Chromium, websockets or openssl).
+Web dist: the argument, else <repo root>/dist/web when it holds a build, else $KN_WEB_DIST. 77 = skip (no web build, Chromium, websockets or openssl).
 Ports from kn_proto.free_ports(); the profile, database and logs live in ~/.cache.
 """
 import asyncio
@@ -40,7 +40,11 @@ except ImportError:  # pragma: no cover
     sys.exit(77)
 
 BUILD, ROOT = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
-DIST = os.path.abspath(sys.argv[3] if len(sys.argv) > 3 else os.environ.get("KN_WEB_DIST", ""))
+# the web dist: the argument, else the checkout's own `make web` output (<repo root>/dist/web, the client this tree builds),
+# else $KN_WEB_DIST. test.env's KN_WEB_DIST names the main checkout's build, which a worktree has not rebuilt.
+DIST = os.path.abspath(sys.argv[3] if len(sys.argv) > 3 else
+                       os.path.join(ROOT, "dist", "web") if os.path.isfile(os.path.join(ROOT, "dist", "web", "client.wasm")) else
+                       os.environ.get("KN_WEB_DIST", ""))
 BRAIN = os.path.join(BUILD, "services", "brain", "kn_brain")
 CHROME = os.environ.get("KN_CHROME") or shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
 sys.path.insert(0, os.path.join(ROOT, "services", "common", "tests"))
