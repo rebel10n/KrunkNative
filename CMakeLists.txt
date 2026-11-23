@@ -1778,6 +1778,12 @@ else ()
     target_link_libraries(hud_format_test PRIVATE m)
     add_test(NAME hud_format_test COMMAND hud_format_test)
 
+    # chat_filter_test: v10.0.7's profanity Filter.clean (client/src/ui/chat_filter.c) that Chat Filter and streamer
+    # mode apply to the chat and the kill-feed names (client/tests/chat_filter_test.c)
+    add_executable(chat_filter_test client/tests/chat_filter_test.c client/src/ui/chat_filter.c)
+    target_include_directories(chat_filter_test PRIVATE client/src/ui)
+    add_test(NAME chat_filter_test COMMAND chat_filter_test)
+
     # window_state_test: the window state F4 / the Settings relaunch pass to the new process
     # (KRUNKNATIVE_RESTORE_WINDOW) and a normal restart keeps (client/src/window_state.c)
     add_executable(window_state_test client/tests/window_state_test.c client/src/window_state.c)
