@@ -20,8 +20,8 @@ Host kru
 # --- Edges, new: dedicated KrunkNative VMs on the wisp Proxmox hosts (inventory group edges_kn).
 # KrunkNative is the only tenant and owns the firewall + fail2ban base. HostName: the VM's address
 # (kn_public_ip in inventory/hosts.yml; built 2026-11-12 by abulxt's pve_edge_vm, VM 110).
-# kn-mia (Miami), kn-iev (Kyiv) and kn-jnb (Johannesburg) are gone since 2026-11-19 (their servers moved
-# to kn-mnz on divide): only kn-ams is left of those VMs.
+# None is left: kn-mia (Miami), kn-iev (Kyiv) and kn-jnb (Johannesburg) went on 2026-11-19 (their servers
+# moved to kn-mnz on divide), kn-ams (Amsterdam) on 2026-11-23.
 # Ashburn/Manassas, US: CT 203 "kn" on divide (VM 123 on meal until 2026-11-16). LAN address only,
 # reached through divide (inventory group divide).
 Host kn-mnz
@@ -29,12 +29,3 @@ Host kn-mnz
   User root
   # CT 203 trusts divide's admin keys (divide.desktop), not the id_ed25519 of the wisp kn VMs
   IdentityFile ~/.ssh/desktop_ed25519
-
-# Amsterdam, NL
-Host kn-ams
-  HostName 92.38.186.100
-  User root
-  # The CI edge deploy key is in the VM's authorized_keys; use it when present
-  # for local hand deploys. CI environments can fall back to their id_ed25519.
-  IdentityFile ~/.config/kn-secrets/github-ci/edges_ci_ed25519
-  IdentityFile ~/.ssh/id_ed25519

@@ -108,10 +108,10 @@ secrets `KRU_SSH_KEY KRU_HOST KRU_PORT KRU_KNOWN_HOSTS DIVIDE_SSH_KEY DIVIDE_KNO
 "Through divide"). That includes `kn_bridge` (the bundle is
 built on the runner with its Node; the Cloudflare DNS/tunnel step is skipped without CF secrets).
 
-`.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` (= `ams,ashburn`) or e.g. `ams`,
+`.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` (= `ashburn`, the only edge since 2026-11-23) or e.g. `ashburn`,
 `dry_run` = `--check --diff`) builds server_bin for bullseye/bookworm/trixie and runs
-`edges.yml --tags release,gameserver`, the canary (ams) first, the others only once ams-1 answers the
-server-info query again. It restarts the game servers only when server_bin, its data or its
+`edges.yml --tags release,gameserver`, the canary (ashburn) first, any others only once ashburn-1 answers
+the server-info query again. It restarts the game servers only when server_bin, its data or its
 config changed (below, "Restarts"), draining them. Secrets: `EDGES_SSH_KEY`
 (a CI-only ed25519 key, private half in `~/.config/kn-secrets/github-ci/edges_ci_ed25519`; in each
 edge's root `authorized_keys` as
@@ -137,7 +137,7 @@ root `authorized_keys` needs the `krunknative-github-ci-edges` line like every e
 divide line and the secret.
 
 Edge groups (`inventory/hosts.yml`): `edges` = `edges_kn` (the dedicated `kn-<site>` VMs on the wisp
-Proxmox hosts, since 2026-11-19 only kn-ams; this repo owns their firewall and fail2ban base,
+Proxmox hosts, none since kn-ams went on 2026-11-23; this repo owns their firewall and fail2ban base,
 `group_vars/edges_kn/main.yml`; and kn-mnz, CT 203 on divide, group `divide`: no in-guest firewall or
 fail2ban, see [Edge firewall](#edge-firewall)). kn-mia, kn-iev and kn-jnb are gone (2026-11-19: no
 answer to ping or ssh); their nine Box Office servers moved to kn-mnz (Ashburn #4..#9), whose CT grew
@@ -544,7 +544,7 @@ rules inside the guest, so `kn_host_firewall: false` (`group_vars/divide/main.ym
 
 This repo: the drop-in's ranges are `kn_gameserver_port_range`, derived from
 `kn_gameserver_first_port` / `kn_gameserver_count` in the same file, which `kn_gameserver`
-also uses, so the open range always matches the instances (today kn-ams 21015-21017), then `kn_strike_port_range` for the Krunker Strike instances (21115). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
+also uses, so the open range always matches the instances, then `kn_strike_port_range` for the Krunker Strike instances (21115). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
 (and 21115).
 
 Safe apply (`roles/edge_firewall/tasks/apply.yml`), only when a rendered file changed: the files are

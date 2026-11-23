@@ -179,7 +179,7 @@ nearest to its real location:
 | `kn-iev` (gone 2026-11-19) | `KV` | Kyiv, Ukraine | `de-fra` | ~1,550 km | see below: no Ukrainian id; `pol` (Warsaw, ~690 km) is a name only; Frankfurt is the nearest pinged id (me-bhn ~3,200 km) |
 | `kn-mia` (gone 2026-11-19) | `MI` | Miami, FL | `us-fl`, alias `us-nj` | 0 / ~1,760 km | see below: `us-fl` (Miami) is a name only, so the official client never pings it; the alias `us-nj` is listed for it while no node of its own holds `us-nj` |
 | `kn-mnz` | `VA` | Ashburn/Manassas, VA | `us-nj` | ~350 km | as `amph.ashburn` before it (2026-11-13: a VM on meal) |
-| `kn-ams` | `AM` | Amsterdam, NL | `de-fra` | ~360 km | `nl-ams` (Amsterdam) is a name only; Frankfurt is the nearest pinged id. Shares `de-fra` with Kyiv |
+| `kn-ams` (gone 2026-11-23) | `AM` | Amsterdam, NL | `de-fra` | ~360 km | `nl-ams` (Amsterdam) is a name only; Frankfurt is the nearest pinged id. Shares `de-fra` with Kyiv |
 | `kn-jnb` (gone 2026-11-19) | `JN` | Johannesburg, ZA | `af-ct`, alias `me-bhn` | ~1,270 / ~6,350 km | see below: `af-ct` (South Africa) is a name only; the alias `me-bhn` is the nearest pinged id |
 | (dev / offline) | `local` | this machine | `local` | - | the non-production list is `["local"]` |
 

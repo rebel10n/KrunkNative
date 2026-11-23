@@ -46,17 +46,11 @@ kn_edge_origin_hosts:
 # Who may connect: the relays. Since kru moved to divide (2026-11-16) the only one that reaches it is
 # divide's edge CT 201 (172.16.5.10, infra's edge_relay): divide's public :443 is DNATed to that CT,
 # which relays the four names to kru on the LAN, and kru's pve-firewall (divide 120.fw) lets only it
-# in on 80/443. The wisp /24s (abulxt's boxes behind byod.abstracteducation.loan, 2026-11-12) are
-# kept as they are live on kru; they can no longer reach kru's :443 (no public address of its own)
-# and can go once nothing relays from them. Overrides the role default (the /24s of group 'edges');
+# in on 80/443. The wisp /24s (wisp-iev, -mia, -jnb, -ams, -mnz) came out on 2026-11-23: those boxes
+# are gone and G-Core gives their addresses to others. Overrides the role default (the /24s of group 'edges');
 # our game servers never connect here directly (they reach coordinator./matchmaker.krunk.io through
 # the relays). The old VPSs' lines went with them (cancelled 2026-11-13).
 kn_edge_origin_allow:
-  - 185.101.138.0/24   # wisp-iev  (Kyiv; its subnet is the .128/25)
-  - 45.92.71.0/24      # wisp-mia  (Miami)
-  - 5.188.120.0/24     # wisp-jnb  (Johannesburg)
-  - 92.38.186.0/24     # wisp-ams  (Amsterdam)
-  - 5.188.124.0/24     # wisp-mnz  (Manassas, was a VM on meal; meal's /24)
   - { net: 172.16.5.10, comment: divide edge CT 201 }
   - 127.0.0.1
 

@@ -87,7 +87,7 @@ its existing `~/actions-runner` is not ours. Package artifacts (Windows, macOS) 
 `local-deploy.sh` does deploy-kru.yml, deploy-edges.yml and assets-cdn.yml from this machine with the
 operator's ssh keys (deploy/ansible/ssh_config, ProxyJump divide): `make web` + kn_brain / kn_migrate
 (bookworm container) + `central.yml`; server_bin + kn_rentd (bullseye / bookworm / trixie) + `edges.yml` on
-the canary kn-ams, its health (instance 1 answers with this build's server commit), then kn-mnz; the asset
+kn-mnz (ashburn, the only edge), its health (instance 1 answers with this build's server commit); the asset
 CDN when it lacks dl.krunk.io's `assets/version.txt`. Secrets come from `~/.config/kn-secrets/` (smtp, ai,
 discord env files: a missing one keeps kru's file; the CDN's `github-ci/CLOUDFLARE_*`). Two things still
 need GitHub and are not done by hand: the krunk.io front end on GitHub Pages (a `build_type=workflow`

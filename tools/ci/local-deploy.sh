@@ -8,7 +8,7 @@
 #          ansible-playbook central.yml (-e kn_web_sync_assets=false -e kn_release_id=<commit12>), with the
 #          secrets of ~/.config/kn-secrets/{smtp,ai,discord}.env (a missing one keeps kru's file)
 #   edges  server_bin + kn_rentd for bullseye / bookworm / trixie, edges.yml (tags firewall,fail2ban,user,
-#          release,gameserver) on the canary kn-ams, its health, then kn-mnz, then every edge's health
+#          release,gameserver) on kn-mnz (ashburn, the only edge), then its health
 #   cdn    deploy/pages/assets-cdn.sh when the CDN lacks dl.krunk.io's assets/version.txt (CLOUDFLARE_* from
 #          ~/.config/kn-secrets/github-ci/)
 # Not here: the krunk.io front end (since 2026-11-21 kru's /opt/krunknative-pages, published with
@@ -110,15 +110,11 @@ if want edges; then
     done
     tags=firewall,fail2ban,user,release,gameserver
     cd "$src/deploy/ansible"
-    ansible -m ansible.builtin.ping "kru,kn-ams,kn-mnz" > "$out/edges-ping.log" 2>&1 || { cat "$out/edges-ping.log" >&2; exit 1; }
-    log "edges: canary kn-ams"
-    ansible-playbook edges.yml --tags "$tags" --limit kn-ams "${check[@]}" > "$out/edges-ams.log" 2>&1 \
-        || { tail -40 "$out/edges-ams.log" >&2; exit 1; }
-    edge_health ams
+    ansible -m ansible.builtin.ping "kru,kn-mnz" > "$out/edges-ping.log" 2>&1 || { cat "$out/edges-ping.log" >&2; exit 1; }
     log "edges: kn-mnz (ashburn)"
     ansible-playbook edges.yml --tags "$tags" --limit kn-mnz "${check[@]}" > "$out/edges-mnz.log" 2>&1 \
         || { tail -40 "$out/edges-mnz.log" >&2; exit 1; }
-    edge_health ams ashburn
+    edge_health ashburn
     cd "$repo"
 fi
 

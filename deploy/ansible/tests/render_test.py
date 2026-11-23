@@ -36,15 +36,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ANSIBLE = os.path.dirname(HERE)
 results = []
 
-# (inventory host, vcpus, MemTotal MB). vcpus as the live instance counts say: kn-ams 21015-21017,
-# kn-mnz (CT 203 on divide, 10 cores since 2026-11-19) 21015-21023, so it renders the 2-Strike path
-# (8+ vcpus); memory: kn-mnz's CT size, else a test value. kn-mia, kn-iev and kn-jnb are gone
-# (2026-11-19).
+# (inventory host, vcpus, MemTotal MB). vcpus as the live instance counts say: kn-mnz (CT 203 on
+# divide, 10 cores since 2026-11-19) 21015-21023, so it renders the 2-Strike path (8+ vcpus);
+# memory: kn-mnz's CT size. kn-mia, kn-iev and kn-jnb are gone (2026-11-19), kn-ams too (2026-11-23).
 EDGE_NAMES = {"kn-mnz": "ashburn"}  # inventory/hosts.yml kn_edge_name where it is not the host's suffix
 
 
 def edge_of(host):
-    """kn_edge_name of an inventory host: com.clara -> clara, kn-ams -> ams, kn-mnz -> ashburn."""
+    """kn_edge_name of an inventory host: com.clara -> clara, kn-iev -> iev, kn-mnz -> ashburn."""
     if host in EDGE_NAMES:
         return EDGE_NAMES[host]
     return host.split(".", 1)[1] if "." in host else host.split("-", 1)[1]
@@ -52,10 +51,9 @@ def edge_of(host):
 
 HOSTS = {
     "kn-mnz": (10, 6144),
-    "kn-ams": (4, 3915),
 }
 # inventory/hosts.yml kn_public_ip, and kn_listen_ip where the host is behind NAT (kn-mnz: CT 203 on divide)
-PUBLIC = {"kn-mnz": "91.199.82.174", "kn-ams": "92.38.186.100"}
+PUBLIC = {"kn-mnz": "91.199.82.174"}
 NAT_LISTEN = {"kn-mnz": "172.16.5.94"}
 # inventory/hosts.yml kn_gameserver_dns_count where it is below the instance count (none since Spaceship got
 # ashburn-4..9, 2026-11-19): instance n above it advertises <edge>-<((n-1) % it) + 1>, the same address.
@@ -65,7 +63,7 @@ RENTD = {"kn-mnz": 3}
 # kn-mnz's kn_forwarded_ports: the hairpin on kru (kru-rtc.nft) sends exactly these to its LAN address
 MNZ_FORWARDED = "21015-21023, 21024-21026, 21115-21116"  # 21024-21026: the rented servers (role kn_rentd)
 DIVIDE = ("kru", "kn-mnz")  # inventory group divide: no in-guest firewall / fail2ban
-TIGHT = ("kn-ams", 4, 1700)  # 1024 + 3 x 160 = 1504: no room for a 256 MB Strike instance
+TIGHT = ("kn-mnz", 10, 2600)  # 1024 + 9 x 160 = 2464: no room for a 256 MB Strike instance
 SECRET = "render-test-internal-secret-0123456789"
 
 PLAYBOOK = """
