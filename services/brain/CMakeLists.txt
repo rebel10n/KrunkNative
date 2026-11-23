@@ -23,6 +23,7 @@ set(KN_BRAIN_SOURCES
     oauth.c                       # v10.0.7 Login with Box Office: the OAuth provider, Connected apps (0366)
     raids.c                       # v10.0.3's raid record: stats commits, account raidStats, the raid leaderboards
     social_ws.c
+    editor_rooms.c
     social_eb.c
     social_gapi.c
     db_social_v10.c
@@ -307,6 +308,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_ws_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_social_ws PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v10.0.7's multiplayer map editing rooms (editor_rooms.c): the mp* relay between three sockets
+    add_test(NAME brain_editor_rooms
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/editor_rooms_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_editor_rooms PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;editor")
     # the social socket's rate limits: per-class buckets, refused frames answered, coalesced pushes
     add_test(NAME brain_social_ratelimit
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_ratelimit_test.py

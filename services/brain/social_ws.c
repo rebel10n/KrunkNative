@@ -12,6 +12,7 @@
  */
 #include "acct_internal.h"
 #include "account_life.h"
+#include "editor_rooms.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -1022,6 +1023,10 @@ static void classify(const cJSON *frame, RateDecision *d) {
         }
         return;
     }
+    if (editor_room_route(label)) { /* v10's editor rooms (editor_rooms.c): a camera every 200 ms, object bursts */
+        d->cls = RC_READ;
+        return;
+    }
     const LabelClass *l = find_class(k_label_class, sizeof k_label_class / sizeof k_label_class[0], label);
     if (l) {
         d->cls = l->cls;
@@ -1141,6 +1146,11 @@ static void dispatch(SocialSession *s, const cJSON *frame) {
             return;
         }
     }
+    const EditorRoomRoute *mp = editor_room_route(label->valuestring); /* v10's editor rooms (editor_rooms.c) */
+    if (mp) {
+        mp->fn(s, frame);
+        return;
+    }
     KN_DEBUG(MOD, "%s: unknown label \"%s\"", s->socket_id, label->valuestring); /* dropped, like socialWs.ts */
 }
 
@@ -1206,6 +1216,7 @@ static void on_close(kn_ws *ws, int code, const char *reason, void *ud) {
     (void) code;
     (void) reason;
     SocialSession *s = ud;
+    editor_rooms_leave(s); /* before s->ws goes: the room is told */
     presence_leave(s);
     clear_pending(s);
     queue_clear(s);
