@@ -305,6 +305,8 @@ typedef struct {
     int muzzle_flash;
     int tracers;
     int damage_overlay;
+    int casings;         // bulletCasings: PARTICLES.showCasings (deob-10.0.7.js:210731, :175309)
+    int impact_holes;    // impactHoles: PARTICLES.showImpactHoles (:210746, the local :175618 and remote :227702 hits)
     vec4 tracer_color;
     float tracer_offset; // tracerOffset (Editing, 0..1): the local tracer starts up to 20 x v off the barrel
     vec4 trail_color;    // trailCol (#ededed): bullet trails (v10.js:194333 RENDER.trailColor)
@@ -506,6 +508,8 @@ static void vfx_read_settings(void) {
     s->muzzle_flash = setting_flag("muzzleFlash");
     s->tracers = setting_flag("bulletTracers");
     s->damage_overlay = setting_flag("useDamageOverlay");
+    s->casings = setting_flag("bulletCasings");
+    s->impact_holes = setting_flag("impactHoles");
 
     double distance = 160.0;
     if (!ui_setting_number("particlesDist", &distance)) distance = 160.0;
@@ -1150,7 +1154,7 @@ static void local_shot(Client *client, Player *me) {
             }
         }
 
-        if (!fx->no_case && vfx.settings.particles && !scoped) {
+        if (!fx->no_case && vfx.settings.particles && vfx.settings.casings && !scoped) {
             for (int i = 0; i < muzzle_count; i++) {
                 vec3 world;
                 const vec3 local = {i ? -fx->x_off * 2.0f : 0.0f, fx->case_y_off, fx->case_z_off};
@@ -1214,7 +1218,7 @@ static void local_shot(Client *client, Player *me) {
         const vec3 hit = v3_add(origin, v3_scale(direction, distance));
 
         // Nettspend: a bill leaves no dust puff (8 per throw: a grey cloud at the feet); the burst is its effect
-        if (object && !money) {
+        if (object && !money && vfx.settings.impact_holes) {
             float normal_yaw, normal_pitch;
             impact_angles(object, hit, &normal_yaw, &normal_pitch);
             spawn_impact(hit, normal_yaw, normal_pitch);
@@ -1325,7 +1329,7 @@ void vfx_remote_shot(Client *client, const Player *shooter, const vec3 hit, cons
     // v10.0.2 SHOW_TRACER (v10.js:220581): the impact only when the hit point is within 200 units of us
     // (getDistance3D(you, hit) <= 200; v3.1.1's g7 measured the shooter within 160)
     const Player *me = client->me;
-    if (has_normal && me && v3_length(v3_sub(hit, me->position)) <= 200.0f) {
+    if (has_normal && me && vfx.settings.impact_holes && v3_length(v3_sub(hit, me->position)) <= 200.0f) {
         spawn_impact(hit, normal_yaw, normal_pitch);
     }
 }

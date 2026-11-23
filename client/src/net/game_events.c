@@ -1203,6 +1203,8 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_EXPLOSION: {
             EVENTS_READ(NetExplosionPacket, explosion);
             const vec3 position = {explosion.position[0], explosion.position[1], explosion.position[2]};
+            // showExplo && (you || spectating): shake, the sound and explodeAt, else nothing (deob-10.0.7.js:227726)
+            if (ui_setting_is_false("showExplo") || (!client->me && !spectate_active())) return 1;
             vfx_explosion(client, position, explosion.radius); // gb: explosion effect
             sound_events_explosion(position);
             camera_feel_explosion(&client->camera, position);  // gb: camera shake by distance

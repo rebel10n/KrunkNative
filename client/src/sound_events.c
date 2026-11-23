@@ -14,6 +14,7 @@
 #include <class_camera.h> // the listener at the head
 #include <audio.h>
 #include <client_settings.h> // Settings > Game > Gameplay "Always Play HS Sound on Kill"
+#include <ui_logic.h>        // particles / bulletCasings: the case_ sound
 #include <cosmetics.h>
 #include <stalker.h> // v10 Stalker: silent steps
 #include <defuse.h>  // v10 Defuse: the planter's beeps
@@ -388,6 +389,9 @@ static void local_shot(PlayerTrack *track, const Player *me, const float now) {
     if (shot < 0) return;
     if (shot) audio_play(name, 0.85f, 0, rand_float(0.9f, 1.1f));
 
+    // the case_ sound plays inside the casing loop: !nCase && PARTICLES.active && showCasings (deob-10.0.7.js:175309)
+    if (casings && ui_setting_is_false("particles")) casings = 0;
+    if (casings && ui_setting_is_false("bulletCasings")) casings = 0;
     if (casings && !(weapon->grapple_range > 0.0f) && now - track->last_shell > SHELL_INTERVAL) {
         track->last_shell = now;
         play_numbered("case_", 0, 1, 0.45f, rand_float(0.8f, 1.3f));
