@@ -6,8 +6,9 @@ wrapper `window.showRewardedAd(cb)` (:227993-228000: `cb` runs on exit, watched 
 placeholder card, "[insert FRVR ad here]" (`client/src/ui/kn_ad.c`, flow `client/src/ui/kn_ad_flow.c`), that counts
 down (`KN_AD_DEFAULT_SECONDS` = 5, `KRUNKNATIVE_AD_SECONDS` overrides it), then Continue grants exactly what the
 watched ad grants (user, 2026-10-30: "grant entitlements as if the user saw an ad for whatever is gated"). Closing it
-early is v10's "skipped". The bundle's rules kept: one ad at a time (a second `showAd` is dropped), onShow, then
-onComplete or onError, then onExit last.
+early is v10's "skipped". The bundle's rules kept: one ad at a time (a second `showAd` is dropped), onShow once the
+ad is over (FRVR.ads.show's promise resolved, deob-10.0.7.js:229900-229912: not when the card comes up), then
+onComplete or onError, then onExit last; a card that could not be shown gets onError and onExit only.
 
 | Feature | v10.0.5 | After the ad | krunker.io account | Box Office (kn_brain / server_bin) |
 | --- | --- | --- | --- | --- |

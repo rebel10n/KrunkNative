@@ -14,6 +14,7 @@
 static KnAdFlow g_flow;
 static KnAdRequest g_req;
 static int g_timer;
+static int g_shown; // the card was shown: the ad's show() resolved, so onShow runs as it ends
 
 static int ad_seconds(void) {
     const char *e = getenv("KRUNKNATIVE_AD_SECONDS"); // tests and screenshots: 0 = ready at once
@@ -100,6 +101,8 @@ static void ad_end(const int completed) {
     if (g_timer) html_timer_cancel(g_timer);
     g_timer = 0;
     const KnAdRequest req = g_req;
+    const int shown = g_shown;
+    g_shown = 0;
     const int result = kn_ad_flow_end(&g_flow, completed);
     memset(&g_req, 0, sizeof g_req);
     const HtmlElem pop = html_dom_by_id("genericPop");
@@ -108,6 +111,10 @@ static void ad_end(const int completed) {
     const HtmlElem strike = html_dom_by_id("knAdStrikePop");
     if (strike) html_dom_remove(strike);
     KN_LOG_DEBUG1("[ad] placeholder %s\n", result == KN_AD_COMPLETED ? "completed" : "skipped");
+    // FRVR.ads.show(type).then(result => { onShow && onShow(); ... }) (deob-10.0.7.js:229900-229912): onShow runs once
+    // the ad is over (completed or delivered), right before onComplete or the "skipped" onError; an ad that could not
+    // be shown rejects before it (onError, onExit only)
+    if (shown && req.on_show) req.on_show(req.user);
     if (result == KN_AD_COMPLETED) {
         if (req.on_complete) req.on_complete(req.user);
     } else if (req.on_error) {
@@ -124,7 +131,7 @@ int kn_ad_show(const KnAdRequest *req) {
         ad_end(0);
         return 1;
     }
-    if (g_req.on_show) g_req.on_show(g_req.user);
+    g_shown = 1;
     if (g_flow.phase == KN_AD_COUNTING) g_timer = html_timer_add(1000.0, ad_tick, NULL);
     return 1;
 }
