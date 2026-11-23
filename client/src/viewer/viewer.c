@@ -37,6 +37,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #define VIEWER_GUI_WIDTH 322           // e.width = 322
 #define VIEWER_RENDER_DELAY_MS 750.0   // $(): setTimeout(..., 750)
@@ -815,6 +818,9 @@ static void viewer_tick(Client *client, const float now, const float delta) {
     int fb_w = 0, fb_h = 0;
     glfwGetFramebufferSize(client->window, &fb_w, &fb_h);
     const float dt_ms = fminf(delta, 0.1f) * 1000.0f;
+    float cx, cy, cw, ch;
+    vscene_canvas_rect(&cx, &cy, &cw, &ch);
+    vscene_place_viewport(cx, cy, cw, ch); // the Skin Manager's placement tools (an iframe of this page on the web)
     vscene_tick(dt_ms);
     vscene_render(fb_w, fb_h);
 }
@@ -832,9 +838,13 @@ static int viewer_mouse_button(Client *client, const int button, const int actio
 
     if (action == GLFW_PRESS) {
         if (dialog_open() || vg_contains(cx, cy) || g_viewer.cosmetic_set) return 0;
+        float px, py, pw, ph;
+        vscene_canvas_rect(&px, &py, &pw, &ph);
+        if (button == GLFW_MOUSE_BUTTON_LEFT && vscene_place_press(cx - px, cy - py)) return 1; // a snap or a gizmo handle
         vscene_orbit_begin(button, mods, cx, cy);
         return vscene_orbit_active();
     }
+    if (action == GLFW_RELEASE && vscene_place_release()) return 1;
     if (action == GLFW_RELEASE && vg_dragging()) vg_drag_end(); // dat.gui's window mouseup
     if (action == GLFW_RELEASE && vscene_orbit_active()) {
         vscene_orbit_end();
@@ -850,6 +860,12 @@ static int viewer_cursor(Client *client, const double x, const double y) {
     if (vg_dragging()) { // dat.gui's window mousemove while a box / colour field is dragged
         vg_drag_move((float) x / s, (float) y / s);
         return 0;
+    }
+    if (vscene_place_dragging()) {
+        float px, py, pw, ph;
+        vscene_canvas_rect(&px, &py, &pw, &ph);
+        vscene_place_move((float) x / s - px, (float) y / s - py);
+        return 1;
     }
     if (!vscene_orbit_active()) return 0;
     vscene_orbit_move((float) x / s, (float) y / s);
@@ -921,14 +937,70 @@ static struct {
     // the iframe's query: the shown copy's wear / paint / seed with the index (or the skin's JSON, with a Shader Studio
     // graph as customShaderInfo: tens of KB encoded)
     char query[65536];
+    HtmlRect rect;   // the iframe's box (CSS px) last frame
+    int grab;        // the pointer pressed on the showcase: 1 a placement tool's, 2 the orbit drag, 0 none
+    ViewerEmbedListener listener;
 } g_embed;
+
+#ifdef __EMSCRIPTEN__
+// the web client's window "message" listener (viewer_embed_listen): the preview iframe's answer
+EMSCRIPTEN_KEEPALIVE void kn_viewer_embed_message(const char *type, const char *json) {
+    cJSON *data = json ? cJSON_Parse(json) : NULL;
+    if (type && data && g_embed.listener) g_embed.listener(type, data);
+    cJSON_Delete(data);
+}
+
+EM_JS(void, kn_viewer_listen_js, (void), {
+    window.addEventListener('message', function (e) {
+        var d = e.data;
+        if (!d || (d.type !== 'attachChanged' && d.type !== 'charmChanged')) return;
+        var frame = document.getElementById('knSmPreview'); // the Skin Manager's showcase iframe only (:124734-124735)
+        if (!frame || e.source !== frame.contentWindow) return;
+        var t = stringToNewUTF8(d.type);
+        var j = stringToNewUTF8(JSON.stringify(d.type === 'attachChanged' ? d.attach : d.charm));
+        _kn_viewer_embed_message(t, j);
+        _free(t);
+        _free(j);
+    });
+});
+
+EM_JS(void, kn_viewer_post_js, (const char *type, const char *json), {
+    if (!window.parent || window.parent === window) return;
+    var t = UTF8ToString(type);
+    var m = {type: t};
+    m[t === 'attachChanged' ? 'attach' : 'charm'] = JSON.parse(UTF8ToString(json));
+    window.parent.postMessage(m, '*');
+});
+#endif
+
+void viewer_embed_listen(const ViewerEmbedListener listener) {
+    g_embed.listener = listener;
+#ifdef __EMSCRIPTEN__
+    static int listening;
+    if (listening || !listener) return;
+    listening = 1;
+    kn_viewer_listen_js();
+#endif
+}
+
+void viewer_place_changed(const char *type, const cJSON *data) {
+    char *json = cJSON_PrintUnformatted(data);
+    fprintf(stderr, "[viewer] %s %s\n", type, json ? json : "{}");
+#ifdef __EMSCRIPTEN__
+    if (g_ui.entered && json) kn_viewer_post_js(type, json); // this page is the iframe: its parent's listener
+#endif
+    free(json);
+    if (g_embed.listener) g_embed.listener(type, data);
+}
 
 void viewer_embed_fini(void) {
     if (!g_embed.active) return;
     vscene_fini();
     params_clear();
     memset(&g_viewer, 0, sizeof(g_viewer));
+    const ViewerEmbedListener listener = g_embed.listener;
     memset(&g_embed, 0, sizeof(g_embed));
+    g_embed.listener = listener;
 }
 
 // the iframe that shows viewer.html?...showcase=<i>: #itemViewPop's (the store's item view) or the Skin Manager's
@@ -966,7 +1038,14 @@ void viewer_embed_frame(Client *client, const float delta) {
         viewer_embed_fini();
         return;
     }
-    if (g_embed.active && (g_embed.index != index || strcmp(g_embed.query, query) != 0)) viewer_embed_fini();
+    vec3 kept_position = {0}, kept_target = {0};
+    int keep_camera = 0;
+    if (g_embed.active && (g_embed.index != index || strcmp(g_embed.query, query) != 0)) {
+        // the Skin Manager's preview again (a placement changed or a tool picked): the camera stays while a tool is on
+        keep_camera = g_embed.index == index && index == VIEWER_SHOWCASE_SKIN_INDEX && (strstr(query, "attachEdit=") || strstr(query, "charmEdit="));
+        if (keep_camera) vscene_camera_get(&kept_position, &kept_target);
+        viewer_embed_fini();
+    }
     if (!g_embed.active) {
         // the iframe's own query (nobg&showcase=<i> and the copy's &wear= / &paint= / &seed=, deob-10.0.6.js:221934)
         memset(&g_viewer, 0, sizeof(g_viewer));
@@ -986,8 +1065,11 @@ void viewer_embed_frame(Client *client, const float delta) {
         }
         vscene_update_lights();
         vscene_build_showcase(index);
+        if (keep_camera && vscene_place_active()) vscene_camera_set(kept_position, kept_target);
         KN_LOG_VERBOSE2("[viewer] item view showcase %d\n", index);
     }
+    g_embed.rect = rect;
+    vscene_place_viewport(rect.x, rect.y, rect.w, rect.h);
 
     int fb_w = 0, fb_h = 0;
     glfwGetFramebufferSize(client->window, &fb_w, &fb_h);
@@ -998,6 +1080,44 @@ void viewer_embed_frame(Client *client, const float delta) {
     const int y = fb_h - (int) lroundf(rect.y * scale) - h;
     vscene_tick(fminf(delta, 0.1f) * 1000.0f);
     vscene_render_rect(x, y, w, h, fb_w, fb_h);
+#endif
+}
+
+int viewer_embed_pointer(const int action, const double x, const double y) {
+#ifdef __EMSCRIPTEN__
+    (void) action;
+    (void) x;
+    (void) y;
+    return 0; // the browser gives the iframe its own pointer
+#else
+    if (!g_embed.active) return 0;
+    const float lx = (float) x - g_embed.rect.x, ly = (float) y - g_embed.rect.y;
+    if (action == 1) {
+        if (g_embed.grab || lx < 0.0f || ly < 0.0f || lx >= g_embed.rect.w || ly >= g_embed.rect.h) return 0;
+        int index = -1;
+        static char query[sizeof(g_embed.query)];
+        const HtmlElem frame = embed_frame(&index, query, sizeof(query));
+        int on_frame = 0; // the iframe is what the page has at that point (no popup over it)
+        for (HtmlElem e = frame ? html_dom_element_at((float) x, (float) y) : 0; e && !on_frame; e = html_dom_parent(e)) on_frame = e == frame;
+        if (!on_frame) return 0;
+        if (vscene_place_press(lx, ly)) {
+            g_embed.grab = vscene_place_dragging() ? 1 : 3; // 3: a snap, done on the press
+            return 1;
+        }
+        vscene_orbit_begin(0, 0, (float) x, (float) y); // OrbitControls: the left button rotates
+        g_embed.grab = 2;
+        return 1;
+    }
+    if (action == 0) {
+        if (g_embed.grab == 1) vscene_place_move(lx, ly);
+        else if (g_embed.grab == 2) vscene_orbit_move((float) x, (float) y);
+        return g_embed.grab != 0;
+    }
+    const int grab = g_embed.grab;
+    g_embed.grab = 0;
+    if (grab == 1) vscene_place_release();
+    else if (grab == 2) vscene_orbit_end();
+    return grab != 0;
 #endif
 }
 

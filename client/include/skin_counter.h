@@ -20,6 +20,8 @@ void skin_counter_set_visible(SkinCounter *counter, int visible);
 // setCount (deob-10.0.4.js:204493-204496): clamped to 0 .. 10^digits - 1; a change rebuilds the lit pixels.
 void skin_counter_set_count(SkinCounter *counter, long count);
 long skin_counter_count(const SkinCounter *counter);
+// The counter's own transform (attach x / y / z, rot, scl on its parent): what the viewer's placement tools move.
+MeshTransform *skin_counter_root(SkinCounter *counter);
 // The counted stat (iíìîííî, deob-10.0.4.js:106489-106492): the attach's when it is one of the eight, else "kills".
 const char *skin_counter_stat(const SkinCounter *counter);
 

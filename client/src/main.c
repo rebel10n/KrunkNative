@@ -2109,6 +2109,9 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
     if (strike_ui_active() && strike_customize_mouse(1, x, y)) return; // a Customize Controls drag
     if (ui_console_mouse(-1, x, y, 0)) return; // dev console titlebar drag / grip resize
     if (krunker_captcha_inline_pointer(KN_WEBVIEW_POINTER_MOVE, x, y, 0)) return; // the challenge in the game UI
+    double cx = x, cy = y;
+    html_css_point(&cx, &cy);
+    if (viewer_embed_pointer(0, cx, cy)) return; // a drag in a showcase iframe (its orbit, the Skin Manager's tools)
     html_ui_mouse_move(x, y);
 }
 
@@ -2162,6 +2165,11 @@ static void mouse_button_callback(GLFWwindow *window, const int button, const in
     if (action == GLFW_PRESS || action == GLFW_RELEASE) { // the challenge in the game UI (krunker_captcha.h)
         const int kind = action == GLFW_PRESS ? KN_WEBVIEW_POINTER_PRESS : KN_WEBVIEW_POINTER_RELEASE;
         if (krunker_captcha_inline_pointer(kind, x, y, captcha_inline_button(button))) return;
+    }
+    if (button == GLFW_MOUSE_BUTTON_LEFT && (action == GLFW_PRESS || action == GLFW_RELEASE)) { // a showcase iframe's own drag
+        double cx = x, cy = y;
+        html_css_point(&cx, &cy);
+        if (viewer_embed_pointer(action == GLFW_PRESS ? 1 : 2, cx, cy)) return;
     }
     html_ui_mouse_move(x, y);
     html_ui_mouse_button(button, action, mods);

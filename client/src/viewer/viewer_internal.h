@@ -68,6 +68,19 @@ void vscene_orbit_end(void);
 int  vscene_orbit_active(void);
 void vscene_orbit_wheel(float dy);
 void vscene_orbit_key(int dom_key_code);
+// The Skin Manager preview's placement tools (viewer_scene.c, &attachEdit / &charmEdit): the viewport the showcase is
+// drawn into (CSS px), whether a tool is on, a press / move / release at a viewport point (CSS px from its top left; a
+// press is the tool's when it snaps or grabs a handle) and the camera kept across a rebuild of the same preview.
+void vscene_place_viewport(float x, float y, float w, float h);
+int  vscene_place_active(void);
+int  vscene_place_press(float x, float y);
+int  vscene_place_dragging(void);
+void vscene_place_move(float x, float y);
+int  vscene_place_release(void);
+void vscene_camera_get(vec3 *position, vec3 *target);
+void vscene_camera_set(vec3 position, vec3 target);
+// attachChanged {attach} / charmChanged {charm}: a placement tool's result (viewer.c: to the embed's listener)
+void viewer_place_changed(const char *type, const cJSON *data);
 // the current player's state, for the import targets
 int  vscene_player_weapon_slot(void);       // weaponIndex
 int  vscene_player_weapon_id(void);         // loadout[weaponIndex], -1 without a player

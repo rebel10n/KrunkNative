@@ -34,9 +34,11 @@
 // (:126048-126978, :127496-127530). Shader Studio's node canvas is sgEditor (shader_graph_ui.c); its graph compiles to
 // the preview's and the game's material (skin_fx.c, mod_shader_graph.c). An OGG sound plays as MP3 and WAV do
 // (miniaudio with stb_vorbis, client/src/miniaudio.c).
-// Not ported: the preview's Kounter / charm tools (Snap to surface, the Move / Rotate / Scale gizmo: the showcase
-// iframe's attachEdit / charmEdit messages); the fields set the placement. The paint preview takes a Solid Colour as
-// the viewer's &paint= and an Animated Shader's graph as &paintGraph= (the paintPreview message, :126274-126295).
+// The preview's Kounter / charm tools (View, Snap to surface, the Move / Rotate / Scale gizmo) are the showcase
+// iframe's attachEdit / charmEdit messages (:124719-124733), here the query's &attachEdit= / &charmEdit= (the iframe
+// takes no messages); its attachChanged / charmChanged answers (:124749-124762) come back through viewer_embed_listen.
+// The paint preview takes a Solid Colour as the viewer's &paint= and an Animated Shader's graph as &paintGraph= (the
+// paintPreview message, :126274-126295).
 // A krunker.io account's skins are krunker.io's: v10_gapi sends no write there (read-only), so its uploads fail as its
 // saves do.
 #include <v10_skin_manager.h>
@@ -1706,6 +1708,35 @@ static void charm_write(const double *p) {
     changed();
 }
 
+// the iframe's attachChanged {attach} / charmChanged {charm} (iIìíîíï, :124749-124762): the skin takes the placement
+// the tool left (the attach's other fields as they are; the charm through iìiîìíì's rounding and floor)
+static void on_preview_message(const char *type, const cJSON *data) {
+    if (!SM.editing || !data) return;
+    if (!strcmp(type, "attachChanged")) {
+        const cJSON *a = attach_of();
+        if (!a) return;
+        cJSON *n = cJSON_Duplicate(a, 1);
+        static const char *const keys[] = {"x", "y", "z", "rot", "scl"};
+        for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(data, keys[i]);
+            if (v) put(n, keys[i], cJSON_Duplicate(v, 1));
+        }
+        attach_write(n);
+    } else if (!strcmp(type, "charmChanged")) {
+        double p[4];
+        if (!charm_placement(p)) return;
+        static const char *const keys[] = {"x", "y", "z", "scl"};
+        for (int i = 0; i < 4; i++) {
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(data, keys[i]);
+            if (cJSON_IsNumber(v)) p[i] = v->valuedouble;
+        }
+        charm_write(p);
+    } else {
+        return;
+    }
+    render();
+}
+
 static void charm_section(StrBuf *sb) {
     const int hidden = cfg_true(editing_config(), "noCharm");
     sb_appendf(sb, "<div class=\"section svelte-sr5bk2\" id=\"knSmCharm\"><h3 class=\"section-title svelte-sr5bk2\"><span class=\"material-icons svelte-sr5bk2\">key</span> Charm</h3> "
@@ -1754,8 +1785,14 @@ static int is_preview_paint(const ViewerSkin *s) { return s && s->type == T_PAIN
 
 // the query after the showcase (iIìííiî :124880-124889): the Kounter's stat at 1284, the wear the slider set
 // (KrunkNative: as &wear=<level>, the iframe's updateWear message folded into its query), the paint picked
+static int charm_placement(double out[4]);
+
 static void preview_extra(StrBuf *sb) {
     sb_appendf(sb, "&%s=1284", attach_stat(attach_of()));
+    double charm[4];
+    if (attach_of()) sb_appendf(sb, "&attachEdit=%s", PLACE_TOOLS[SM.ed.attach_mode].mode); // iÎíîiìì (:124720-124725)
+    if (!cfg_true(editing_config(), "noCharm") && charm_placement(charm))
+        sb_appendf(sb, "&charmEdit=%s", PLACE_TOOLS[SM.ed.charm_mode].mode); // iÏïiïìí (:124726-124732)
     if (SM.ed.wear_touched) {
         char v[24];
         js_number(v, sizeof(v), SM.ed.wear_level);
@@ -2265,6 +2302,7 @@ static void changed(void) { // onSkinChange (iÍíìîïí): the skin is unsaved
 // the editor opens on a skin: its preview, its glow toggle (hasGlow: an emissive texture, never for a player card),
 // Shader Studio's state, the sections' errors (each section component is new)
 static void editor_opened(void) {
+    viewer_embed_listen(on_preview_message);
     free(SM.preview);
     SM.preview = NULL;
     SM.preview_due = now_ms() + PREVIEW_DEBOUNCE_MS;

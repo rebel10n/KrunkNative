@@ -389,6 +389,8 @@ void skin_counter_set_count(SkinCounter *c, const long count) {
 
 long skin_counter_count(const SkinCounter *c) { return c ? c->count : 0; }
 
+MeshTransform *skin_counter_root(SkinCounter *c) { return c ? &c->root : NULL; }
+
 const char *skin_counter_stat(const SkinCounter *c) { return c ? k_icons[c->stat].stat : "kills"; }
 
 // counterLive (deob-10.0.4.js:170932, :172729-172734): per player and weapon, the stat and what this match counted

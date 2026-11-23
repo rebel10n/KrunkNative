@@ -130,11 +130,25 @@ These sections are v10's, from `client/src/ui/v10_skin_manager.c` (:126048-12697
   moves the mount to `skin || weapon` and scales it by `weapon.charmMScl * (skin.charmMScl || 1)` (:174210).
 - **The preview's Wear slider and paint select** add `&wear=` and `&paint=` to the iframe's query. The query also
   carries `&<stat>=1284`, so the showcase's Kounter shows 1284.
+- **The preview's Kounter and charm tools** (View, Snap to surface, Move, Rotate for the Kounter, Scale;
+  :126662-126691, :126849-126866) are v10's attachEdit / charmEdit messages (:124719-124733), here
+  `&attachEdit=<mode>` (with an attach) and `&charmEdit=<mode>` (with the skin's own charm placement). The showcase
+  (viewer_scene.c) answers attachChanged / charmChanged (:124749-124762):
+  - A tool other than View holds the preview still. Natively a press on the preview box is the showcase's
+    (`viewer_embed_pointer`): a tool's, else the orbit drag ("Drag anywhere else to look around").
+  - Snap casts a ray at the click. The Kounter goes on the hit triangle with its face (+z) along the normal; the
+    charm mount goes to the point.
+  - The gizmo's handles run along the item's axes: Move drags x / y / z, Rotate `rot[i]`, Scale the scale (the
+    charm's at least 0.05, as `charmMScl`).
+  - The charm shows as its mount (`charms/charm_mount_0`) in the weapon's anchor, the weapon mesh's own transform
+    undone inside the shown item (player_mesh.c's frame).
+  - The Skin Manager takes the answer through `viewer_embed_listen`: natively a call, on the web the viewer page's
+    `postMessage` to its parent and a `message` listener for `#knSmPreview`'s window.
 - **Differences**:
-  - The iframe takes no postMessage. attach and the charm keys stay in the showcase JSON (v10 posts attachEdit /
-    charmEdit), and the wear level is the query's.
-  - The preview's Snap to surface tool and its Move / Rotate / Scale gizmo are not ported. The Kounter and charm
-    fields set the placement.
+  - The iframe takes no postMessage from its page. attach and the charm keys stay in the showcase JSON, and the
+    tool and the wear level are the query's.
+  - A placement the tool leaves rebuilds the preview from the new query. Natively the camera stays where it was;
+    on the web the iframe reloads with its first view.
   - A graph paint is drawn in the preview only: the game has no paint shader number for it until the paint is
     released (v10 assigns one on review).
 
@@ -156,6 +170,8 @@ These sections are v10's, from `client/src/ui/v10_skin_manager.c` (:126048-12697
     Kounter (`[viewer] showcase counter`), the charm placement,
     and a paint's colour and Animated Shader canvas, its graph drawn on the preview item (`[viewer] showcase paint
     graph`, `[paint] mesh enabled=1 shader=100`).
+  - The preview's tools: Snap clicks the item (the Kounter lands on the fixture's triangle, z 0), Move drags the x
+    handle, the charm's Scale drags the y handle and its Snap clicks the item. Each answer is saved.
 - `tools/modshader/sample_e2e.sh`: grey and invert mods (`client/tests/data/mod_shader/`) on a Sandstorm copy
   whose `modURL` points at them, headless from a pinned camera. Checks: grey frame R=G=B with the plain frame's
   Rec. 709 luminance, invert frame = 255 minus plain.

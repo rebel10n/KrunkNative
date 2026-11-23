@@ -222,6 +222,20 @@ class Client:
         found = re.findall(r"\[ui_cmds\] count %s = (\d+)" % re.escape(sel), self.text()[m:])
         return int(found[-1]) if found else -1
 
+    def wait_re(self, pattern, mark, timeout=20.0):
+        end = time.time() + timeout
+        while time.time() < end:
+            found = re.findall(pattern, self.text()[mark:])
+            if found: return found[-1]
+            time.sleep(0.15)
+        return None
+
+    def drag(self, x0, y0, x1, y1, steps=6):
+        self.cmd("press %d %d" % (x0, y0))
+        for i in range(1, steps + 1):
+            self.cmd("move %d %d" % (x0 + (x1 - x0) * i // steps, y0 + (y1 - y0) * i // steps))
+        self.cmd("release %d %d" % (x1, y1)); time.sleep(0.5)
+
     def textof(self, sel):
         m = self.mark()
         self.cmd("textof " + sel)
@@ -450,6 +464,38 @@ def editors(A, sid, sdir):
           and (c["attach"].get("rot") or [0])[0] == 1.571 and c["attach"].get("color") == "#7fe3ff", "itemConfig.attach")
     A.shot("editor-kounter")
 
+    # the preview's Kounter tools (attachEdit {attach, mode} :124719-124725, attachChanged :124755-124762): Snap mounts it
+    # on the clicked surface (the fixture's one triangle: z 0 in the model, x / y inside it), Move drags the x handle
+    m = A.mark()
+    A.ui("knSkins('attachMode','translate')")
+    A.ui("knSkins('attachMode','snap')")
+    check(A.wait_line("&attachEdit=snap", m, 5.0), "Snap: the preview's query asks for the Kounter's snap (&attachEdit=snap)")
+    check(A.wait_line("[viewer] placement kounter: snap", m, 20.0), "the preview holds still for the snap")
+    item = A.wait_re(r"\[viewer\] placement handles: item (\d+),(\d+)", m, 10.0)
+    check(item is not None, "the preview's item is on screen (%s)" % (item,))
+    if item:
+        m = A.mark()
+        A.cmd("click %s %s" % item)
+        check(A.wait_line("[viewer] attachChanged ", m, 5.0), "a click on the item snaps the Kounter there (attachChanged)")
+        time.sleep(0.5)
+        saved(lambda c: abs((c.get("attach") or {}).get("z", 1)) < 0.01 and 0 <= c["attach"].get("x", -1) <= 1 and 0 <= c["attach"].get("y", -1) <= 1
+              and c["attach"].get("digits") == 10 and c["attach"].get("stat") == "jumps", "attach on the clicked triangle, its other fields kept")
+    snapped = (cfg_of(sid).get("attach") or {}).get("x", 0)
+    m = A.mark()
+    A.ui("knSkins('attachMode','translate')")
+    check(A.wait_line("[viewer] placement kounter: translate", m, 20.0), "Move: the preview shows the gizmo")
+    h = A.wait_re(r"\[viewer\] placement handles: item \S+ node (\d+),(\d+) x (\d+),(\d+)", m, 10.0)
+    check(h is not None, "the gizmo's x handle is on screen (%s)" % (h,))
+    if h:
+        nx, ny, hx, hy = (int(v) for v in h)
+        m = A.mark()
+        A.drag(hx, hy, hx + (hx - nx) // 2, hy + (hy - ny) // 2)  # half a handle outwards
+        check(A.wait_line("[viewer] attachChanged ", m, 5.0), "dragging the x handle moves the Kounter (attachChanged)")
+        time.sleep(0.5)
+        saved(lambda c: (c.get("attach") or {}).get("x", snapped) > snapped + 0.01, "the Kounter moved along x")
+    A.shot("editor-kounter-gizmo")
+    A.ui("knSkins('attachMode','off')")
+
     # Charm: the weapon's spot to start from, a field, the scale's floor, Hide charms
     check(A.has("knSmCharmCustomize"), "a weapon skin with a charm mount: Customize charm placement")
     A.ui("knSkins('charmCustomize')")
@@ -458,6 +504,33 @@ def editors(A, sid, sdir):
     A.ui("knSkins('charmSet','scl','0.01')")
     saved(lambda c: c.get("charmMXOff") == 0.25 and c.get("charmMYOff") == -0.4 and c.get("charmMZOff") == -0.91 and c.get("charmMScl") == 0.05,
           "the charm placement (charmM{X,Y,Z}Off from the weapon's, charmMScl at least 0.05)")
+    # the preview's charm tools (charmEdit {charm, mode} :124726-124732, charmChanged :124749-124754): its mount shows,
+    # Scale drags the y handle, Snap hangs it from the clicked point
+    m = A.mark()
+    A.ui("knSkins('charmMode','scale')")
+    check(A.wait_line("&charmEdit=scale", m, 5.0), "Scale: the preview's query asks for the charm's tool (&charmEdit=scale)")
+    check(A.wait_line("[viewer] showcase charm mount at (0.25, -0.4, -0.91)", m, 20.0), "the preview shows the charm mount at the placement")
+    h = A.wait_re(r"\[viewer\] placement handles: item \S+ node (\d+),(\d+) x \S+ y (\d+),(\d+)", m, 20.0)
+    check(h is not None, "the charm gizmo's y handle is on screen (%s)" % (h,))
+    if h:
+        nx, ny, hx, hy = (int(v) for v in h)
+        m = A.mark()
+        A.drag(hx, hy, hx + (hx - nx), hy + (hy - ny))  # a handle outwards: e times the scale
+        check(A.wait_line("[viewer] charmChanged ", m, 5.0), "dragging the scale handle scales the charm (charmChanged)")
+        time.sleep(0.5)
+        saved(lambda c: c.get("charmMScl", 0) > 0.06 and c.get("charmMXOff") == 0.25, "the charm's scale grew, its spot kept")
+    m = A.mark()
+    A.ui("knSkins('charmMode','snap')")
+    item = A.wait_re(r"\[viewer\] placement handles: item (\d+),(\d+)", m, 20.0)
+    if item:
+        m = A.mark()
+        A.cmd("click %s %s" % item)
+        check(A.wait_line("[viewer] charmChanged ", m, 5.0), "Snap: a click on the item hangs the charm there (charmChanged)")
+        time.sleep(0.5)
+        saved(lambda c: c.get("charmMXOff") != 0.25, "the charm moved to the clicked point")
+    else:
+        check(False, "the preview's item is on screen for the charm's snap")
+    A.ui("knSkins('charmMode','off')")
     A.ui("knSkins('noCharm',1)")
     check(A.gone("knSmCharmX"), "Hide charms hides the placement")
     saved(lambda c: c.get("noCharm") is True, "noCharm")

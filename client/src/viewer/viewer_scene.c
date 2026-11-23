@@ -38,6 +38,7 @@
 #include <skin_counter.h> // a counter skin's Kounter on the showcase item
 #include <skin_fx.h>
 #include <store_item_model.h> // a store item's model (the showcase, the cosmetic page)
+#include <ruleset.h>          // rules_weapon: a weapon skin's charm anchor (the placement tools)
 #include <fast_obj.h>
 #include <stb_image.h>
 #include <math.h>
@@ -508,6 +509,468 @@ static void item_counter(const ViewerSkin *n, MeshTransform *parent) {
     fprintf(stderr, "[viewer] showcase counter: %s %ld, %d digits\n", skin_counter_stat(vs.counter), skin_counter_count(vs.counter), n->counter_digits);
 }
 
+static MeshTransform *holder_new(MeshTransform *parent);
+static void item_add(Mesh *mesh);
+
+// ---------------------------------------------------------------- the Skin Manager preview's placement tools
+// v10.0.7's Skin Manager posts attachEdit {attach, mode} / charmEdit {charm, mode} to its showcase iframe and takes
+// attachChanged {attach} / charmChanged {charm} back (deob-10.0.7.js:124719-124762); the tools are its Kounter section's
+// View / Snap to surface / Move / Rotate / Scale and its Charm section's View / Snap / Move / Scale (:126662-126691,
+// :126849-126866), with "Click the weapon in the preview to mount the Kounter on that surface" / "... to hang the charm
+// from that spot" and "Drag the gizmo in the preview. Drag anywhere else to look around." (:126746-126752,
+// :126928-126934). KrunkNative's iframe takes no messages: the query carries the skin (its attach and charm keys) and
+// &attachEdit=<mode> / &charmEdit=<mode>; a change goes back through viewer_place_changed (viewer.c). Snap mounts the
+// Kounter on the clicked surface (its face, +z, along the surface normal) or puts the charm mount at the clicked point;
+// the gizmo's handles drag along the item's axes (Move: x / y / z, Rotate: rot[i], Scale: the uniform scale). A tool
+// other than View holds the preview still (no auto-rotation). The charm shows as its mount (charms/charm_mount_0) where
+// the game puts it: charmM{X,Y,Z}Off in the weapon's anchor (player_mesh.c player_generate_charm), here the inverse of
+// the weapon mesh's own transform inside the shown item.
+enum { PLACE_OFF, PLACE_SNAP, PLACE_TRANSLATE, PLACE_ROTATE, PLACE_SCALE };
+enum { PLACE_NONE, PLACE_KOUNTER, PLACE_CHARM };
+static const char *const k_place_tools[] = {"off", "snap", "translate", "rotate", "scale"};
+#define PLACE_HANDLE_PX 14.0f // a handle's grab radius (CSS px)
+
+static struct {
+    int what;               // PLACE_KOUNTER / PLACE_CHARM: whose tool is on (PLACE_NONE: none)
+    int tool;               // PLACE_*
+    MeshTransform *node;    // what the tool places: the Kounter's root, the charm mount's transform
+    MeshTransform *frame;   // its parent: the item (Kounter), the weapon's anchor inside the item (charm)
+    Mesh *mount;            // the charm mount (not a snap target)
+    float mount_scl;        // the weapon's charmMScl (the mount's scale = it * the skin's charmMScl)
+    MeshTransform *gizmo;   // the handles' holder: in `frame` at the node, scaled to a steady size on screen
+    Mesh *handles[6];       // x / y / z shafts, then their tips
+    int axis;               // the dragged handle's axis, -1 none
+    float last_x, last_y;   // the drag's last point (viewport CSS px)
+    float vx, vy, vw, vh;   // the viewport the showcase is drawn into (CSS px, vscene_place_viewport)
+    int logged;             // the handles' places were logged for this build
+} vp = {.axis = -1};
+
+int vscene_place_active(void);
+
+static void place_clear(void) {
+    const float vx = vp.vx, vy = vp.vy, vw = vp.vw, vh = vp.vh;
+    memset(&vp, 0, sizeof(vp)); // the meshes and holders are the scene's items (items_clear)
+    vp.axis = -1;
+    vp.vx = vx, vp.vy = vy, vp.vw = vw, vp.vh = vh;
+}
+
+static int place_tool_of(const char *mode) {
+    for (int i = 0; mode && i < (int) (sizeof(k_place_tools) / sizeof(k_place_tools[0])); i++)
+        if (!strcmp(mode, k_place_tools[i])) return i;
+    return PLACE_OFF;
+}
+
+// the tool the query asks for on `what` (its param present: the section's placement exists)
+static void place_target(const int what, const char *param, MeshTransform *node, MeshTransform *frame) {
+    const char *mode = viewer_param_get(param);
+    if (!mode || !node || !frame) return;
+    const int tool = place_tool_of(mode);
+    if (tool == PLACE_OFF) return;                             // View: the preview spins freely
+    if (tool == PLACE_ROTATE && what != PLACE_KOUNTER) return; // the charm has no Rotate (:126849-126866)
+    vp.what = what;
+    vp.tool = tool;
+    vp.node = node;
+    vp.frame = frame;
+}
+
+// a vector through mesh.c's ROTATION_ORDER_INTRINSIC rotation (R = Rx Ry Rz) inverted: Rz(-z) Ry(-y) Rx(-x)
+static vec3 rotate_inverse(const vec3 r, vec3 v) {
+    float c = cosf(-r.x), s = sinf(-r.x);
+    v = (vec3) {v.x, c * v.y - s * v.z, s * v.y + c * v.z};
+    c = cosf(-r.y), s = sinf(-r.y);
+    v = (vec3) {c * v.x + s * v.z, v.y, -s * v.x + c * v.z};
+    c = cosf(-r.z), s = sinf(-r.z);
+    return (vec3) {c * v.x - s * v.y, s * v.x + c * v.y, v.z};
+}
+
+// The charm mount on a weapon skin while the Skin Manager's Charm section shows its placement (&charmEdit): the game's
+// mount (player_generate_charm) at the skin's charmM{X,Y,Z}Off || the weapon's, scale weapon charmMScl * (skin
+// charmMScl || 1), turned PI / 2, in the weapon's anchor. The anchor is the weapon mesh's own transform undone (loadMesh's
+// (0, yOff, zOff), rot || PI / 2 about y, mScl || scale; player_mesh.c) under the shown item.
+static void item_charm(const ViewerSkin *n, MeshTransform *item) {
+    if (!viewer_param_get("charmEdit") || !item || n->type != 0 || n->weapon <= 0 || (n->flags2 & VS2_NO_CHARM)) return;
+    const ViewerCharmMount *mount = viewer_charm_mount(n->weapon - 1);
+    const Weapon *weapon = rules_weapon(n->weapon - 1);
+    if (!mount || !weapon) return;
+    char *path = asset("models", "charms/charm_mount_0", ".obj");
+    Geometry *geometry = path ? load_obj_model(path, 0) : NULL;
+    free(path);
+    BasicMaterial *material = geometry ? basic_material_init() : NULL;
+    MeshTransform *anchor = material ? holder_new(item) : NULL;
+    if (!anchor) {
+        if (material) material_fini((Material *) material);
+        return;
+    }
+    const float s = n->m_scl ? n->m_scl : weapon->scale ? weapon->scale : 1.0f;
+    const vec3 r = weapon->has_rotation ? weapon->rotation : (vec3) {0.0f, (float) M_PI * 0.5f, 0.0f};
+    const vec3 back = rotate_inverse(r, (vec3) {0.0f, n->y_off, n->z_off});
+    anchor->rotation_order = ROTATION_ORDER_EXTRINSIC; // Rz Ry Rx with the angles negated: (Rx Ry Rz)^-1
+    anchor->rotation = (vec3) {-r.x, -r.y, -r.z};
+    anchor->scale = (vec3) {1.0f / s, 1.0f / s, 1.0f / s};
+    anchor->position = (vec3) {-back.x / s, -back.y / s, -back.z / s};
+    material->texture = texture_for("charms/charm_mount_0");
+    material->base.transparent = 1;
+    Mesh *mesh = mesh_init(geometry, (Material *) material);
+    const float at[3] = {n->charm_m[0] ? n->charm_m[0] : mount->mount[0], n->charm_m[1] ? n->charm_m[1] : mount->mount[1],
+                         n->charm_m[2] ? n->charm_m[2] : mount->mount[2]};
+    const float scl = mount->mount_scl * (n->charm_m_scl ? n->charm_m_scl : 1.0f);
+    mesh->transform.position = (vec3) {at[0], at[1], at[2]};
+    mesh->transform.rotation.y = (float) M_PI * 0.5f;
+    mesh->transform.scale = (vec3) {scl, scl, scl};
+    mesh->transform.parent = anchor;
+    item_add(mesh);
+    vp.mount = mesh;
+    vp.mount_scl = mount->mount_scl;
+    place_target(PLACE_CHARM, "charmEdit", &mesh->transform, anchor);
+    fprintf(stderr, "[viewer] showcase charm mount at (%g, %g, %g), scale %g\n", at[0], at[1], at[2], scl);
+}
+
+// the camera's frame (camera_look_at: yaw rotation.y, pitch rotation.x, no roll)
+static void camera_axes(vec3 *right, vec3 *up, vec3 *forward) {
+    const float cx = cosf(vs.camera.rotation.x), sx = sinf(vs.camera.rotation.x);
+    const float cy = cosf(vs.camera.rotation.y), sy = sinf(vs.camera.rotation.y);
+    *forward = (vec3) {-sy * cx, sx, -cy * cx};
+    *right = (vec3) {cy, 0.0f, -sy};
+    *up = (vec3) {right->y * forward->z - right->z * forward->y, right->z * forward->x - right->x * forward->z,
+                  right->x * forward->y - right->y * forward->x};
+}
+
+static float dot3(const vec3 a, const vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+static vec3 sub3(const vec3 a, const vec3 b) { return (vec3) {a.x - b.x, a.y - b.y, a.z - b.z}; }
+static vec3 cross3(const vec3 a, const vec3 b) { return (vec3) {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+static vec3 norm3(const vec3 a) {
+    const float l = sqrtf(dot3(a, a));
+    return l > 0.0f ? (vec3) {a.x / l, a.y / l, a.z / l} : a;
+}
+
+// the camera's vertical fov in radians (scene_draw sets vs.camera.fov, but a build clears vs and ticks before it draws)
+static float camera_fov(void) {
+    return (g_viewer.cosmetic_set ? COSMETIC_FOV_DEG : VIEWER_FOV_DEG) * (float) M_PI / 180.0f;
+}
+
+// a world point on the viewport (CSS px from its top left); 0 behind the camera
+static int place_project(const vec3 p, float *sx, float *sy) {
+    if (vp.vw <= 0.0f || vp.vh <= 0.0f) return 0;
+    vec3 right, up, forward;
+    camera_axes(&right, &up, &forward);
+    const vec3 rel = sub3(p, vs.camera.position);
+    const float z = dot3(rel, forward);
+    if (z <= 1e-4f) return 0;
+    const float t = tanf(camera_fov() / 2.0f);
+    const float nx = dot3(rel, right) / (z * t * vp.vw / vp.vh), ny = dot3(rel, up) / (z * t);
+    *sx = (nx * 0.5f + 0.5f) * vp.vw;
+    *sy = (0.5f - ny * 0.5f) * vp.vh;
+    return 1;
+}
+
+// the ray through a viewport point (CSS px)
+static vec3 place_ray(const float sx, const float sy) {
+    vec3 right, up, forward;
+    camera_axes(&right, &up, &forward);
+    const float t = tanf(camera_fov() / 2.0f);
+    const float nx = (sx / vp.vw * 2.0f - 1.0f) * t * vp.vw / vp.vh, ny = (1.0f - sy / vp.vh * 2.0f) * t;
+    return norm3((vec3) {forward.x + right.x * nx + up.x * ny, forward.y + right.y * nx + up.y * ny, forward.z + right.z * nx + up.z * ny});
+}
+
+static vec3 world_of(const float m[16], const float *p) {
+    return (vec3) {m[0] * p[0] + m[1] * p[1] + m[2] * p[2] + m[3], m[4] * p[0] + m[5] * p[1] + m[6] * p[2] + m[7],
+                   m[8] * p[0] + m[9] * p[1] + m[10] * p[2] + m[11]};
+}
+
+static int place_is_tool_mesh(const Mesh *mesh) {
+    if (mesh == vp.mount) return 1;
+    for (int i = 0; i < 6; i++)
+        if (mesh == vp.handles[i]) return 1;
+    return 0;
+}
+
+// the nearest item triangle along the ray (Moller-Trumbore, both sides): its point and its normal facing the camera
+static int ray_mesh(Mesh *mesh, const vec3 o, const vec3 d, float *best, vec3 *hit, vec3 *normal) {
+    const Geometry *g = mesh ? mesh->geometry : NULL;
+    if (!g || !g->tri_positions || !g->tri_indices || !mesh->visible || place_is_tool_mesh(mesh)) return 0;
+    mesh_update_transform_matrix(mesh);
+    int found = 0;
+    for (int i = 0; i + 2 < g->index_count; i += 3) {
+        const unsigned int i0 = g->tri_indices[i], i1 = g->tri_indices[i + 1], i2 = g->tri_indices[i + 2];
+        if ((int) i0 >= g->tri_vertex_count || (int) i1 >= g->tri_vertex_count || (int) i2 >= g->tri_vertex_count) continue;
+        const vec3 a = world_of(mesh->transform_matrix, g->tri_positions + i0 * 3);
+        const vec3 b = world_of(mesh->transform_matrix, g->tri_positions + i1 * 3);
+        const vec3 c = world_of(mesh->transform_matrix, g->tri_positions + i2 * 3);
+        const vec3 e1 = sub3(b, a), e2 = sub3(c, a);
+        const vec3 pv = cross3(d, e2);
+        const float det = dot3(e1, pv);
+        if (fabsf(det) < 1e-9f) continue;
+        const vec3 tv = sub3(o, a);
+        const float u = dot3(tv, pv) / det;
+        if (u < 0.0f || u > 1.0f) continue;
+        const vec3 qv = cross3(tv, e1);
+        const float v = dot3(d, qv) / det;
+        if (v < 0.0f || u + v > 1.0f) continue;
+        const float t = dot3(e2, qv) / det;
+        if (t <= 0.0f || t >= *best) continue;
+        *best = t;
+        *hit = (vec3) {o.x + d.x * t, o.y + d.y * t, o.z + d.z * t};
+        vec3 n = norm3(cross3(e1, e2));
+        if (dot3(n, d) > 0.0f) n = (vec3) {-n.x, -n.y, -n.z};
+        *normal = n;
+        found = 1;
+    }
+    return found;
+}
+
+static int place_raycast(const float sx, const float sy, vec3 *hit, vec3 *normal) {
+    const vec3 o = vs.camera.position, d = place_ray(sx, sy);
+    float best = 1e30f;
+    int found = 0;
+    for (int i = 0; i < vs.item_count; i++) found |= ray_mesh(vs.items[i], o, d, &best, hit, normal);
+    for (int i = 0; i < vs.model_count; i++)
+        for (size_t k = 0; vs.models[i] && k < vs.models[i]->mesh_count; k++) found |= ray_mesh(vs.models[i]->meshes[k], o, d, &best, hit, normal);
+    return found;
+}
+
+// `frame`'s world affine (its columns e_x, e_y, e_z and origin) and its inverse
+static int frame_inverse(const MeshTransform *frame, float inv[3][3], vec3 *origin) {
+    *origin = transform_point_to(frame, (vec3) {0.0f, 0.0f, 0.0f}, NULL);
+    const vec3 cx = sub3(transform_point_to(frame, (vec3) {1.0f, 0.0f, 0.0f}, NULL), *origin);
+    const vec3 cy = sub3(transform_point_to(frame, (vec3) {0.0f, 1.0f, 0.0f}, NULL), *origin);
+    const vec3 cz = sub3(transform_point_to(frame, (vec3) {0.0f, 0.0f, 1.0f}, NULL), *origin);
+    const float m[3][3] = {{cx.x, cy.x, cz.x}, {cx.y, cy.y, cz.y}, {cx.z, cy.z, cz.z}};
+    const float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                      m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if (fabsf(det) < 1e-12f) return 0;
+    inv[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) / det;
+    inv[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / det;
+    inv[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / det;
+    inv[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) / det;
+    inv[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / det;
+    inv[1][2] = (m[0][2] * m[1][0] - m[0][0] * m[1][2]) / det;
+    inv[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) / det;
+    inv[2][1] = (m[0][1] * m[2][0] - m[0][0] * m[2][1]) / det;
+    inv[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) / det;
+    return 1;
+}
+
+static vec3 mul33(const float m[3][3], const vec3 v) {
+    return (vec3) {m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z, m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+                   m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z};
+}
+
+static double place_round(const float v) { return floor((double) v * 1000.0 + 0.5) / 1000.0; } // to 0.001 (attachRot's)
+
+// attachChanged {attach} / charmChanged {charm} (deob-10.0.7.js:124749-124762) with the node's placement now
+static void place_report(void) {
+    if (!vp.node) return;
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddNumberToObject(data, "x", place_round(vp.node->position.x));
+    cJSON_AddNumberToObject(data, "y", place_round(vp.node->position.y));
+    cJSON_AddNumberToObject(data, "z", place_round(vp.node->position.z));
+    if (vp.what == PLACE_KOUNTER) {
+        const double rot[3] = {place_round(vp.node->rotation.x), place_round(vp.node->rotation.y), place_round(vp.node->rotation.z)};
+        cJSON_AddItemToObject(data, "rot", cJSON_CreateDoubleArray(rot, 3));
+        cJSON_AddNumberToObject(data, "scl", place_round(vp.node->scale.x));
+    } else {
+        cJSON_AddNumberToObject(data, "scl", place_round(vp.mount_scl > 0.0f ? vp.node->scale.x / vp.mount_scl : vp.node->scale.x));
+    }
+    viewer_place_changed(vp.what == PLACE_KOUNTER ? "attachChanged" : "charmChanged", data);
+    cJSON_Delete(data);
+}
+
+// three.js Euler XYZ (mesh.c's intrinsic order) of the rotation whose columns are x, y, z (Euler.setFromRotationMatrix)
+static vec3 euler_xyz(const vec3 x, const vec3 y, const vec3 z) {
+    const float m13 = z.x, m23 = z.y, m33 = z.z, m12 = y.x, m11 = x.x, m32 = y.z, m22 = y.y;
+    vec3 e;
+    e.y = asinf(fmaxf(-1.0f, fminf(1.0f, m13)));
+    if (fabsf(m13) < 0.9999999f) {
+        e.x = atan2f(-m23, m33);
+        e.z = atan2f(-m12, m11);
+    } else {
+        e.x = atan2f(m32, m22);
+        e.z = 0.0f;
+    }
+    return e;
+}
+
+// Snap: the Kounter's face (+z) along the clicked surface's normal at the point, upright when it can be; the charm mount
+// at the point
+static int place_snap(const float sx, const float sy) {
+    vec3 hit, normal, origin;
+    float inv[3][3];
+    if (!place_raycast(sx, sy, &hit, &normal) || !frame_inverse(vp.frame, inv, &origin)) return 0;
+    const vec3 p = mul33(inv, sub3(hit, origin));
+    vp.node->position = p;
+    if (vp.what == PLACE_KOUNTER) {
+        const vec3 z = norm3(mul33(inv, normal));
+        const vec3 ref = fabsf(z.y) < 0.95f ? (vec3) {0.0f, 1.0f, 0.0f} : (vec3) {1.0f, 0.0f, 0.0f};
+        const vec3 x = norm3(cross3(ref, z));
+        const vec3 y = cross3(z, x);
+        vp.node->rotation = euler_xyz(x, y, z);
+    }
+    fprintf(stderr, "[viewer] placement snap: (%.3f, %.3f, %.3f)\n", p.x, p.y, p.z);
+    place_report();
+    return 1;
+}
+
+static const vec3 k_axes[3] = {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+
+// a handle's tip and the node on the viewport, and the tip's offset from the node there
+static int handle_screen(const int axis, float *tx, float *ty, float *vx, float *vy) {
+    if (!vp.gizmo) return 0;
+    float nx, ny;
+    if (!place_project(transform_point_to(vp.gizmo, (vec3) {0.0f, 0.0f, 0.0f}, NULL), &nx, &ny) ||
+        !place_project(transform_point_to(vp.gizmo, k_axes[axis], NULL), tx, ty))
+        return 0;
+    *vx = *tx - nx;
+    *vy = *ty - ny;
+    return 1;
+}
+
+// the gizmo: in the item's frame at the node, about a seventh of the camera's distance long
+static void place_gizmo_update(void) {
+    if (!vp.gizmo) return;
+    const vec3 o = transform_point_to(vp.frame, (vec3) {0.0f, 0.0f, 0.0f}, NULL);
+    const float frame_scale = sqrtf(dot3(sub3(transform_point_to(vp.frame, k_axes[0], NULL), o), sub3(transform_point_to(vp.frame, k_axes[0], NULL), o)));
+    const vec3 at = transform_point_to(vp.node, (vec3) {0.0f, 0.0f, 0.0f}, NULL);
+    const float distance = sqrtf(dot3(sub3(at, vs.camera.position), sub3(at, vs.camera.position)));
+    const float length = frame_scale > 0.0f ? distance * 0.15f / frame_scale : 1.0f;
+    vp.gizmo->position = vp.node->position;
+    vp.gizmo->scale = (vec3) {length, length, length};
+    for (int i = 0; i < 6; i++) {
+        if (!vp.handles[i]) continue;
+        LineMaterial *m = (LineMaterial *) vp.handles[i]->material;
+        const int axis = i % 3;
+        const vec4 base = axis == 0 ? (vec4) {1.0f, 0.25f, 0.25f, 1.0f} : axis == 1 ? (vec4) {0.35f, 1.0f, 0.35f, 1.0f} : (vec4) {0.3f, 0.55f, 1.0f, 1.0f};
+        m->color = vp.axis == axis ? (vec4) {1.0f, 1.0f, 0.2f, 1.0f} : base; // TransformControls' active yellow
+    }
+}
+
+// the Move / Rotate / Scale handles: a shaft along each axis of the frame and a cube at its tip, drawn over the item
+static void place_gizmo_build(void) {
+    if (vp.tool < PLACE_TRANSLATE || !vp.frame) return;
+    vp.gizmo = holder_new(vp.frame);
+    if (!vp.gizmo) return;
+    for (int i = 0; i < 6; i++) {
+        LineMaterial *material = line_material_init();
+        if (!material) return;
+        material->depth_test = 0; // TransformControls: drawn over the item
+        material->fog = 0;
+        Mesh *mesh = mesh_init(create_cube_geo(), (Material *) material);
+        const int axis = i % 3, tip = i >= 3;
+        // the unit cube spans y 0..1: turned so +y runs along the axis
+        mesh->transform.rotation = axis == 0 ? (vec3) {0.0f, 0.0f, (float) -M_PI / 2.0f} : axis == 2 ? (vec3) {(float) M_PI / 2.0f, 0.0f, 0.0f} : (vec3) {0};
+        if (tip) {
+            const float s = vp.tool == PLACE_SCALE ? 0.16f : 0.12f;
+            mesh->transform.scale = (vec3) {s, s, s};
+            mesh->transform.position = (vec3) {k_axes[axis].x * (1.0f - s / 2.0f), k_axes[axis].y * (1.0f - s / 2.0f), k_axes[axis].z * (1.0f - s / 2.0f)};
+        } else {
+            mesh->transform.scale = (vec3) {0.03f, 1.0f, 0.03f};
+        }
+        mesh->transform.parent = vp.gizmo;
+        vp.handles[i] = mesh;
+        item_add(mesh);
+    }
+    place_gizmo_update();
+}
+
+// after the showcase is built: the query's tool (&attachEdit / &charmEdit), its gizmo; a tool holds the preview still
+static void place_build(void) {
+    MeshTransform *root = skin_counter_root(vs.counter); // the charm's was taken by item_charm
+    if (root) place_target(PLACE_KOUNTER, "attachEdit", root, root->parent);
+    if (!vscene_place_active()) return;
+    vs.auto_rotate = 0; // "The preview spins freely. Pick a tool to hold it still" (:126750)
+    place_gizmo_build();
+    fprintf(stderr, "[viewer] placement %s: %s\n", vp.what == PLACE_KOUNTER ? "kounter" : "charm", k_place_tools[vp.tool]);
+}
+
+void vscene_place_viewport(const float x, const float y, const float w, const float h) {
+    vp.vx = x, vp.vy = y, vp.vw = w, vp.vh = h;
+}
+
+int vscene_place_active(void) { return vp.what && vp.tool != PLACE_OFF; }
+
+int vscene_place_press(const float x, const float y) {
+    if (!vscene_place_active()) return 0;
+    if (vp.tool == PLACE_SNAP) return place_snap(x, y);
+    int best = -1;
+    float best_d = PLACE_HANDLE_PX;
+    for (int i = 0; i < 3; i++) {
+        float tx, ty, vx, vy;
+        if (!handle_screen(i, &tx, &ty, &vx, &vy)) continue;
+        const float d = hypotf(tx - x, ty - y);
+        if (d < best_d) best = i, best_d = d;
+    }
+    if (best < 0) return 0; // "Drag anywhere else to look around"
+    vp.axis = best;
+    vp.last_x = x;
+    vp.last_y = y;
+    place_gizmo_update();
+    return 1;
+}
+
+int vscene_place_dragging(void) { return vp.axis >= 0; }
+
+void vscene_place_move(const float x, const float y) {
+    if (vp.axis < 0 || !vp.node) return;
+    float tx, ty, vx, vy;
+    if (!handle_screen(vp.axis, &tx, &ty, &vx, &vy)) return;
+    const float dx = x - vp.last_x, dy = y - vp.last_y, vv = vx * vx + vy * vy;
+    vp.last_x = x;
+    vp.last_y = y;
+    if (vv < 1.0f) return; // the axis points at the camera
+    const float along = (dx * vx + dy * vy) / vv; // handle lengths dragged along its axis
+    float *p = vp.axis == 0 ? &vp.node->position.x : vp.axis == 1 ? &vp.node->position.y : &vp.node->position.z;
+    float *r = vp.axis == 0 ? &vp.node->rotation.x : vp.axis == 1 ? &vp.node->rotation.y : &vp.node->rotation.z;
+    if (vp.tool == PLACE_TRANSLATE) {
+        *p += along * vp.gizmo->scale.x; // the handle is gizmo->scale frame units long
+    } else if (vp.tool == PLACE_ROTATE) {
+        *r += (dy * vx - dx * vy) / vv; // across the handle: a handle's length is a radian
+    } else if (vp.tool == PLACE_SCALE) {
+        const float floor_scl = vp.what == PLACE_CHARM ? 0.05f * vp.mount_scl : 0.01f; // charmMScl >= 0.05 (iìiîìíì)
+        const float s = fmaxf(floor_scl, vp.node->scale.x * expf(along));
+        vp.node->scale = (vec3) {s, s, s};
+    }
+    place_gizmo_update();
+}
+
+int vscene_place_release(void) {
+    if (vp.axis < 0) return 0;
+    vp.axis = -1;
+    place_gizmo_update();
+    place_report();
+    return 1;
+}
+
+// once a frame: the gizmo follows the node and the camera; the handles' places are logged once a build (the e2e's)
+static void place_tick(void) {
+    if (!vscene_place_active()) return;
+    place_gizmo_update();
+    if (vp.logged || vp.vw <= 0.0f) return;
+    vp.logged = 1;
+    float ix = -1.0f, iy = -1.0f;
+    for (int i = 0; i < vs.item_count && ix < 0.0f; i++) { // the item: its first triangle's middle
+        Mesh *mesh = vs.items[i];
+        const Geometry *g = mesh ? mesh->geometry : NULL;
+        if (!g || !g->tri_positions || !g->tri_indices || g->index_count < 3 || place_is_tool_mesh(mesh)) continue;
+        mesh_update_transform_matrix(mesh);
+        vec3 c = {0};
+        for (int k = 0; k < 3; k++) {
+            const vec3 w = world_of(mesh->transform_matrix, g->tri_positions + g->tri_indices[k] * 3);
+            c = (vec3) {c.x + w.x / 3.0f, c.y + w.y / 3.0f, c.z + w.z / 3.0f};
+        }
+        if (!place_project(c, &ix, &iy)) ix = iy = -1.0f;
+    }
+    char handles[192] = "";
+    float nx, ny;
+    if (vp.gizmo && place_project(transform_point_to(vp.node, (vec3) {0.0f, 0.0f, 0.0f}, NULL), &nx, &ny))
+        snprintf(handles, sizeof(handles), " node %.0f,%.0f", vp.vx + nx, vp.vy + ny);
+    for (int i = 0; i < 3 && vp.gizmo; i++) {
+        float tx, ty, vx, vy;
+        if (!handle_screen(i, &tx, &ty, &vx, &vy)) continue;
+        const size_t n = strlen(handles);
+        snprintf(handles + n, sizeof(handles) - n, " %c %.0f,%.0f", "xyz"[i], vp.vx + tx, vp.vy + ty);
+    }
+    fprintf(stderr, "[viewer] placement handles: item %.0f,%.0f%s\n", vp.vx + ix, vp.vy + iy, handles);
+}
+
 static MeshTransform *holder_new(MeshTransform *parent) {
     if (vs.holder_count >= VIEWER_MAX_ITEMS) return NULL;
     MeshTransform *holder = calloc(1, sizeof(MeshTransform));
@@ -622,6 +1085,7 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
         vs.models[vs.model_count++] = built.model;
         scene_add_gltf(vs.scene, built.model);
         item_counter(n, &built.model->root);
+        item_charm(n, &built.model->root);
         return;
     }
     if (!item_custom_wear(built.mesh, NULL, n)) skin_fx_apply_wear(built.mesh, n, g_viewer.wear); // the page's wear param
@@ -630,6 +1094,7 @@ static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 po
     skin_fx_set_seed(NULL, built.mesh, g_viewer.seed);
     item_add(built.mesh);
     item_counter(n, &built.mesh->transform);
+    item_charm(n, &built.mesh->transform);
 }
 
 // player_update_meshes() (third person) poses legs[0..1] / crouched_legs[0..1] without checking
@@ -666,7 +1131,10 @@ static void player_free(Player *player) {
     free(player);
 }
 
+static void place_clear(void);
+
 static void scene_clear(void) {
+    place_clear();
     player_free(vs.player);
     vs.player = NULL;
     player_free(vs.item_player);
@@ -1114,6 +1582,7 @@ void vscene_build_showcase(int index) {
     }
 
     camera_place((vec3) {12.0f, 0.0f, 0.0f}, look);
+    place_build();
 }
 
 // renderHat / Head / Face / Body / Back / Waist / Shoes / Dye / Pet: camera (0, 10, -15) looking at
@@ -1193,11 +1662,20 @@ void vscene_tick(float dt) {
     skin_fx_tick(dt, 1, client_render_settings()->lighting == 0);
     // OrbitControls.autoRotate (the showcase's 120 Hz update)
     if (vs.auto_rotate && g_viewer.showcase_set && dt > 0.0f && vs.orbit_state < 0) orbit_apply(-ORBIT_AUTO_ROTATE_SPEED * dt, 0.0f, 1.0f, (vec3) {0});
+    place_tick();
+}
+
+void vscene_camera_get(vec3 *position, vec3 *target) {
+    *position = vs.camera.position;
+    *target = vs.target;
+}
+
+void vscene_camera_set(const vec3 position, const vec3 target) {
+    camera_place(position, target);
 }
 
 static void scene_draw(const int x, const int y, const int w, const int h) {
-    const float fov = g_viewer.cosmetic_set ? COSMETIC_FOV_DEG : VIEWER_FOV_DEG;
-    vs.camera.fov = fov * (float) M_PI / 180.0f;
+    vs.camera.fov = camera_fov();
     vs.camera.zoom = 1.0f;
     vs.camera.near = g_viewer.cosmetic_set ? COSMETIC_NEAR : VIEWER_NEAR;
     vs.camera.far = g_viewer.cosmetic_set ? COSMETIC_FAR : VIEWER_FAR;
