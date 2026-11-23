@@ -83,7 +83,10 @@ static struct {
     unsigned active_gen;  // account_active_generation() the header last followed
     int sandbox;          // the sandbox menu (v10_menu_set_sandbox): v10's /?sandbox or custMap page
     int sandbox_shown;    // sandbox_apply last hid the play column / nav items (0: they are their owners')
-} V = {.signed_in = -1};
+    int logging_in;       // the guest bar is v10's "Logging in..." one ($loggingIn, v10_login_logging_in)
+    int title;            // the header's title id last drawn (-1 none)
+    double title_poll_ms; // the wall clock of the last titleIndex read (header_title_tick)
+} V = {.signed_in = -1, .title = -1};
 
 static HtmlElem by_id(const char *id) { return html_dom_by_id(id); }
 
@@ -219,13 +222,68 @@ static void account_manager_markup(char *out, const size_t n, const char *id) {
         "<span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:#fff\">switch_account</span></div>", id, action);
 }
 
+// The equipped title's tag after the name (.ph-name-row's {#if title}, deob-10.0.7.js:148780-148797, :148830-
+// :148838): an account whose titleIndex (|| -1) names a title it has (account.titles), its name and tag style
+// (iiiíîíî: the title's colour, a Contraband outline). v10_customize_title() is that rule; the span is v10's
+// <span class="ph-title svelte-da3zva"> (:148215), with no title no span at all.
+static void header_title_update(const AccountInfo *acc) {
+    HtmlElem name = by_id("knV10Name");
+    if (!name) return;
+    const int id = acc ? v10_customize_title() : -1;
+    const cJSON *t = id >= 0 ? v10_customize_title_get(id) : NULL;
+    HtmlElem el = by_id("knV10Title");
+    V.title = t ? id : -1;
+    if (!t) {
+        if (el) html_dom_remove(el);
+        return;
+    }
+    StrBuf style = {0};
+    v10_customize_title_style(&style, t);
+    char *css = sb_finish(&style);
+    if (!el) {
+        html_dom_insert_html(name, HTML_INSERT_AFTER_END, "<span class=\"ph-title svelte-da3zva\" id=\"knV10Title\"> </span>");
+        el = by_id("knV10Title");
+    }
+    if (el) {
+        html_dom_set_attr(el, "style", css ? css : "");
+        const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(t, "name"));
+        html_dom_set_text(el, text ? text : "");
+    }
+    free(css);
+}
+
+// The title follows titleIndex (selectTitle, a loadout preset) and account.titles (the "ttl" answer, a Black Market
+// grant): v10's derived store redraws on $titlesVersion / $account. Here: read again a few times a second.
+#define TITLE_POLL_MS 250.0
+static void header_title_tick(void) {
+    const AccountInfo *acc = active_account();
+    if (!acc || V.sandbox || !by_id("knV10Name")) return;
+    const double now = ks_wall_ms();
+    if (now - V.title_poll_ms < TITLE_POLL_MS && now >= V.title_poll_ms) return;
+    V.title_poll_ms = now;
+    const int id = v10_customize_title();
+    if (id != V.title || (id >= 0) != (by_id("knV10Title") != 0)) header_title_update(acc);
+}
+
 // #signedInHeaderBar (_52526) for an account, #signedOutHeaderBar (_52519) for a guest. Both live
 // in #playerHeaderEl; v10 swaps the component, here the guest bar stays in the page and the
-// signed-in one is built next to it once.
+// signed-in one is built next to it once. While a login the modal sent waits for its answer ($loggingIn), v10's
+// guest component is the "Logging in..." bar (iîììîïì, deob-10.0.7.js:148210, shown `!account && loggingIn`,
+// :148818-148821): built here next to the guest bar once (#signedOutHeaderBar's CSS as its inline style: one id per
+// page) and shown in its place.
 // acc: the active account (backend_ui.h), NULL = a guest.
 static void header_update(const AccountInfo *acc) {
     HtmlElem out = by_id("signedOutHeaderBar");
     HtmlElem in = by_id("signedInHeaderBar");
+    HtmlElem logging = by_id("knV10LoggingInBar");
+    if (!logging && out) {
+        html_dom_insert_html(out, HTML_INSERT_AFTER_END,
+            "<div id=\"knV10LoggingInBar\" class=\"svelte-da3zva\" style=\"display:none;align-items:center;height:100%;padding:0 8px;gap:0;overflow:visible\">"
+            "<div class=\"ph-item ph-logging-in svelte-da3zva\"><span class=\"material-icons ph-icon svelte-da3zva\" style=\"color:rgba(255,255,255,0.5)\">person</span> "
+            "<span class=\"ph-label svelte-da3zva\" style=\"opacity:0.7\">Logging in...</span></div></div>");
+        logging = by_id("knV10LoggingInBar");
+    }
+    V.logging_in = !acc && v10_login_logging_in();
     if (acc && !in && out) {
         html_dom_insert_html(out, HTML_INSERT_AFTER_END,
             "<div id=\"signedInHeaderBar\" class=\"svelte-da3zva\">"
@@ -257,7 +315,8 @@ static void header_update(const AccountInfo *acc) {
     }
     // the sandbox menu hides both bars, the signed-in one too (connectToSandbox, deob-10.0.7.js:229384-229387; see
     // sandbox_apply)
-    set_display(out, acc || V.sandbox ? "none" : "");
+    set_display(out, acc || V.sandbox || V.logging_in ? "none" : "");
+    set_display(logging, !acc && !V.sandbox && V.logging_in ? "flex" : "none");
     set_display(in, acc && !V.sandbox ? "" : "none");
     // the Inbox entry (_52295) of .headerBarRight: signed in only
     HtmlElem inbox = by_id("knV10Inbox");
@@ -276,6 +335,7 @@ static void header_update(const AccountInfo *acc) {
     HtmlElem el;
     // premiumT && settings.tmp.premiumBadge ? alias : name
     if ((el = by_id("knV10Name"))) html_dom_set_text(el, player_names_account(acc->premium && !ui_setting_is_false("premiumBadge") && acc->alias[0] ? acc->alias : acc->name));
+    header_title_update(acc);
     // the picture (v10:209536 _70104, run at sign-in): the menu class's icon, textures/classes/icon_N.png
     // (defaultSrc). KN has no profile.png upload, so a premium account's picture is the class icon too.
     // Classes past Krunker's icons (KN's own from KN_CLASS_BASE: the Nettspend) keep the stock picture.
@@ -1181,8 +1241,13 @@ void v10_menu_account_tick(void) {
     // to a remote game (the console, a ?play= link): its menu is the live one then
     const Client *c = menu_ui()->client;
     if (V.sandbox && !scenario_on() && c && !c->offline && (c->net_connected || krunker_net_active())) v10_menu_set_sandbox(0);
-    if (account_active_generation() == V.active_gen) return;
-    v10_menu_account_changed();
+    if (account_active_generation() != V.active_gen) {
+        v10_menu_account_changed();
+        return;
+    }
+    const AccountInfo *acc = active_account();
+    if ((!acc && v10_login_logging_in()) != V.logging_in) header_update(acc); // $loggingIn moved: the guest bar
+    header_title_tick();
 }
 
 // ---------------------------------------------------------------- set-up

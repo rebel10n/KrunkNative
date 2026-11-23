@@ -69,6 +69,7 @@
 #define CONNECT_ERROR_DEFAULT "Could not connect to the game server"
 
 static MenuUi g_ui;
+static char g_guest_shown[PLAYER_NAME_SIZE]; // the guest name the class box last drew (menu_apply_open redraws a stale one)
 // Region name override (ui_scenario.c `state.region`); "" = MENU_REGION_NAME.
 static char g_region_label[64];
 static char g_connect_code[8]; // Krunker's error code on the connection error screen ("000000")
@@ -666,6 +667,11 @@ void menu_apply_open(const int open) {
         menu_close_window();
     }
     set_style("menuClassContainer", "visibility", "");
+    if (on && !active_account()) { // the class box's guest name follows the game's player object (menu_guest_name)
+        char guest[PLAYER_NAME_SIZE];
+        menu_guest_name(guest, sizeof(guest));
+        if (strcmp(guest, g_guest_shown) != 0) menu_update_class_box();
+    }
     menu_update_info_holder();
     ui_loadout_clear_pops(); // toggleMenuHider(false) / toggleControlUI end with clearPops()
     menu_update_instructions();
@@ -1219,6 +1225,23 @@ static const char *menu_clan_colour(const char *clan) {
 // Contraband, "inherit" without a skin; #menuClassIcn = the last weapon's skin thumbnail, or its
 // preview without one; #menuClassNameTag = the player tag or "Guest". The K.P.D popup shows
 // Detective's loadout (classConfig[5]) in the player's skins.
+// A guest's name in v10's menu (the class box, deob-10.0.7.js:217898; the Change Loadout toolbar, :217967):
+// "Guest_" + me.sid while the game's player object exists (iiïììiï, set at our spawn :227167, cleared at every INIT
+// :226430), else "Guest". KN's sid is the Player's uid (krunker_link: a krunker.io player's sid); on a KrunkNative
+// server the guest's name there is "Guest_<slot>" (server/src/net.c), so that one is shown when it is ours.
+void menu_guest_name(char *out, const size_t n) {
+    const Player *me = g_ui.client ? g_ui.client->me : NULL;
+    if (!me) {
+        snprintf(out, n, "Guest");
+        return;
+    }
+    const char *name = me->name;
+    int digits = strncmp(name, "Guest_", 6) == 0 && name[6];
+    for (const char *p = name + 6; digits && *p; p++) digits = *p >= '0' && *p <= '9';
+    if (digits) snprintf(out, n, "%s", name);
+    else snprintf(out, n, "Guest_%d", me->uid);
+}
+
 void menu_update_class_box(void) {
     const int police = ui_police_active();
     const MenuClass *c = menu_class_at(police ? MENU_POLICE_CLASS : g_ui.client->menu_class_index);
@@ -1280,8 +1303,14 @@ void menu_update_class_box(void) {
         free(html);
     } else if (tag_el) {
         StrBuf sb = {0};
-        // v10: a guest is "Guest" (Guest_<sid> only while a game's player object exists), not the name typed in the menu
-        sb_append(&sb, "<span class='menuClassPlayerName'>Guest</span>");
+        // v10: a guest is "Guest_" + me.sid while a game's player object exists, else "Guest" (deob-10.0.7.js:217898);
+        // never the name typed in the menu
+        char guest[PLAYER_NAME_SIZE];
+        menu_guest_name(guest, sizeof(guest));
+        sb_append(&sb, "<span class='menuClassPlayerName'>");
+        sb_append_esc(&sb, guest);
+        sb_append(&sb, "</span>");
+        snprintf(g_guest_shown, sizeof(g_guest_shown), "%s", guest);
         char *html = sb_finish(&sb);
         html_dom_set_html(tag_el, html);
         free(html);

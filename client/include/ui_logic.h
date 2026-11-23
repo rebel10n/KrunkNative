@@ -115,6 +115,7 @@ void menu_request_open(int open);                // requestMenu -> client_set_me
 void menu_update_instructions(void);             // updatePlayInstructions (4 states)
 void menu_update_top_bar(void);                  // updateTopBar
 void menu_update_class_box(void);                // updateClassBox
+void menu_guest_name(char *out, size_t n);       // a guest's v10 name: "Guest_<sid>" while in a game, else "Guest"
 void menu_show_speech_bubble(const char *text, double ms); // showSpeechBubble (2,100 ms default)
 void menu_show_window(int id, int force);        // showWindow
 int menu_open_window_id(void);                  // the window shown in #windowHolder, 0 when none is

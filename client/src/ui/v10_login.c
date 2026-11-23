@@ -58,6 +58,7 @@ static struct {
     unsigned kio_gen; // krunker_account_generation() the modal last followed
     int backend;      // account_backend() the modal signs in to
     int kio_form;     // the card signs in to krunker.io: an official game, or the Account Manager's krunker.io row
+    int logging_in;   // v10's $loggingIn (v10_login_logging_in): 1 a krunk.io request, 2 a krunker.io sign-in, 0 none
 } L;
 
 // The card signs in to krunker.io (an official game, or a krunker.io row's Use) instead of krunk.io
@@ -485,9 +486,32 @@ static void kio_submit(const char *mail, const char *name, const char *pass) {
         message(text);
         return;
     }
-    krunker_account_sign_in(ident, pass);
+    if (krunker_account_sign_in(ident, pass)) L.logging_in = 2; // iìïîïîì: loggingIn.set(true) (deob-10.0.7.js:116810)
     message(krunker_account_message()); // "Please wait..." (v10 _39219), or why it was refused
     L.kio_gen = krunker_account_generation();
+}
+
+// #accResp shows account_ui's "Please wait..." (send_account_request: a krunk.io login / register went out, its "a"
+// answer replaces the line)
+static int resp_waiting(void) {
+    HtmlElem resp = by_id("accResp");
+    char text[128] = "";
+    if (resp) html_dom_get_text(resp, text, sizeof(text));
+    return resp && !strcmp(text, I18N("generic.wait", "Please wait..."));
+}
+
+// v10's $loggingIn (deob-10.0.7.js:27912): set by a login or a registration (:116767, :116810), cleared by their
+// failure (:116792, :116844) and by the account response (:216820). It turns the guest header into "Logging in..."
+// (deob-10.0.7.js:148818-148821, v10_menu.c). krunker.io: while its sign-in runs (the request, the code step);
+// krunk.io: while account_ui's "Please wait..." waits for the "a" answer (or until the modal goes).
+int v10_login_logging_in(void) {
+    if (L.logging_in == 2) {
+        const KrunkerAccountState st = krunker_account_state();
+        if (st != KRUNKER_ACCOUNT_BUSY && st != KRUNKER_ACCOUNT_CODE) L.logging_in = 0;
+    } else if (L.logging_in == 1 && !resp_waiting()) {
+        L.logging_in = 0;
+    }
+    return L.logging_in != 0;
 }
 
 // Per frame: the krunker.io sign-in's progress in the modal (the message line, the code form);
@@ -554,6 +578,7 @@ static void submit(void) {
     // account_ui.c reads #accName or #accEmail / #accPass (/ #accEmail) and answers in #accResp
     if (account_ui_handle(L.reg ? "registerAcc" : "loginAcc", NULL, NULL, 0) < 0)
         message(I18N("generic.error", "Error")); // no account service in this build
+    else if (resp_waiting()) L.logging_in = 1; // the request went out (refused at once: #accResp says why)
 }
 
 // The recover card's Submit: krunker.io's recoverAccount (v10 _39188); krunk.io: the Account
@@ -600,7 +625,7 @@ int v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         read_value("accEmail", mail, sizeof(mail));
         if (!mail[0]) message(I18N("generic.auth.fillAllFields", "Please fill in all fields"));
         else {
-            krunker_account_email_code(mail);
+            if (krunker_account_email_code(mail)) L.logging_in = 2; // loginEmailCode: the same login (:116810)
             message(krunker_account_message());
             L.kio_gen = krunker_account_generation();
         }

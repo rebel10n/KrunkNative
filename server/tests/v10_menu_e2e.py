@@ -56,6 +56,7 @@ CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-v10menu-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
 results = []
 procs = []
+DB = {}  # the scratch database's config section (db_scratch.py create)
 
 
 def check(name, ok, detail=""):
@@ -170,6 +171,10 @@ def nodes(text, label):
 FIND_GAME_MAX_FRAME_MS = 500
 
 SIGNED_IN_SCRIPT = """0 menu
+450 waitfor [id=knV10Title]
+460 text @title [id=knV10Title]
+470 attr @titlestyle style [id=knV10Title]
+480 nodes @titlerow [id=signedInHeaderBar] .ph-name-row .ph-title
 500 vis @header signedInHeaderBar signedOutHeaderBar knV10Name menuKRCount menuBtnConnect menuBtnHost menuBtnQuickMatch :preview spectButtonHolder chatUIHolder knV10AccountsBtn knV10AccountsSignedIn
 500 vis @nav menuBtnGuide knV10GuideItem menuBtnTurfWars menuBtnMarket menuBtnLeaderboards menuBtnShop menuBtnChall menuBtnSocial menuBtnSideCommunity
 600 clickid knV10Settings
@@ -229,6 +234,7 @@ GUEST_SCRIPT = """0 menu
 1600 clickid accEmail
 1650 type {user}@example.com
 1700 clickid knV10LoginSubmit
+1730 vis @logging knV10LoggingInBar signedOutHeaderBar signedInHeaderBar
 6000 vis @registered knV10Login signedInHeaderBar signedOutHeaderBar knV10Name spectButtonHolder chatUIHolder
 6100 call logoutAcc
 6800 down ESC
@@ -246,6 +252,30 @@ GUEST_SCRIPT = """0 menu
 12000 vis @loggedin knV10Login signedInHeaderBar signedOutHeaderBar
 12100 quit
 """
+
+
+# A guest's name in the class box (menu_ui.c menu_guest_name, deob-10.0.7.js:217898): "Guest" on the menu before any
+# spawn, "Guest_<sid>" once the game has our player (back on the menu with Escape)
+GUEST_NAME_SCRIPT = """0 menu
+500 text @tag0 [id=menuClassNameTag]
+600 play
+3000 down ESC
+3020 up ESC
+4000 text @tag1 [id=menuClassNameTag]
+4100 quit
+"""
+
+
+def text_of(text, label):
+    m = re.search(r"\[input_script\] text t=\d+ @%s n=\d+ .* text=(.*)" % re.escape(label), text)
+    return m.group(1).strip() if m else None
+
+
+def guest_name_case(brain_port):
+    text = client("guestname", brain_port, GUEST_NAME_SCRIPT)
+    t0, t1 = text_of(text, "tag0"), text_of(text, "tag1")
+    check("2: a guest's class box name on the menu before any spawn is Guest", t0 == "Guest", str(t0))
+    check("2: ... and Guest_<sid> once the game has our player", bool(t1 and re.fullmatch(r"Guest_\d+", t1)), str(t1))
 
 
 # The guest header's Account Manager (v10_menu.c header_setup): between Login or Register and Get
@@ -313,7 +343,26 @@ def signed_in_case(brain_port, games):
     st, reg = http(brain_port, "/auth/register", {"username": user, "password": "pw-v10menu-%d" % os.getpid()})
     token = reg.get("token", "") if isinstance(reg, dict) else ""
     check("1: account registered", st == 200 and token, str(reg)[:200])
-    text = client("signedin", brain_port, SIGNED_IN_SCRIPT.format(shots=WORK), {"krunker_username": user, "krunker_token": token})
+    # the equipped title in the header (.ph-title, deob-10.0.7.js:148780-148797): the account owns title 91
+    # ("Pinpoint", player_titles: "ttl") and wears it (titleIndex)
+    titled = False
+    if DB.get("driver") == "sqlite" and DB.get("path"):
+        import sqlite3
+        con = sqlite3.connect(DB["path"])
+        con.execute("INSERT INTO player_titles (account_id, title_id, source, ref) SELECT id, 91, 'blackmarket', 1866 "
+                    "FROM accounts WHERE lower(username) = lower(?)", (user,))
+        con.commit()
+        titled = con.execute("SELECT count(*) FROM player_titles pt JOIN accounts a ON a.id = pt.account_id "
+                             "WHERE lower(a.username) = lower(?)", (user,)).fetchone()[0] == 1
+        con.close()
+    text = client("signedin", brain_port, SIGNED_IN_SCRIPT.format(shots=WORK),
+                  {"krunker_username": user, "krunker_token": token, "titleIndex": "91"})
+    if titled:
+        title = re.search(r"\[input_script\] text t=\d+ @title n=(\d+) .* text=(.*)", text)
+        style = re.search(r"\[input_script\] attr t=\d+ @titlestyle n=\d+ style=(.*)", text)
+        check("1: the header shows the equipped title after the name", title and title.group(1) == "1" and title.group(2).strip() == "Pinpoint"
+              and nodes(text, "titlerow") == 1, title.group(0) if title else "no text line")
+        check("1: ... in its rarity colour", style and style.group(1).startswith("color:#"), style.group(0) if style else "no attr line")
     signed_accounts_case(brain_port, user, token)
     joins = re.findall(r"\[mm\] joining (\S+) at", text)
     h = vis(text, "header")
@@ -381,6 +430,11 @@ def guest_case(brain_port):
     check("2: guest header bar", g.get("signedOutHeaderBar") == "1" and g.get("signedInHeaderBar") in ("-", "0"), str(g))
     check("2: a guest has no chat (hideChatIfGuestUser, deob-10.0.7.js:215587) and no Spectate switch on the menu (v10:208579)",
           g.get("chatUIHolder") == "0" and g.get("spectButtonHolder") == "0", str(g))
+    lg = vis(text, "logging")
+    # $loggingIn (deob-10.0.7.js:148818-148821): while the registration waits for its answer the guest bar is
+    # "Logging in..." (v10_login_logging_in)
+    check("2: a sent registration: the header says Logging in... in place of the guest bar",
+          lg.get("knV10LoggingInBar") == "1" and lg.get("signedOutHeaderBar") == "0" and lg.get("signedInHeaderBar") in ("-", "0"), str(lg))
     m = vis(text, "modal")
     # a guest with no saved username: v10's Email field first (the "(use username instead)" toggle -> Username)
     check("2: Login or Register opens the modal", m.get("knV10Login") == "1" and m.get("accEmail") == "1", str(m))
@@ -422,7 +476,8 @@ def main():
     if r.returncode:
         print("v10_menu_e2e: %s unavailable: skipped" % DRIVER)
         return r.returncode
-    dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in json.loads(r.stdout).items()}
+    DB.update(json.loads(r.stdout))
+    dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in DB.items()}
     env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET, **dbenv)
     brain_log = os.path.join(WORK, "brain.log")
     try:
@@ -450,6 +505,7 @@ def main():
         brain_case(port, games)
         signed_in_case(port, games)
         guest_case(port)
+        guest_name_case(port)
         accounts_case(port)
     finally:
         for p in procs:
