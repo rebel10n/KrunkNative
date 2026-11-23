@@ -1658,7 +1658,10 @@ static void end_session(void) {
 static void logout(void) {
     end_session();
     KN_LOG_DEBUG1("[account] logged out\n");
-    menu_show_window(5, 1); // showWindow(5)
+    // logoutAcc's iïìiîìï() runs updateWindow(5) (deob-10.0.7.js:216910, :216644): the Account window, when it is
+    // the one up (its Logout link), renders again, and for the guest now that is the login modal; a logout with no
+    // window up (the console, a script) leaves the menu as it is
+    menu_rerender_if_open(5);
     menu_update_class_box();
 }
 
@@ -1691,7 +1694,7 @@ int account_ui_logout(void) {
         ui_loadout_logout(); // deleteVal of the loadout keys, the selections back to none (deob-10.0.7.js:216910)
         KN_LOG_DEBUG1("[account] signed out of krunker.io\n");
         active_tick();
-        menu_show_window(5, 1); // showWindow(5): v10's login modal for the guest now
+        menu_rerender_if_open(5); // updateWindow(5): from the Account window, v10's login modal for the guest now
         return 1;
     }
     if (!g_logged_in) return 0;

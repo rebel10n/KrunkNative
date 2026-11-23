@@ -406,7 +406,7 @@ def client_script():
          "8100 down F1", "8120 up F1",
          "8800 vis @om knOmGrid",
          "9000 om object %d" % CRATE,
-         "10500 call logoutAcc",
+         "10400 call showWindow 5", "10500 call logoutAcc",
          "11500 down ESC", "11520 up ESC",
          "12500 om object %d" % CRATE,
          "14000 quit"]

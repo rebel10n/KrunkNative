@@ -168,9 +168,11 @@ SIGNED = "signedInHeaderBar signedOutHeaderBar knV10Login"
 
 
 def logout(t, label):
-    """logoutAcc (showWindow(5) as a guest: the login modal, the window closed), then ESC twice:
-    the first blurs the modal's focused Email field, the second closes the modal"""
-    return (f"{t} call logoutAcc\n"
+    """The Account window's Logout: logoutAcc's updateWindow(5) renders it again as a guest (showWindow(5): the login
+    modal, the window closed), then ESC twice: the first blurs the modal's focused Email field, the second closes the
+    modal"""
+    return (f"{t - 50} call showWindow 5\n"
+            f"{t} call logoutAcc\n"
             f"{t + 600} nodes @{label}w5 [id=knV10Login] [id=accEmail][placeholder=\"Enter Email\"]\n"
             f"{t + 600} nodes @{label}w5old [id=menuWindow] [id=referralHeader]\n"
             f"{t + 600} nodes @{label}w5opt [placeholder*=\"optional\"]\n"

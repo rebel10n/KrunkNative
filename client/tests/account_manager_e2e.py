@@ -415,6 +415,7 @@ def restart_and_logout(brain_url, game_port):
     """A restart resumes the account from its stored session (no prompt); Logout ends it, and Use then fills the card
     again with no sign-in."""
     log = run_client("restart", f"""0 menu
+1900 call showWindow 5
 2000 call logoutAcc
 3000 call knV10LoginClose
 3500 call showWindow {WINDOW}

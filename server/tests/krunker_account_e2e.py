@@ -1137,6 +1137,7 @@ def run_web():
         console += list(cdp.console)
 
         # 3. Logout in the game: a krunker.io guest; the next join carries no token
+        call("showWindow", "[5]")  # the Account window: its Logout link
         call("logoutAcc")
         check("web: Logout: v10's login modal for the krunker.io guest", bool(wait("(() => !!document.getElementById('knV10Login'))()", 30)))
         n_seek, n_ws = len(stub.find("GET", "/mm/seek-game")), len(stub.ws_paths)

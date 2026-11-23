@@ -163,6 +163,7 @@ def scenario(brain_url, game_port, smtp, db):
 2900 type pass_word1
 3000 down ENTER
 3010 up ENTER
+4900 call showWindow 5
 5000 call logoutAcc
 6000 clickid knV10LoginMode
 6200 clickid accName
