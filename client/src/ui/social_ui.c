@@ -692,6 +692,51 @@ static void side_boxes(void) {
 static double parse_time_ms(const cJSON *v);
 static double now_epoch_ms(void);
 
+// ------------------------------------------------------------------ profile pictures
+// v10's picture of a player (config-BDN_kuhS.js:4749-4757): <userAssetsHost>/p<id>/profile.png?v=<the hour>, the
+// hour being the player's own upload time after an upload (pfpUploaded). The host is Box Office's for a Box Office
+// account (kn_brain answers p<id>/profile.png with the approved profile picture, avatar.c; 404 without one) and
+// krunker.io's for a krunker.io account, whose ids are Krunker's.
+static double g_pfp_up_id, g_pfp_up_ms;
+
+void social_pfp_uploaded(const int id, const double ms) {
+    g_pfp_up_id = id;
+    g_pfp_up_ms = ms;
+}
+
+static void pfp_url(char *out, const size_t n, const double id) {
+    double v = floor(now_epoch_ms() / 3600000.0) * 3600000.0;
+    if (g_pfp_up_id == id && g_pfp_up_ms > v) v = g_pfp_up_ms;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER || !backend_url()[0])
+        snprintf(out, n, "https://user-assets.krunker.io/p%.0f/profile.png?v=%.0f", id, v);
+    else
+        snprintf(out, n, "%s/user-assets/p%.0f/profile.png?v=%.0f", backend_url(), id, v);
+}
+
+// iíìiíïi(img, id, cond, fallback) (hub-10.0.7.js:2143-2149): the picture when cond, else the fallback, which
+// also replaces a picture that fails to load
+static void set_pfp(const HtmlElem img, const double id, const int cond, const char *fallback) {
+    if (!img) return;
+    char src[512], on[300];
+    if (cond) pfp_url(src, sizeof(src), id);
+    else snprintf(src, sizeof(src), "%s", fallback);
+    snprintf(on, sizeof(on), "this.onerror=null;this.src='%s';", fallback);
+    html_dom_set_attr(img, "onerror", on);
+    html_dom_set_attr(img, "src", src);
+}
+
+// the picture's URL as markup: cond ? pfp(id) : fallback ("" or ./img/player_pfp.png)
+static void sb_pfp(StrBuf *sb, const double id, const int cond, const char *fallback) {
+    char src[512];
+    if (cond) pfp_url(src, sizeof(src), id);
+    else snprintf(src, sizeof(src), "%s", fallback);
+    sb_append_esc(sb, src);
+}
+
+static cJSON *g_friends; // the last "chtb" rows, online first (owned; the hub chat below)
+static double jnum(const cJSON *o, const char *key);
+static const char *jstr(const cJSON *o, const char *key);
+
 // config.mapTabs / config.modTabs (v7.1.4). `api` is the /api/maps|mods `index` the
 // KrunkNative server and kn_brain answer (shared/src/social.c, services/brain/creations.c:
 // 0 Popular, 1 Featured, 2 New, 3 Favorites, 4 My Games / My Mods); v7's own index space
@@ -913,7 +958,36 @@ static void append_map_cards(StrBuf *sb, const cJSON *rows_in, const int tab) {
         sb_append_js_escape(sb, name);
         sb_appendf(sb, "&quot;,&quot;%s&quot;,&quot;%s&quot;)'/>", mod_url ? mod_url : "undefined", mod_id ? mod_id : "undefined");
         sb_append(sb, name);
-        sb_appendf(sb, "</a><span style='float:right;color:#fff;margin-right:6px;'>%s <span style='color:rgba(255,255,255,0.6)'>Plays</span></span></div></div></div></div>", plays);
+        sb_appendf(sb, "</a><span style='float:right;color:#fff;margin-right:6px;'>%s <span style='color:rgba(255,255,255,0.6)'>Plays</span></span></div></div></div>", plays);
+        // the friends playing it (at most 4 pictures): an online friend whose status is "playing <map>"
+        if (cJSON_GetArraySize(g_friends)) {
+            int playing = 0;
+            const char *who = NULL;
+            const cJSON *f;
+            sb_append(sb, "<div class='frndPlyingH'>");
+            cJSON_ArrayForEach(f, g_friends) {
+                const char *sm = jstr(f, "sm");
+                if (playing >= 4 || jnum(f, "st") != 1 || !sm || !*sm) continue;
+                const char *at = strstr(sm, "playing ");
+                char map[160];
+                if (at) snprintf(map, sizeof(map), "%.*s%s", (int) (at - sm), sm, at + 8); // String.replace: the first one
+                else snprintf(map, sizeof(map), "%s", sm);
+                if (strcmp(map, name)) continue;
+                sb_append(sb, "<img class='frndPlyinIcn' src='");
+                sb_pfp(sb, jnum(f, "fid"), jnum(f, "sub") != 0, "");
+                sb_append(sb, "'>");
+                who = jstr(f, "fna");
+                playing++;
+            }
+            if (playing > 1) sb_append(sb, " several friends playing");
+            else if (playing) {
+                sb_append(sb, " ");
+                sb_append_esc(sb, who ? who : "");
+                sb_append(sb, " is Playing");
+            }
+            sb_append(sb, "</div>");
+        }
+        sb_append(sb, "</div>");
     }
     cJSON_Delete(rows);
 }
@@ -1470,10 +1544,11 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     if (k < 1) k = 1;
     const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     const HtmlElem pic = el("socialPic");
-    if (pic) {
-        char src[64];
-        snprintf(src, sizeof(src), "./textures/classes/icon_%d.png", (int) jnum(stats, "c"));
-        html_dom_set_attr(pic, "src", src);
+    if (pic) { // the picture with showPfp on and a premium player, else the class icon (Kamile's: "a")
+        char icon[64];
+        if (name && !strcmp(name, "Kamile")) snprintf(icon, sizeof(icon), "./textures/classes/icon_a.png");
+        else snprintf(icon, sizeof(icon), "./textures/classes/icon_%d.png", (int) jnum(stats, "c"));
+        set_pfp(pic, jnum(t, "player_id"), g_hub.show_pfp && jnum(t, "player_premium") > 0, icon);
     }
     const char *clan = jstr(t, "player_clan");
     const int premium = jnum(t, "player_premium") > 0;
@@ -2106,7 +2181,9 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
     }
     char flw[32];
     comma_number(flw, sizeof(flw), jnum(e, "flw"));
-    sb_appendf(sb, "<div></div><div %s><div class='postHead'><img class='postPFP' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png' /><div class='postInfo'><div>", single ? "" : "class='socPost'");
+    sb_appendf(sb, "<div></div><div %s><div class='postHead'><img class='postPFP' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='", single ? "" : "class='socPost'");
+    sb_pfp(sb, jnum(e, "pli"), jnum(e, "prm") > 0, "./img/player_pfp.png");
+    sb_append(sb, "' /><div class='postInfo'><div>");
     append_post_author(sb, e);
     sb_appendf(sb, "<span class='postTime'>%s</span></div><span class='postSubInfo'>%s Followers</span></div><div class='postContent'><div style='overflow-x:hidden;color:rgba(255,255,255,0.8);user-select: text;'>", ago, flw);
     const char *txt = jstr(e, "txt");
@@ -2134,6 +2211,7 @@ static void append_post(StrBuf *sb, const cJSON *e, const int single) {
 static void hub_render_feed(const cJSON *t) {
     const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
     if (acc) {
+        set_pfp(el("postProf"), acc->id, acc->premium > 0, "./img/player_pfp.png");
         char n[32];
         format_num(n, sizeof(n), acc->followers);
         set_html("postCFole", n);
@@ -3629,6 +3707,8 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
         set_display("postEntryC", g_hub.logged_in ? "inline-block" : "none");
         side_boxes();
         g_hub.feed_switching = 0;
+        const AccountInfo *me = g_hub.logged_in ? active_account() : NULL;
+        if (me) set_pfp(el("postProf"), me->id, me->premium > 0, "./img/player_pfp.png");
         if (has_t) {
             set_html("postTopStat", "");
             set_display("singlePost", "inline-block");
@@ -3640,8 +3720,7 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
 }
 
 // ------------------------------------------------------------------ hub chat (chatHolder)
-// Profile pictures (user-assets.krunker.io/p<id>/profile.png) end on their favicon.png
-// onerror fallback, as in side_boxes.
+// Profile pictures (pfp_url: <userAssetsHost>/p<id>/profile.png) end on ./img/player_pfp.png when they fail.
 static cJSON *g_chat_list; // we: the open thread, newest first (owned)
 static int g_chat_peer;    // ve.id
 static int g_chat_pending; // he != null
@@ -3649,7 +3728,6 @@ static char g_chat_pending_txt[320];
 
 // The signed-in chat sidebar (hub-10.0.7.js:2201-2207): the Friends button, then the friends' bubbles ("chtb", the
 // brain's mutual follows with presence). The friends list is kept for showFriends / removeFriend.
-static cJSON *g_friends; // the last "chtb" rows, online first (owned)
 static void io_msg(int from, const char *text); // ["msg", fromId, text] (below)
 static void profile_reports(const cJSON *rows);   // ["rps", rows]: the profile's Reports tab (below)
 
@@ -3672,12 +3750,14 @@ static const char *friend_status(const cJSON *r) {
     return sm && *sm ? sm : "Online";
 }
 
-// startChat(fid, 0, name, picture, 1, status, game) for a friend row
+// startChat(fid, 0, name, picture, 1, status, game) for a friend row; the picture is a subscriber's, else ""
 static void friend_chat_call(StrBuf *sb, const cJSON *r) {
     const char *fna = jstr(r, "fna") ? jstr(r, "fna") : "", *gid = jstr(r, "gid") ? jstr(r, "gid") : "";
     sb_appendf(sb, "startChat(%d,0,&quot;", (int) jnum(r, "fid"));
     sb_append_js_escape(sb, fna);
-    sb_append(sb, "&quot;,&quot;./img/favicon.png&quot;,1,&quot;");
+    sb_append(sb, "&quot;,&quot;");
+    sb_pfp(sb, jnum(r, "fid"), jnum(r, "sub") != 0, "");
+    sb_append(sb, "&quot;,1,&quot;");
     sb_append_js_escape(sb, jnum(r, "st") ? friend_status(r) : "");
     sb_append(sb, "&quot;,&quot;");
     sb_append_js_escape(sb, gid);
@@ -3709,7 +3789,9 @@ static void io_xhtb(const cJSON *rows) {
         sb_appendf(&sb, "`, %d)' onmouseout='cancelTip(1)'><div class='statusBlob' style='background:%s'></div>", on, on ? "#27ab32" : "#7f7f7f");
         sb_appendf(&sb, "<div class='msgCount' id='msgCnt%d'%s>%d</div><img class='chatBlobImg' onclick='", fid, cht ? "" : " style='display: none;'", cht);
         friend_chat_call(&sb, r);
-        sb_append(&sb, "' onerror='this.onerror=null;this.src=\"./img/favicon.png\";' src='./img/favicon.png'/></div>");
+        sb_append(&sb, "'onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='");
+        sb_pfp(&sb, fid, jnum(r, "sub") != 0, "");
+        sb_append(&sb, "'/></div>");
     }
     if (!cJSON_GetArraySize(g_friends)) sb_append(&sb, "<div class='chatBlobI'><img class='chatBlobImg'/></div>");
     char *html = sb_finish(&sb);
@@ -3738,7 +3820,9 @@ static void chat_update_list(void) {
             char ago[48];
             // v3.1.1: getReadableTime(tim), an age in ms; kn_brain's chtl sends epoch ms
             readable_time(ago, sizeof(ago), tim > 1e12 ? fmax(0, now_epoch_ms() - tim) : tim);
-            sb_append(&sb, "<div class='chatItemH' style='margin-bottom:12px'><img src='./img/favicon.png' class='chatItPFP'  onerror='this.onerror=null;this.src=\"./img/favicon.png\";' /><div class='chatItInfo'><b style='color:#fff'>");
+            sb_append(&sb, "<div class='chatItemH' style='margin-bottom:12px'><img src='");
+            sb_pfp(&sb, jnum(m, "fid"), 1, "");
+            sb_append(&sb, "' class='chatItPFP'  onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' /><div class='chatItInfo'><b style='color:#fff'>");
             sb_append_esc(&sb, fna);
             sb_appendf(&sb, "</b><span style='color:rgba(255,255,255,0.4);font-size:14px;margin-left:10px'>%s ago</span><div style='height:6px'></div>", ago);
             sb_append_served(&sb, jstr(m, "txt"));
@@ -3802,11 +3886,11 @@ static void io_a(const char *error) {
         login_modal_close(); // v10: the LoginModal pops on success
         set_display("profileLogin", "none");
         const HtmlElem img = el("profileImg");
-        if (img) {
+        if (img) { // a premium account's picture, else its class icon
             char src[64];
             const cJSON *c = acc->stats ? cJSON_GetObjectItem(acc->stats, "c") : NULL;
             snprintf(src, sizeof(src), "./textures/classes/icon_%d.png", cJSON_IsNumber(c) ? c->valueint : 0);
-            html_dom_set_attr(img, "src", src);
+            set_pfp(img, acc->id, acc->premium > 0, src);
             html_dom_set_display(img, "inline-block");
         }
         char kr[32];
@@ -4046,11 +4130,16 @@ static void handle_reply_frame(const cJSON *frame) {
             if (post) {
                 sb_append(&sb, "<div style='height:10px'></div>");
                 append_post(&sb, post, 1);
-                sb_appendf(&sb, "<div class='replyHolder'><img src='./img/favicon.png' class='replyPfp'><input class='replyInput' placeholder='Reply' id='replyInput'></input><div class='replyBtn' onclick='postReply(%d)' id='replyBtn'>Reply</div></div>", (int) jnum(post, "pid"));
+                const AccountInfo *me = g_hub.logged_in ? active_account() : NULL;
+                sb_append(&sb, "<div class='replyHolder'><img src='");
+                sb_pfp(&sb, me ? me->id : 0, me && me->premium, "./img/player_pfp.png");
+                sb_appendf(&sb, "' class='replyPfp'><input class='replyInput' placeholder='Reply' id='replyInput'></input><div class='replyBtn' onclick='postReply(%d)' id='replyBtn'>Reply</div></div>", (int) jnum(post, "pid"));
                 const cJSON *c;
                 sb_append(&sb, "<div style='margin-top:10px' id='comHolderH'>");
                 cJSON_ArrayForEach(c, cJSON_GetObjectItem(res, "c")) {
-                    sb_append(&sb, "<div class='commHolder'><img class='replyPfp' src='./img/favicon.png' /><div class='comTxtHolder'><div style='margin-bottom:6px'>");
+                    sb_append(&sb, "<div class='commHolder'><img class='replyPfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='");
+                    sb_pfp(&sb, jnum(c, "pli"), jnum(c, "prm") > 0, "./img/player_pfp.png");
+                    sb_append(&sb, "' /><div class='comTxtHolder'><div style='margin-bottom:6px'>");
                     append_post_author(&sb, c);
                     sb_append(&sb, "</span></div>");
                     if (jstr(c, "txt")) sb_append_served(&sb, jstr(c, "txt"));
@@ -4366,34 +4455,38 @@ H(h_show_friends) {
     if (!g_hub.logged_in || !g_friends) return 1;
     const int n = cJSON_GetArraySize(g_friends);
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div style='font-size:22px;margin-bottom:20px;color:#fff;'>Friends<div style='float:right;color:rgba(255,255,255,0.8);'>%d</div></div>", n);
+    char total[32];
+    comma_number(total, sizeof(total), n);
+    sb_appendf(&sb, "<div style='font-size:22px;margin-bottom:20px;color:#fff;'>Your Friends<div style='float:right;color:rgba(255,255,255,0.8);'>%s Total</div></div>", total);
     for (int i = 0; i < n; i++) {
         const cJSON *r = cJSON_GetArrayItem(g_friends, i);
         const char *fna = jstr(r, "fna") ? jstr(r, "fna") : "", *gid = jstr(r, "gid");
         const int on = jnum(r, "st") != 0;
-        sb_append(&sb, "<div class='friendBHold'><div style='text-align:left;'><img class='folPfp' style='width:60px;height:60px;' "
-                       "onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='./img/player_pfp.png'/><div class='folInfHldr'>");
-        if (jnum(r, "sub")) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
-        if (jnum(r, "plf")) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:-8px;margin-right:4px;font-size:28px;vertical-align:middle;'>check_circle</i>");
-        sb_append(&sb, "<a href='/social.html?p=profile&q=");
+        sb_append(&sb, "<div class='friendBHold'><div style='text-align:left;'><img class='folPfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'  "
+                       "style='width:60px;height:60px;' src='");
+        sb_pfp(&sb, jnum(r, "fid"), jnum(r, "sub") != 0, "");
+        sb_append(&sb, "'/><div class='folInfHldr'>");
+        if (jnum(r, "sub")) sb_append(&sb, "<i class='material-icons' style='color:#FBC02D;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
+        if (jnum(r, "plf")) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:-8px;margin-right: 4px;font-size:28px;vertical-align:middle;'>check_circle</i>");
+        sb_append(&sb, "<a target='_blank' href='/social.html?p=profile&q=");
         sb_append_esc(&sb, fna);
         sb_append(&sb, "' class='lName' style='color:rgba(255,255,255,0.9)'>");
         sb_append_esc(&sb, fna);
         sb_appendf(&sb, "</a><div style='color:rgba(255,255,255,0.4);font-size:16px;margin-left:2px;'><div class='onStatus' style='background:%s'></div>",
                    on ? "#27ab32" : "#7f7f7f");
         sb_append_esc(&sb, friend_status(r));
-        sb_append(&sb, "</div></div><div class='friendHrgt'><div class='dmFrndBtn' title='Message' onclick='");
+        sb_append(&sb, "</div></div><div class='friendHrgt'><div class='dmFrndBtn' onclick='");
         friend_chat_call(&sb, r);
         sb_append(&sb, "'><span class='material-icons' style='color:#fff;font-size:47px;vertical-align:middle;margin-bottom:-16px;'>chat_bubble_outline</span></div>");
         if (gid && *gid) {
-            sb_append(&sb, "<div class='button buttonB' style='margin-right:15px;padding:10px;transform:translateY(7px);display:inline-block;' onclick='openURL(`/?game=");
+            sb_append(&sb, "<div class='button buttonB' style='margin-right:15px;padding:10px;transform:translateY(7px);display:inline-block;'onclick='openURL(`/?game=");
             sb_append_js_escape(&sb, gid);
             sb_append(&sb, "`,1)'>Join</div>");
         }
-        sb_appendf(&sb, "<div class='button buttonR' style='padding:10px;transform:translateY(7px);display:inline-block;vertical-align:unset;' "
-                        "onclick='removeFriend(%d)'>Remove</div></div></div></div>", i);
+        sb_appendf(&sb, "<div class='button buttonR' style='padding: 10px;transform:translateY(7px);display:inline-block;vertical-align: unset;'"
+                        "onclick='removeFriend(%d)'>Remove Friend</div></div></div></div>", i);
     }
-    if (!n) sb_append(&sb, "No friends yet: follow someone who follows you back");
+    if (!n) sb_append(&sb, "You have no friends");
     char *html = sb_finish(&sb);
     generic_popup(html, "followPop", NULL);
     free(html);
@@ -4535,12 +4628,13 @@ H(h_start_chat) {
     cJSON_Delete(g_chat_list);
     g_chat_list = cJSON_CreateArray();
     set_html("chatBoxFill", "<div style='width:100%;opacity:0.6;text-align:center;margin-bottom:10px;font-size:25px'><div style='display:inline-block'><div class='lds-ring'><div></div><div></div><div></div><div></div></div></div></div>");
-    char src[256] = "./img/favicon.png";
+    char src[512] = "";
     if (argc > 3 && args[3].kind == HTML_ARG_THIS && ev && ev->target) html_dom_get_attr(ev->target, "src", src, sizeof(src));
+    else if (argc > 3) snprintf(src, sizeof(src), "%s", arg_s(ev, args, argc, 3) ? arg_s(ev, args, argc, 3) : "");
     StrBuf sb = {0};
     sb_append(&sb, "<img src='");
     sb_append_esc(&sb, src);
-    sb_append(&sb, "' class='chatHeadPFP' />");
+    sb_append(&sb, "' class='chatHeadPFP' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' />");
     if (player && name) {
         sb_append(&sb, "<a href='/social.html?p=profile&q=");
         sb_append_esc(&sb, name);
@@ -6335,7 +6429,9 @@ static void follows_popup(void) {
             const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "friendname"));
             const int premium = (int) jnum(r, "subscription");
             const int featured = (int) jnum(r, "featured");
-            sb_append(&sb, "<div class='friendBHold'><div class='leaderText'><img class='folPfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='./img/player_pfp.png'/><div class='folInfHldr'>");
+            sb_append(&sb, "<div class='friendBHold'><div class='leaderText'><img class='folPfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='");
+            sb_pfp(&sb, jnum(r, "friendid"), 1, "");
+            sb_append(&sb, "'/><div class='folInfHldr'>");
             if (premium) sb_append(&sb, "<i class='material-icons' style='color:#FBC02D;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
             if (featured) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:-8px;margin-right: 4px;font-size:28px;vertical-align:middle;'>check_circle</i>");
             sb_append(&sb, "<a target='_blank' href='/social.html?p=profile&q=");

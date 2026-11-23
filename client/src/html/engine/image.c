@@ -967,7 +967,16 @@ int image_cache_retry_missing(ImageCache *cache) {
         if (!slot->entry.failed || !slot->missing) continue;
         if (slot->remote) { /* a download the fetcher finished: its file is there now */
             FILE *f = slot->path ? fopen(slot->path, "rb") : NULL;
-            if (!f) continue;
+            if (!f) {
+                /* or one it gave up on (HTTP 404, not an image): an error now, like a browser's
+                 * failed load, so the <img>'s onerror runs (image_entry_error) */
+                char path[1024] = "";
+                if (image_remote_fetch && image_remote_fetch(slot->key, path, sizeof(path)) == IMAGE_REMOTE_REFUSED) {
+                    slot->missing = 0;
+                    loaded++;
+                }
+                continue;
+            }
             fclose(f);
             image_probe(cache, slot);
             if (!slot->entry.failed) {
@@ -1034,8 +1043,15 @@ static void image_remote_start(ImageCache *cache, ImageSlot *slot) {
     slot->missing = 1;
 }
 
+static const ImageEntry failed_entry = {0, 0, 0, 1, 0};
+
+int image_entry_error(const ImageEntry *entry) {
+    if (!entry || !entry->failed) return 0;
+    if (entry == &failed_entry) return 1; /* src="": Chrome fires error for it */
+    return !((const ImageSlot *) entry)->missing;
+}
+
 const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base_url) {
-    static const ImageEntry failed_entry = {0, 0, 0, 1, 0};
     if (!cache) return &failed_entry;
     /* An empty URL (`url()`, `src=""`) names no image: browsers fetch nothing for it, so it is
      * not a missing file either (v10's prize wheel tiles write url() for a guest, v10:127937). */

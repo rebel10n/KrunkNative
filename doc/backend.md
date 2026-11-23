@@ -1180,6 +1180,16 @@ CORS headers). Paths and content rules: `shared/include/user_asset_path.h` (an a
 cache); an upstream 404 is remembered `user_assets.fail_cache_s`. Config keys: `config/config.example.json`
 `"user_assets"`.
 
+`p<id>/profile.png` is a player's picture, at the path Krunker's hub builds for one
+(`<userAssetsHost>/p<id>/profile.png?v=<the hour>`, config-BDN_kuhS.js:4749-4757). For Box Office it is the
+account's approved profile picture (`POST /api/account/avatar`, the same bytes as `/api/avatars/<id>`: WebP,
+ETag, `Cache-Control: public, max-age=300`), answered by `avatar.c` (`avatar_serve_public`). It is never fetched
+upstream, because the id is a Box Office account and not Krunker's player. Without an approved picture it is a
+404, and the hub's `onerror` shows its default picture as on Krunker. The hub points every picture v10 builds
+this way at it: the navbar, the profile, the feed composer, posts, comments, chat, friends and follows rows
+(`social_ui.c` `pfp_url`). A krunker.io account's hub uses `user-assets.krunker.io`. Tests:
+`brain_avatar_e2e`, `hub_creator_e2e`.
+
 `<id>/video.mp4.knv` is not on Krunker's host: it is the asset's `video.mp4` (fetched as above) as
 KrunkNative's frame sidecar (`shared/include/knv.h`), made with `user_assets.ffmpeg` (role `kn_brain`
 installs ffmpeg) and cached like a fetched file; the clients play it on the map object

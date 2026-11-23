@@ -180,6 +180,7 @@ void debug_capture_frame_end(Client *client) {
 //   at x y                              print the elementFromPoint chain at (x, y) to stderr
 //   key <glfw key>                      press and release a key through the key callback (342 = Alt: pListKey)
 //   clicksel <n> <selector>             click the centre of the n-th (0-based) match of a selector
+//   rectsel <n> <selector>              print the n-th match's rect to stderr (no click)
 //   count <selector>                    print how many elements match
 //   textof <id|selector>                print the element's textContent (whitespace folded)
 //   quit                                close the window
@@ -329,7 +330,7 @@ static void ui_cmds_run(Client *client, char *line) {
         }
         fprintf(stderr, "[ui_cmds] #%s rect %.1f %.1f %.1f %.1f\n", rest, r.x, r.y, r.w, r.h);
         if (cmd[0] == 'c') ui_cmds_click(w, r.x + r.w * 0.5, r.y + r.h * 0.5);
-    } else if (!strcmp(cmd, "clicksel")) {
+    } else if (!strcmp(cmd, "clicksel") || !strcmp(cmd, "rectsel")) {
         int nth = 0, at = 0;
         HtmlElem all[256];
         HtmlRect r;
@@ -341,7 +342,7 @@ static void ui_cmds_run(Client *client, char *line) {
             return;
         }
         fprintf(stderr, "[ui_cmds] sel %s[%d] rect %.1f %.1f %.1f %.1f\n", sel, nth, r.x, r.y, r.w, r.h);
-        ui_cmds_click(w, r.x + r.w * 0.5, r.y + r.h * 0.5);
+        if (cmd[0] == 'c') ui_cmds_click(w, r.x + r.w * 0.5, r.y + r.h * 0.5);
     } else if (!strcmp(cmd, "key")) {
         int key = 0;
         if (sscanf(rest, "%d", &key) != 1) return;

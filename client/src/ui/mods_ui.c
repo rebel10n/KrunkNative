@@ -396,6 +396,8 @@ static void set_resp(const char *text, const int err) {
 // The hub's Publish / Update Mod popup, v10.0.7's markup (publishModPopup, hub-10.0.7.js:6734-6754): the thumbnail on
 // the left (Select, its KB limit), the .zip on the right (Select, its MB limit), the name, the response line and the
 // Publish / Update button. selectFile opens the platform file dialog (mods_ui_handle), uploadMod is publish().
+static char *thumb_data_url(const char *path);
+
 static char *hub_publish_form(void) {
     const AccountInfo *acc = active_account();
     if (!acc) return NULL;
@@ -470,12 +472,9 @@ static char *publish_form(void) {
     }
     sb_append(&sb, "style='position:relative;display:flex;align-items:center;gap:10px;padding:10px;border-radius:4px;"
                    "background:rgba(255,255,255,0.12);margin-bottom:15px'><img id='modThumbPrev' src='");
-    if (P.thumb[0]) {
-        sb_append(&sb, "file://");
-        esc(&sb, P.thumb);
-    } else {
-        sb_append(&sb, "./img/noimg.png");
-    }
+    char *thumb_url = P.thumb[0] ? thumb_data_url(P.thumb) : NULL;
+    sb_append(&sb, thumb_url ? thumb_url : "./img/noimg.png");
+    free(thumb_url);
     sb_appendf(&sb, "' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' style='width:80px;height:80px;object-fit:cover;border-radius:4px;"
                     "background:rgba(0,0,0,0.3)'><input id='modThumb' type='file' accept='image/png' style='width:1px;visibility:hidden;"
                     "position:absolute' onchange=\"windows[18].onFileChange('modThumb', false, %d)\"%s><a href='javascript:;' class='menuLink' "
@@ -505,6 +504,36 @@ static char *publish_form(void) {
     sb_append(&sb, "</div><a id='modPubSubmit' href='javascript:;' class='menuLink' style='display:block;text-align:center;padding:12px;"
                    "font-size:20px;background:rgba(255,255,255,0.12);border-radius:4px' onclick='windows[18].submit()'>Publish</a></div>");
     return sb_finish(&sb);
+}
+
+static unsigned char *read_whole(const char *path, size_t *len);
+
+// FileReader.readAsDataURL(file) of the picked thumbnail (the window's onFileChange, game.deob.js:220973-220980; the
+// hub's updateFile, hub-10.0.7.js:6786-6792): the preview shows the picked file through a data: URL (the page
+// loads no file: URL), malloc'd; NULL when the file cannot be read
+static char *thumb_data_url(const char *path) {
+    static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    static const char head[] = "data:image/png;base64,";
+    size_t n = 0;
+    unsigned char *d = path && *path ? read_whole(path, &n) : NULL;
+    if (!d) return NULL;
+    char *out = malloc(sizeof(head) + 4 * ((n + 2) / 3) + 1);
+    if (!out) {
+        free(d);
+        return NULL;
+    }
+    memcpy(out, head, sizeof(head) - 1);
+    size_t o = sizeof(head) - 1;
+    for (size_t i = 0; i < n; i += 3) {
+        const uint32_t v = (uint32_t) d[i] << 16 | (i + 1 < n ? (uint32_t) d[i + 1] << 8 : 0) | (i + 2 < n ? d[i + 2] : 0);
+        out[o++] = T[v >> 18 & 63];
+        out[o++] = T[v >> 12 & 63];
+        out[o++] = i + 1 < n ? T[v >> 6 & 63] : '=';
+        out[o++] = i + 2 < n ? T[v & 63] : '=';
+    }
+    out[o] = 0;
+    free(d);
+    return out;
 }
 
 static char *publish_gen(void) {
@@ -542,9 +571,9 @@ static void picked_in_place(const int thumb, const char *path) {
         free(t);
     }
     if (thumb && (e = html_dom_by_id("modThumbPrev"))) {
-        char url[1100];
-        snprintf(url, sizeof url, "file://%s", path);
-        html_dom_set_attr(e, "src", url);
+        char *url = thumb_data_url(path);
+        if (url) html_dom_set_attr(e, "src", url);
+        free(url);
     }
 }
 

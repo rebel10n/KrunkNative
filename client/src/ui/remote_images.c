@@ -101,6 +101,29 @@ static RiEntry *find(const uint64_t hash) {
 
 static void start_next(void);
 
+// A still WebP's size from its header (stb_image reads no WebP; the engine decodes it, webp.c):
+// "RIFF" <size> "WEBP" then a VP8 (lossy), VP8L (lossless) or VP8X (extended) chunk. 0 otherwise.
+static int webp_info(const unsigned char *b, const size_t n, int *w, int *h) {
+    if (n < 30 || memcmp(b, "RIFF", 4) || memcmp(b + 8, "WEBP", 4)) return 0;
+    const unsigned char *c = b + 12, *d = b + 20;
+    if (!memcmp(c, "VP8 ", 4)) { // frame tag (3), start code 9d 01 2a, 14-bit width / height
+        if (d[3] != 0x9d || d[4] != 0x01 || d[5] != 0x2a) return 0;
+        *w = (d[6] | d[7] << 8) & 0x3fff;
+        *h = (d[8] | d[9] << 8) & 0x3fff;
+    } else if (!memcmp(c, "VP8L", 4)) { // signature 2f, then 14-bit width - 1 and height - 1
+        if (d[0] != 0x2f) return 0;
+        const uint32_t v = (uint32_t) d[1] | (uint32_t) d[2] << 8 | (uint32_t) d[3] << 16 | (uint32_t) d[4] << 24;
+        *w = (int) (v & 0x3fff) + 1;
+        *h = (int) (v >> 14 & 0x3fff) + 1;
+    } else if (!memcmp(c, "VP8X", 4)) { // flags (4), 24-bit canvas width - 1 and height - 1
+        *w = (d[4] | d[5] << 8 | d[6] << 16) + 1;
+        *h = (d[7] | d[8] << 8 | d[9] << 16) + 1;
+    } else {
+        return 0;
+    }
+    return *w > 0 && *h > 0;
+}
+
 // The body: a raster stb_image reads, within the limits; written next to its final name, then
 // renamed over it, so the engine never reads half a file.
 static int store(const RiEntry *e, const char *body, const size_t length, char *why, const size_t why_n) {
@@ -109,7 +132,8 @@ static int store(const RiEntry *e, const char *body, const size_t length, char *
         snprintf(why, why_n, "%zu bytes (limit %u)", length, REMOTE_IMAGE_MAX_BYTES);
         return 0;
     }
-    if (!stbi_info_from_memory((const unsigned char *) body, (int) length, &w, &h, &comp)) {
+    if (!stbi_info_from_memory((const unsigned char *) body, (int) length, &w, &h, &comp) &&
+        !webp_info((const unsigned char *) body, length, &w, &h)) {
         snprintf(why, why_n, "not an image (%s)", stbi_failure_reason() ? stbi_failure_reason() : "unknown format");
         return 0;
     }
@@ -160,6 +184,8 @@ static void on_body(void *user, const int status, const char *body, const size_t
             e->state = e->refresh ? RI_DONE : RI_FAILED;
             e->failed_at = time(NULL);
             fprintf(stderr, "[remote-image] %s failed: %s\n", e->url, why);
+            // the engine asks again and finds it refused: the <img>'s onerror runs (image_cache_retry_missing)
+            if (!e->refresh) asset_arrival_bump();
         }
     }
     start_next();

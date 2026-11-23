@@ -125,7 +125,13 @@ static void on_status(void *user, const int status, const char *body, const size
     const char *s = cJSON_IsString(st) && st->valuestring ? st->valuestring : "none";
     char line[320];
     if (!strcmp(s, "pending")) snprintf(line, sizeof(line), "Your picture is being checked.");
-    else if (!strcmp(s, "approved")) snprintf(line, sizeof(line), "Your picture is shown.");
+    else if (!strcmp(s, "approved")) {
+        snprintf(line, sizeof(line), "Your picture is shown.");
+        // the hub's own picture URL moves to the new picture (v10 sets pfpUploaded on its upload)
+        const AccountInfo *acc = active_account();
+        const cJSON *at = data ? cJSON_GetObjectItemCaseSensitive(data, "moderated_ms") : NULL;
+        if (acc && cJSON_IsNumber(at)) social_pfp_uploaded(acc->id, at->valuedouble);
+    }
     else if (!strcmp(s, "rejected") || !strcmp(s, "error")) {
         const char *r = cJSON_IsString(why) && why->valuestring ? why->valuestring : "";
         snprintf(line, sizeof(line), "Not shown: %s", r[0] ? r : "it did not pass review.");

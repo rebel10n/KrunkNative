@@ -250,6 +250,11 @@ def public(port, account_id):
     return http(port, "GET", "/api/avatars/%d" % account_id)
 
 
+def asset_pfp(port, account_id, prefix="/user-assets"):
+    """the path Krunker's hub builds for a player's picture: <userAssetsHost>/p<id>/profile.png?v=<hour>"""
+    return http(port, "GET", "%s/p%d/profile.png?v=%d" % (prefix, account_id, int(time.time() // 3600) * 3600000))
+
+
 # ---- the brain
 
 def pg(*args):
@@ -332,6 +337,12 @@ def scenario(port, gw):
     check(headers.get("ETag") and "max-age=300" in (headers.get("Cache-Control") or ""), "ETag and Cache-Control on the picture")
     code, _, _ = http(port, "GET", "/api/avatars/%d" % alice_id, None)
     check(code == 200, "the picture is public (no token)")
+    for prefix in ("/user-assets", "/api/user-assets"):
+        code, headers, same = asset_pfp(port, alice_id, prefix)
+        check(code == 200 and same == img and headers.get("Content-Type") == "image/webp",
+              "%s/p<id>/profile.png serves the approved picture: %s" % (prefix, code))
+    check(asset_pfp(port, alice_id + 999)[0] == 404, "p<id>/profile.png without a picture -> 404 (the hub's onerror)")
+    check(http(port, "GET", "/user-assets/p%d/other.png" % alice_id)[0] == 404, "only profile.png is a picture")
     if Image is not None:
         size = Image.open(io.BytesIO(img)).size
         check(size == (256, 256), "stored picture is 256 x 256: %r" % (size,))
@@ -367,6 +378,7 @@ def scenario(port, gw):
     check(st.get("reason") == "Shows blood.", "rejection reason shown to the owner")
     code, _, _ = public(port, alice_id)
     check(code == 404, "a rejected picture is not served (404)")
+    check(asset_pfp(port, alice_id)[0] == 404, "nor at p<id>/profile.png")
 
     # ---- failures: each hides the picture and says why
     gw.mode = "fail"
@@ -395,6 +407,7 @@ def scenario(port, gw):
     code_pub, _, _ = public(port, alice_id)
     check(st_now.get("status") == "pending" and st_now.get("shown") is False, "while under review the status is pending, not shown")
     check(code_pub == 404, "while under review the picture is NOT served (404)")
+    check(asset_pfp(port, alice_id)[0] == 404, "nor at p<id>/profile.png while under review")
     st = wait_status(port, alice, ("approved", "rejected", "error"), timeout=30)
     check(st.get("status") == "approved", "after the slow review it is approved")
     check(public(port, alice_id)[0] == 200, "and then served")
@@ -405,6 +418,7 @@ def scenario(port, gw):
     code, st = status(port, alice)
     check(st.get("status") == "none" and st.get("shown") is False, "after delete the status is none")
     check(public(port, alice_id)[0] == 404, "after delete the picture is gone (404)")
+    check(asset_pfp(port, alice_id)[0] == 404, "and gone from p<id>/profile.png")
 
     # ---- quota: uploads that reach the account count, a rolling hour per account
     last = None

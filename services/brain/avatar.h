@@ -10,6 +10,10 @@
 int avatar_init(Brain *b);
 void avatar_shutdown(Brain *b);
 
+/* Answers req with player id's approved picture (image/webp, ETag, Cache-Control 300 s), else 404:
+ * GET /api/avatars/:id and the user-asset path p<id>/profile.png (user_assets.c). */
+void avatar_serve_public(struct kn_http_req *req, long long id);
+
 /* The review of one normalized picture (a base64 WebP, the caller keeps it): one moderation call on
  * the moderation provider profile, the strict verdict of avatar_verdict.c, fail closed. Profile
  * pictures and clan logos both go through it. status: "approved" | "rejected" | "error"; categories

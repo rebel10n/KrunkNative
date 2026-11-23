@@ -105,6 +105,9 @@ typedef struct ElemData {
 
     void *box;                  /* layout.c                                    */
     void *anim;                 /* anim.c (reserved)                           */
+    /* engine.c: the <img onerror> handler ran for this src (a hash; 0 = not run), so a handler that
+     * leaves src alone runs once per load like a browser's error event */
+    uint32_t img_error_src;
 } ElemData;
 
 /* ---- lifetime ---------------------------------------------------------- */

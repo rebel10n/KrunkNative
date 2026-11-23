@@ -126,6 +126,10 @@ struct Engine {
     int need_layout;                         /* layout_run on the current tree */
     int need_paint;                          /* display list must be re-recorded */
     int observe_pending;                     /* a layout ran since events_after_layout */
+    /* <img onerror>: the elements whose load failed in the last layout (lh_image_error), run after it
+     * (img_errors_run) */
+    HtmlElem *img_errors;
+    int n_img_errors, cap_img_errors;
     int in_flush;
     int in_after_layout;
 
@@ -669,6 +673,146 @@ static void canvas_drop(Engine *g, const int i)
 /* ------------------------------------------------------------------------- */
 /* <video> (video.h)                                                          */
 /* ------------------------------------------------------------------------- */
+
+/* ---- <img onerror> ------------------------------------------------------- */
+
+static uint32_t img_src_hash(const char *s)
+{
+    uint32_t h = 2166136261u;
+    for (; s && *s; s++) h = (h ^ (unsigned char) *s) * 16777619u;
+    return h ? h : 1;
+}
+
+/* LayoutCtx.image_error: an <img onerror> laid out without a size. Queued when the load failed for
+ * good (not while a download is pending), and run after the layout (img_errors_run). */
+static void img_error_check(Engine *g, const HtmlElem e, const char *url, const char *base)
+{
+    const ImageEntry *entry = image_get(g->images, url, base);
+    if (!e || !image_entry_error(entry)) return;
+    const ElemData *ed = dom_elem_data(g->dom, e);
+    if (ed && ed->img_error_src == img_src_hash(url)) return;
+    for (int i = 0; i < g->n_img_errors; i++)
+        if (g->img_errors[i] == e) return;
+    if (g->n_img_errors == g->cap_img_errors) {
+        const int cap = g->cap_img_errors ? g->cap_img_errors * 2 : 16;
+        HtmlElem *grown = realloc(g->img_errors, (size_t) cap * sizeof(*grown));
+        if (!grown) return;
+        g->img_errors = grown;
+        g->cap_img_errors = cap;
+    }
+    g->img_errors[g->n_img_errors++] = e;
+    g->observe_pending = 1;
+}
+
+static void lh_image_error(void *user, lxb_dom_node_t *node, const char *url, const char *base)
+{
+    Engine *g = user;
+    img_error_check(g, dom_node_elem(g->dom, node), url, base);
+}
+
+/* A pending download failed (image_cache_retry_missing): the <img onerror> already laid out are
+ * not built again for it, so they are checked here */
+static void img_errors_scan(Engine *g)
+{
+    HtmlElem all[1024];
+    const size_t n = dom_query_all(g->dom, 0, "img[onerror]", all, sizeof(all) / sizeof(all[0]));
+    for (size_t i = 0; i < n; i++) {
+        const char *src = dom_get_attr(g->dom, all[i], "src", NULL);
+        if (src) img_error_check(g, all[i], src, g->page);
+    }
+}
+
+/* One quoted JS string literal at *p ('...' or "..."; a backslash escapes the next character). */
+static int img_js_string(const char **p, char *out, const size_t cap)
+{
+    const char q = **p;
+    if (q != '\'' && q != '"') return 0;
+    size_t n = 0;
+    const char *c = *p + 1;
+    for (; *c && *c != q; c++) {
+        if (*c == '\\' && c[1]) c++;
+        if (n + 1 < cap) out[n++] = *c;
+    }
+    if (*c != q) return 0;
+    out[n] = 0;
+    *p = c + 1;
+    return 1;
+}
+
+/* The pages' onerror handlers are statements on `this` (the hub's and the menu's markup):
+ * this.onerror=null, this.src='<url>', this.style.<prop>='<value>'. Other statements are skipped. */
+static void img_error_run(const HtmlElem e, const char *handler)
+{
+    const char *p = handler;
+    while (*p) {
+        while (*p == ' ' || *p == ';' || *p == '\t' || *p == '\n') p++;
+        if (!*p) break;
+        if (strncmp(p, "this.", 5)) {
+            while (*p && *p != ';') p++;
+            continue;
+        }
+        p += 5;
+        char name[64];
+        size_t n = 0;
+        while ((isalnum((unsigned char) *p) || *p == '.' || *p == '_') && n + 1 < sizeof(name)) name[n++] = *p++;
+        name[n] = 0;
+        while (*p == ' ') p++;
+        if (*p != '=' || p[1] == '=') {
+            while (*p && *p != ';') p++;
+            continue;
+        }
+        p++;
+        while (*p == ' ') p++;
+        char value[2048];
+        if (!strcmp(name, "onerror") && !strncmp(p, "null", 4)) {
+            p += 4;
+            html_dom_remove_attr(e, "onerror");
+        } else if (img_js_string(&p, value, sizeof(value))) {
+            if (!strcmp(name, "src")) {
+                html_dom_set_attr(e, "src", value);
+            } else if (!strncmp(name, "style.", 6) && name[6]) {
+                char prop[64];
+                size_t k = 0;
+                for (const char *c = name + 6; *c && k + 2 < sizeof(prop); c++) { /* fontSize -> font-size */
+                    if (*c >= 'A' && *c <= 'Z') {
+                        prop[k++] = '-';
+                        prop[k++] = (char) (*c + 32);
+                    } else {
+                        prop[k++] = *c;
+                    }
+                }
+                prop[k] = 0;
+                html_dom_set_style(e, prop, value);
+            }
+        }
+        while (*p && *p != ';') p++;
+    }
+}
+
+static void img_errors_run(Engine *g)
+{
+    const int n = g->n_img_errors;
+    if (!n) return;
+    HtmlElem *list = g->img_errors;
+    g->img_errors = NULL;
+    g->n_img_errors = g->cap_img_errors = 0;
+    for (int i = 0; i < n; i++) {
+        const HtmlElem e = list[i];
+        size_t len = 0;
+        const char *on = dom_get_attr(g->dom, e, "onerror", &len);
+        if (!on || !len) continue;
+        char *handler = malloc(len + 1);
+        if (!handler) continue;
+        memcpy(handler, on, len);
+        handler[len] = 0;
+        const char *src = dom_get_attr(g->dom, e, "src", NULL);
+        ElemData *ed = dom_elem_data(g->dom, e);
+        if (ed) ed->img_error_src = img_src_hash(src ? src : "");
+        img_error_run(e, handler);
+        free(handler);
+    }
+    free(list);
+}
 
 static int lh_video_size(void *user, const char *url, const char *base, float *w, float *h)
 {
@@ -1432,6 +1576,8 @@ static void run_after_layout(Engine *g)
     g->in_after_layout = 1;
     g->observe_pending = 0;
     engine_flush_layout(g);
+    img_errors_run(g); /* <img onerror> handlers may set another src: laid out again below */
+    engine_flush_layout(g);
     events_after_layout(&g->events);
     g->in_after_layout = 0;
 }
@@ -2178,6 +2324,7 @@ static void engine_destroy(Engine *g)
     for (uint32_t i = 0; i < g->shadow_cap; i++) free(g->shadow[i]);
     free(g->shadow);
     free(g->saved_scroll);
+    free(g->img_errors);
     while (g->n_canvases) canvas_drop(g, g->n_canvases - 1);
     free(g->canvases);
     video_players_destroy(g->videos);
@@ -2311,6 +2458,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     g->lctx.text = g->text;
     g->lctx.user = g;
     g->lctx.image_size = lh_image_size;
+    g->lctx.image_error = lh_image_error;
     g->lctx.video_size = lh_video_size;
     g->lctx.scrollbar_width = lh_scrollbar_width;
     g->lctx.widget_size = lh_widget_size;
@@ -2633,6 +2781,7 @@ void html_ui_backend_render(UI *ui, const int layers)
         dom_mark_all_dirty(g->dom);
         g->need_layout = 1;
         g->need_paint = 1;
+        img_errors_scan(g);
     }
 
     /* restyle -> layout -> observers/hover -> paint (only when dirty) */

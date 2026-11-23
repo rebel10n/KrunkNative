@@ -142,6 +142,7 @@ class Client:
         env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, tag + "-state"),
                     "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UI_CMDS": self.cmds, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                     "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % port,
+                    "KRUNKNATIVE_REMOTE_IMAGE_CACHE": os.path.join(WORK, tag + "-images"),  # the pictures it downloads
                     "PATH": PICK_BIN + os.pathsep + os.environ.get("PATH", "")})
         self.out = open(self.log, "w")
         self.proc = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT] + (["--hub", query] if hub else []), stdout=self.out, stderr=subprocess.STDOUT,
@@ -208,7 +209,24 @@ class Client:
         path = os.path.join(WORK, "%s-%s.png" % (self.tag, name))
         self.cmd("shot " + path)
         wait(lambda: os.path.exists(path), 10)
+        time.sleep(0.3)  # written in one go; let it finish
         return path
+
+    def rect(self, what, nth=0):
+        """(x, y, w, h) of #id, or of the nth match of a selector (rectsel: no click)"""
+        if what[0] in "#.[" or " " in what:
+            m = self.ask("rectsel %d %s" % (nth, what), r"sel %s\[%d\] (rect ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)|: no box)"
+                         % (re.escape(what), nth))
+        else:
+            m = self.ask("rect " + what, r"#%s (rect ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)|: no box)" % re.escape(what))
+        return tuple(float(m.group(i)) for i in range(2, 6)) if m and m.group(2) else None
+
+    def pixel_at_centre(self, what, name, nth=0):
+        """the screenshot's colour at the centre of an element (r, g, b), None without a box"""
+        r = self.rect(what, nth)
+        if not r or r[2] < 2 or r[3] < 2:
+            return None
+        return png_pixel(self.shot(name), int(r[0] + r[2] / 2), int(r[1] + r[3] / 2))
 
     def close(self):
         self.cmd("quit")
@@ -422,6 +440,72 @@ def png(w, h, pad=0):
             chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
+def png_pixel(path, x, y):
+    """(r, g, b) at (x, y) of an 8-bit RGB / RGBA PNG (the client's shot)"""
+    with open(path, "rb") as f:
+        data = f.read()
+    pos, idat, w, h, ctype = 8, b"", 0, 0, 6
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, ctype = struct.unpack(">IIBB", body[:10])
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    bpp = 4 if ctype == 6 else 3
+    raw, stride, prev, row = zlib.decompress(idat), w * bpp, bytearray(w * bpp), None
+    for j in range(y + 1):
+        line = raw[j * (stride + 1):(j + 1) * (stride + 1)]
+        ft, cur = line[0], bytearray(line[1:])
+        for i in range(stride):
+            a = cur[i - bpp] if i >= bpp else 0
+            b = prev[i]
+            c = prev[i - bpp] if i >= bpp else 0
+            if ft == 1:
+                cur[i] = (cur[i] + a) & 255
+            elif ft == 2:
+                cur[i] = (cur[i] + b) & 255
+            elif ft == 3:
+                cur[i] = (cur[i] + (a + b) // 2) & 255
+            elif ft == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                cur[i] = (cur[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        prev, row = cur, cur
+    return tuple(row[x * bpp:x * bpp + 3])
+
+
+def near(rgb, want, tol=14):
+    return rgb is not None and all(abs(a - b) <= tol for a, b in zip(rgb, want))
+
+
+def webp_solid(w, h, rgba):
+    """a lossless WebP of one colour: every prefix code has one symbol, so the pixels take no bits"""
+    bits, n = 0, 0
+
+    def put(v, k):
+        nonlocal bits, n
+        bits |= (v & ((1 << k) - 1)) << n
+        n += k
+    put(0x2f, 8)
+    put(w - 1, 14)
+    put(h - 1, 14)
+    put(1 if rgba[3] != 255 else 0, 1)
+    put(0, 3)  # version 0, then no transform, no colour cache, no meta prefix codes
+    put(0, 3)
+    for sym in (rgba[1], rgba[0], rgba[2], rgba[3]):  # green, red, blue, alpha: simple codes of one 8-bit symbol
+        put(0b101, 3)
+        put(sym, 8)
+    put(0b001, 3)  # distance: a simple code of one 1-bit symbol (0)
+    put(0, 1)
+    data = bits.to_bytes((n + 7) // 8, "little")
+    chunk = b"VP8L" + struct.pack("<I", len(data)) + data + (b"\0" if len(data) % 2 else b"")
+    return b"RIFF" + struct.pack("<I", 4 + len(chunk)) + b"WEBP" + chunk
+
+
+PFP_RGB = (32, 192, 64)
+
+
 def pick(path):
     with open(PICK, "w") as f:
         f.write(path + "\n")
@@ -468,7 +552,15 @@ def mod_window(port, ids, tokens, names, stamp):
         check(wait(lambda: (c.textof("#modThumbSize") or "") == tkb + " / 250 KB", 5) and c.count("#modThumbH[title='thumb.png']") == 1,
               "onFileChange: the thumbnail's size line %s / 250 KB and its title: %r" % (tkb, c.textof("#modThumbSize")))
         check((c.value("modNameNew") or "") == "Window Pack " + stamp, "picking a file keeps the typed name")
-        c.shot("upload-mod")
+        # the preview is the picked file as a data: URL (v10: FileReader.readAsDataURL), drawn in the 80 x 80 box
+        check(c.count("#modThumbPrev[src^='data:image/png;base64,iVBORw0KGgo']") == 1, "the preview's src is the picked PNG's data: URL")
+        rgb = None
+        for _ in range(10):
+            rgb = c.pixel_at_centre("modThumbPrev", "upload-mod")
+            if near(rgb, (128, 64, 32)):
+                break
+            time.sleep(0.5)
+        check(near(rgb, (128, 64, 32)), "the preview shows the picked thumbnail (its colour, not the dark box): %r" % (rgb,))
         c.ui("windows[18].submit()")
         check(wait(lambda: one("SELECT count(*) FROM published_mods WHERE mod_name = ? AND creator_id = ?", "Window Pack " + stamp, A) == 1, 60),
               "Publish: the mod is in published_mods")
@@ -480,15 +572,42 @@ def mod_window(port, ids, tokens, names, stamp):
 
 async def friends(port, ids, tokens, names, bob_sock):
     A, B = ids
+    # bob's approved profile picture (avatar.c): served at <Box Office>/user-assets/p<id>/profile.png; alice has none (404)
+    import base64
+    q("INSERT INTO account_avatars (account_id, status, sha256, image, bytes, width, height) VALUES (?, 'approved', 'e2e', ?, 0, 16, 16)",
+      B, base64.b64encode(webp_solid(16, 16, PFP_RGB + (255,))).decode())
+    pfp = lambda i: "http://127.0.0.1:%d/user-assets/p%d/profile.png?v=" % (port, i)  # noqa: E731
     c = Client(port, names[0], tokens[0], "p=feed", "friends")
     try:
         check(c.has("chatBubHold", 60) and wait(lambda: c.count("#msgCnt%d" % B) == 1, 20), "the chat sidebar shows the friend's bubble")
         check(c.count("#chatBubHold .chatBlobI") == 1, "one bubble: the one friend")
+        # not a subscriber: src="" and the onerror's default picture (hub-10.0.7.js:2340)
+        check(wait(lambda: c.count("#chatBubHold .chatBlobImg[src='./img/player_pfp.png']") == 1, 10),
+              "the bubble of a friend without a subscription: src='' falls back to player_pfp.png (onerror)")
         r = await bob_sock.call("chf", "ict", A, "hi from bob")
         check(r and r[1] is True, "bob sent a message")
         check(wait(lambda: c.textof("msgCnt%d" % B) == "1", 10), "the message counts on bob's bubble (msg push)")
+        # the chat's messages: every sender's picture (hub-10.0.7.js:2311), its default when there is none
+        c.ui("startChat(%d,0,'%s','',1)" % (B, names[1]))
+        check(wait(lambda: c.count(".chatItPFP[src^='%s']" % pfp(B)) == 1, 15), "bob's message shows p%d/profile.png" % B)
+        rgb = None
+        for _ in range(20):
+            rgb = c.pixel_at_centre(".chatItPFP", "chat-pfp")
+            if near(rgb, PFP_RGB):
+                break
+            time.sleep(0.5)
+        check(near(rgb, PFP_RGB), "and draws bob's approved picture (the WebP from Box Office): %r" % (rgb,))
+        c.type("chatBoxInput", "heybob")
+        c.ui("sendChat()")
+        check(wait(lambda: c.count(".chatItPFP[src='./img/player_pfp.png']") == 1, 20),
+              "alice's own message: p%d/profile.png answers 404 and the onerror shows player_pfp.png" % A)
+        c.ui("closeChat()")
         c.ui("showFriends()")
         check(c.text_has("#genericPop", names[1]) and "Online" in (c.textof("#genericPop") or ""), "Friends lists bob, online")
+        check(c.text_has("#genericPop", "Your Friends") and c.text_has("#genericPop", "1 Total"), "v10's header: Your Friends, 1 Total")
+        check(wait(lambda: c.count("#genericPop .folPfp[src='./img/player_pfp.png']") == 1, 10) and
+              c.count("#genericPop .buttonR[onclick='removeFriend(0)']") == 1 and c.text_has("#genericPop", "Remove Friend"),
+              "a friend's row: the default picture (no subscription) and Remove Friend")
         c.shot("friends")
         c.ui("removeFriend(0)")
         check(wait(lambda: not q("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?", A, B)), "Remove unfollowed bob")
@@ -497,6 +616,15 @@ async def friends(port, ids, tokens, names, bob_sock):
         c.ui("clearPops();viewFollowers(1)")
         check(c.text_has("#genericPop", "Your followers") and c.text_has("#genericPop", names[1]) and
               c.count("#genericPop .reqFollB[onclick^='instaFollo']") == 1, "Your followers: bob, with Follow: %r" % c.textof("#genericPop"))
+        # a follower's picture: p<friendid>/profile.png always (hub-10.0.7.js:5366)
+        check(c.count("#genericPop .folPfp[src^='%s']" % pfp(B)) == 1, "bob's follower row loads p%d/profile.png" % B)
+        rgb = None
+        for _ in range(20):
+            rgb = c.pixel_at_centre("#genericPop .folPfp", "follower-pfp")
+            if near(rgb, PFP_RGB):
+                break
+            time.sleep(0.5)
+        check(near(rgb, PFP_RGB), "and draws his picture: %r" % (rgb,))
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?)", A, B)
         c.ui("clearPops();viewFollowing(1)")
         check(c.text_has("#genericPop", "You follow") and c.text_has("#genericPop", names[1]) and

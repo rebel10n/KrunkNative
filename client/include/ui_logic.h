@@ -768,6 +768,8 @@ void ui_loadout_clear_pops(void);                // clearPops
 void ui_loadout_reset_pops(void);                // resetPops (the popup holder stays up)
 int social_estimate_value(int skin);             // prices.estimateValue: kn_brain's sale prices, else data/prices.js (0 unknown)
 void social_set_estimates(const cJSON *rows); // v10 getPrices -> _36377: the server's [{ski, est}] (v10_market.c)
+// the hub's pfpUploaded: account id's picture changed at ms (epoch), so its p<id>/profile.png ?v= passes the hour (avatar_ui.c)
+void social_pfp_uploaded(int id, double ms);
 int  ui_police_active(void);                     // Officer Buddy is in the class preview
 const char *ui_police_class_name(void);          // his classN: "Deputy" / "Marshal" for an officer, else "Officer"
 int  ui_police_officer(void);                    // v10 isMod || isDeputy of the K.P.D's account (an official game: its krunker.io one)

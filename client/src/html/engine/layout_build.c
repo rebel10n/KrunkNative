@@ -290,6 +290,11 @@ static int replaced_intrinsics_unzoomed(LayoutTree *t, Box *b)
         if (b->src && ctx->image_size) {
             if (!ctx->image_size(ctx->user, b->src, ctx->base_url, &w, &h)) w = h = 0;
         }
+        size_t on_len = 0;
+        if (w <= 0 && h <= 0 && tag == LXB_TAG_IMG && ctx->image_error &&
+            (src ? src != key : lxb_dom_element_has_attribute(lxb_dom_interface_element(b->node), (const lxb_char_t *) "src", 3)) &&
+            elem_attr(b->node, "onerror", &on_len) && on_len)
+            ctx->image_error(ctx->user, b->node, b->src ? b->src : "", ctx->base_url);
         b->intrinsic_w = w; b->intrinsic_h = h;
         if (w <= 0 && h <= 0) {
             /* missing image: Chrome lays out 0x0 (no alt) unless attributes give a size */

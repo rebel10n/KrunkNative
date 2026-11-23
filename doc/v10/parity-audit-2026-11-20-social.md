@@ -141,9 +141,8 @@ social_ui.c, mods_ui.c and kn_brain.
   "Potential Earnings" (the listings' prices). hub_creator_e2e.
 - The hub's mod upload says "Loading..." and "Mod Uploaded!" (:6755-6773, 6829), and "Mod.zip size Limit
   Reached" for a .zip over the limit.
-- Left as they are: the pfp image of a follows row or post (`./img/player_pfp.png`; v10 builds a per-player
-  avatar URL that Box Office does not serve); the page titles ("Mods - Krunker Hub", ...); the badge tables
-  (served by kn_brain).
+- Left as they are: the page titles ("Mods - Krunker Hub", ...); the badge tables (served by kn_brain). The
+  per-player pictures were left here too, and are now fixed (see "Profile pictures" below).
 
 ## Upload Mod window (window 19), 2026-11-23
 
@@ -160,3 +159,44 @@ popup's markup: the game has its own form, and v10.0.7 decides. The flow is v10'
 
 As before, selectFile opens the platform file dialog, and the upload is chunked to kn_brain. hub_creator_e2e
 covers it: a stand-in file dialog, the size lines, and a publish landing in published_mods.
+
+The thumbnail preview showed a dark square. The cause: KN set the preview's src to `file://<path>`, and the
+engine's image cache refuses any URL with a scheme (image.c `image_resolve_url`). The img drew only its own
+`background: rgba(0,0,0,0.3)`. Its `onerror` did not run either: the native engine ran no img onerror handlers. v10
+reads the picked file with `FileReader.readAsDataURL` (deob-10.0.7.js:220973-220980; the hub's updateFile,
+hub-10.0.7.js:6786-6792). KN now does the same: the preview's src is a `data:image/png;base64,` URL of the file, in
+the window and in the hub popup. hub_creator_e2e checks the src and samples the preview's colour in a screenshot.
+
+## Profile pictures, 2026-11-23
+
+v10 builds a player's picture as `<userAssetsHost>/p<id>/profile.png?v=<the hour>` (config-BDN_kuhS.js:4749-4757,
+where the hour is the player's own upload time after an upload). kn_brain now serves that path from the approved
+profile pictures (doc/backend.md, user assets). The hub uses it wherever v10 does, with v10's conditions and
+fallbacks:
+- navbar #profileImg and the feed composer #postProf: premium, else the class icon / player_pfp.png (:2170, :3582,
+  :3608);
+- the profile's #socialPic: showPfp and a premium player, else the class icon ("a" for Kamile) (:2770);
+- posts and comments: `prm > 0` gives `pli`'s picture (:4944, :4948). The reply box shows the viewer's own picture
+  (:4977);
+- chat messages: always (:2311). Friend bubbles, the Friends list and startChat's picture: subscribers only, else
+  `src=''` (:2340, :5330);
+- follows rows: always (:5366, :5388);
+- the maps list's "is Playing" pictures (frndPlyingH, :6513-6533). This block was missing and is added. Box
+  Office's presence says "In game", not "playing <map>", so it shows only for a krunker.io account.
+
+A krunker.io account's hub uses user-assets.krunker.io. The account page's approval moves the own picture's `?v=`
+past the hour, as v10's pfpUploaded does.
+
+The native engine now runs `<img onerror>` (engine.c `img_errors_run`). It runs the handler when a load fails for
+good: `src=''`, a refused URL, an undecodable file, or a remote picture the fetcher gave up on (an HTTP 404). It
+does not run while a download is pending or while game content may still arrive. It runs the statements the pages
+use: `this.onerror=null`, `this.src='…'` and `this.style.<prop>='…'`. The remote fetcher accepts WebP (Box Office's
+pictures are WebP) and wakes the engine on a failure. This also gives the maps and mods lists their noimg.png
+fallback.
+
+showFriends is v10's: "Your Friends" with "N Total", `target='_blank'` names, "Remove Friend" and "You have no
+friends". The pictures' fallback is player_pfp.png, not favicon.png.
+
+Tests: brain_avatar_e2e (p<id>/profile.png under /user-assets and /api/user-assets: served when approved, 404
+otherwise) and hub_creator_e2e (a seeded approved WebP drawn in a chat message and a follower row; the 404 and
+`src=''` fallbacks).

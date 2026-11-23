@@ -9,6 +9,9 @@
  * and comes here when that host refuses it (Cloudflare answers 403 to some networks); the web client
  * always comes here: the host sends no CORS headers, so a page on krunk.io cannot read it.
  *
+ * p<id>/profile.png, the path Krunker's hub loads a player's picture from, is a Box Office player's approved profile
+ * picture (avatar.c avatar_serve_public), never fetched upstream: id is a Box Office account, not Krunker's player.
+ *
  * Not an open proxy: only the paths of shared/include/user_asset_path.h (an asset id, md<id> or
  * m<id>, and one of Krunker's file names), capped in size (user_asset_max_bytes), checked
  * (user_asset_content_ok: never an HTML block page), redirects not followed. Answers, in order:
@@ -41,6 +44,7 @@
 #include "user_assets.h"
 
 #include "asset_upload.h"
+#include "avatar.h"
 
 #include "brain.h"
 
@@ -559,13 +563,29 @@ static Slot *slot_for(const char *rel, const uint64_t now) {
     return old;
 }
 
+/* p<digits>: a player's picture folder (p<id>/profile.png); its id, else 0 */
+static long long pfp_player(const char *id) {
+    if (!id || id[0] != 'p' || !id[1] || strlen(id) > 12) return 0;
+    long long v = 0;
+    for (const char *c = id + 1; *c; c++) {
+        if (*c < '0' || *c > '9') return 0;
+        v = v * 10 + (*c - '0');
+    }
+    return v;
+}
+
 static void h_asset(kn_http_req *req, void *ud) {
     (void) ud;
+    const char *id = kn_http_param(req, "id"), *file = kn_http_param(req, "file");
+    const long long pfp = pfp_player(id);
+    if (pfp > 0 && file && !strcmp(file, "profile.png")) {
+        avatar_serve_public(req, pfp);
+        return;
+    }
     if (!C.enabled) {
         reply_status(req, 503);
         return;
     }
-    const char *id = kn_http_param(req, "id"), *file = kn_http_param(req, "file");
     char rel[UA_REL_MAX];
     if (!id || !file || snprintf(rel, sizeof(rel), "%s/%s", id, file) >= (int) sizeof(rel) || !user_asset_rel_ok(rel)) {
         reply_status(req, 404);

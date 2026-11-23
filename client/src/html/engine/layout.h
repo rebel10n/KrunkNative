@@ -80,6 +80,9 @@ typedef struct LayoutCtx {
     /* Intrinsic size of an <img>; return 0 when missing/undecodable.  The engine
      * binds image_get(); tests may stub it (image_get needs a GL context). */
     int (*image_size)(void *user, const char *url, const char *base, float *w, float *h);
+    /* An <img> with an onerror attribute whose src gave no size (url "" for src=""): the engine
+     * runs the handler when the load failed for good (engine.c img_error). NULL: never called. */
+    void (*image_error)(void *user, lxb_dom_node_t *node, const char *url, const char *base);
     /* Natural size of a <video> source (video.c: the .knv sidecar's header); 0 while
      * unknown (the box keeps 300 x 150 or its poster's size).  NULL: never known. */
     int (*video_size)(void *user, const char *url, const char *base, float *w, float *h);

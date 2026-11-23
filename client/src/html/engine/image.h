@@ -164,9 +164,14 @@ void image_cache_frame(ImageCache *cache);                           /* once per
  * animated GIFs follow; each starts at its first decode and shows the frame due then (image.c ImageAnim). */
 void image_cache_set_clock(ImageCache *cache, double now_ms);
 /* Game content arrived (asset_arrival_generation(), the native on-demand fetch): images that
- * failed with "file not found" and whose asset file exists now are probed again. Returns how many
- * load now (the caller relayouts / repaints). */
+ * failed with "file not found" and whose asset file exists now are probed again, and pending remote
+ * images the fetcher gave up on become errors (image_entry_error). Returns how many changed (the
+ * caller relayouts / repaints). */
 int  image_cache_retry_missing(ImageCache *cache);
+/* 1 when the entry is a failed load a browser would fire `error` for: an empty src, a rejected URL, an
+ * undecodable file, a remote image the fetcher refused or gave up on. 0 while it may still arrive (a
+ * pending download, game content not fetched yet) and for a loaded one. */
+int  image_entry_error(const ImageEntry *entry);
 /* How many images image_cache_retry_missing() has loaded so far. A paint that drew one before it loaded (a
  * placeholder, a pending remote picture) is stale: paint.c re-records the page when this moves. */
 unsigned image_cache_loads(const ImageCache *cache);

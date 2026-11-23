@@ -18,6 +18,11 @@
  *   DELETE /api/account/avatar  the owner removes the picture: {data: {deleted}}
  *   GET    /api/avatars/:id     the picture (image/webp, ETag, Cache-Control 300 s) when it is
  *               APPROVED; otherwise 404 NotFound. Nothing under review or refused is served.
+ *   GET    /user-assets/p<id>/profile.png (and /api/user-assets/...): the same picture at the path
+ *               Krunker's hub builds for a player's picture (<userAssetsHost>/p<id>/profile.png?v=<hour>,
+ *               hub-10.0.7.js / config-BDN_kuhS.js:4749-4757), answered by user_assets.c through
+ *               avatar_serve_public: the WebP bytes (the hub's <img> sniffs them), 404 without an
+ *               approved picture, so the page's onerror shows its default picture as on Krunker.
  *
  * Auth: the session token ("token" in the JSON body, Authorization: Bearer, or ?token=), resolved
  * through accounts_internal_call("token") like the Turf Wars routes.
@@ -559,6 +564,13 @@ static void on_public_row(kn_db_result *res, void *ud) {
     free(bytes);
 }
 
+void avatar_serve_public(kn_http_req *req, const long long id) {
+    if (!db_ready() || id <= 0) return reply_error(req, 404, "NotFound");
+    char idtxt[24];
+    snprintf(idtxt, sizeof(idtxt), "%lld", id);
+    kn_db_call(A.b->db, &P_AVATAR_PUBLIC, KN_DB_ARGS(idtxt), on_public_row, req);
+}
+
 static void h_public(kn_http_req *req, void *ud) {
     (void) ud;
     if (!db_ready()) return reply_error(req, 503, "AvatarsUnavailable");
@@ -566,9 +578,7 @@ static void h_public(kn_http_req *req, void *ud) {
     char *end = NULL;
     const long long id = raw && raw[0] ? strtoll(raw, &end, 10) : 0;
     if (id <= 0 || (end && *end)) return reply_error(req, 404, "NotFound");
-    char idtxt[24];
-    snprintf(idtxt, sizeof(idtxt), "%lld", id);
-    kn_db_call(A.b->db, &P_AVATAR_PUBLIC, KN_DB_ARGS(idtxt), on_public_row, req);
+    avatar_serve_public(req, id);
 }
 
 /* ---- module */
