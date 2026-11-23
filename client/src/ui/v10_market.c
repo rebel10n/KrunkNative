@@ -3155,10 +3155,26 @@ static void catalog_detail(StrBuf *sb) {
     // KrunkNative: the flat preview image instead of the 3D viewer iframe (no iframes in the engine)
     sb_appendf(sb, "<div class=\"items-detail-image svelte-dmu4q2%s\" style=\"border: 3px solid %s; background-image: url(%s);\"></div>", rarity_animate(s) ? " rainbow" : "", col, url);
     sb_append(sb, " <div class=\"items-detail-header-overlay svelte-dmu4q2\"><div class=\"items-detail-badges-top svelte-dmu4q2\">");
+    // the badge (deob-10.0.7.js:109675-109688, drawn at 109864-109873): Black Market; a limT's name in #41c300;
+    // Vaulted (not a paint: another season, or limited + noSpin outside the Item Shop); Limited (limited or blocked);
+    // the same rules as the Junkyard's item view (v10_junkyard.c item_view, deob-10.0.7.js:106727-106746)
     const int seas = s->seas ? s->seas : 1;
+    const cJSON *sj = ui_loadout_skin_json(index);
+    const cJSON *lim_t = cJSON_GetObjectItemCaseSensitive(sj, "limT");
+    const int limited = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sj, "limited")),
+              no_spin = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sj, "noSpin"));
+    const cJSON *item_shop = cJSON_GetObjectItemCaseSensitive(sj, "itemShop");
+    const int in_shop = item_shop && !cJSON_IsNull(item_shop) && !cJSON_IsFalse(item_shop) && !(cJSON_IsNumber(item_shop) && item_shop->valuedouble == 0);
     if (econ_black_market_find(index)) sb_append(sb, "<span class=\"items-detail-badge svelte-dmu4q2\" style=\"background-color: #00ffff;\">Black Market</span>");
-    else if (s->type != 18 && seas != g_viewer_current_season) sb_append(sb, "<span class=\"items-detail-badge svelte-dmu4q2\" style=\"background-color: #666666;\">Vaulted</span>");
-    else if (s->flags & VS_BLOCKED) sb_append(sb, "<span class=\"items-detail-badge svelte-dmu4q2\" style=\"background-color: #faa332;\">Limited</span>");
+    else if (cJSON_IsString(lim_t) && lim_t->valuestring[0]) {
+        sb_append(sb, "<span class=\"items-detail-badge svelte-dmu4q2\" style=\"background-color: #41c300;\">");
+        sb_append_esc(sb, lim_t->valuestring);
+        sb_append(sb, "</span>");
+    } else if (s->type != 18 && (seas != g_viewer_current_season || (limited && no_spin && !in_shop)))
+        sb_append(sb, "<span class=\"items-detail-badge svelte-dmu4q2\" style=\"background-color: #666666;\">Vaulted</span>");
+    else if (limited || (s->flags & VS_BLOCKED))
+        sb_append(sb, "<span class=\"items-detail-badge svelte-dmu4q2\" style=\"background-color: #faa332;\">Limited</span>");
+    else sb_append(sb, "<!---->");
     sb_append(sb, " ");
     if (s->type != 18) sb_appendf(sb, "<span class=\"items-detail-season svelte-dmu4q2\">Season %d</span>", seas);
     sb_append(sb, " ");

@@ -66,6 +66,19 @@ int game_presence_get(int64_t account_id, char *game_id, size_t n, int *password
     return p != NULL;
 }
 
+int game_presence_status(const int64_t account_id, char *sm, const size_t n, char *game_id, const size_t gn) {
+    char gid[MM_GAME_ID_MAX] = "";
+    const int in_game = game_presence_get(account_id, gid, sizeof gid, NULL);
+    if (game_id && gn) snprintf(game_id, gn, "%s", in_game ? gid : "");
+    if (sm && n) sm[0] = 0;
+    if (!in_game) return 0;
+    Brain *b = brain_get();
+    MmNode *node = NULL;
+    const MmLobby *l = gid[0] && b && b->registry ? registry_lobby(b->registry, gid, &node) : NULL;
+    if (l && l->map[0] && sm && n) snprintf(sm, n, "playing %s", l->map);
+    return 1;
+}
+
 /* ---------------------------------------------------------------- pushes to friends */
 
 typedef struct PushCtx {

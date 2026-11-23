@@ -137,6 +137,23 @@ class Client:
             time.sleep(0.3)
         return False
 
+    def rect(self, elem_id, timeout=6.0):
+        """(x, y, w, h) of #elem_id, None without a box"""
+        end = time.time() + timeout
+        while time.time() < end:
+            mark = len(self.text())
+            self.cmd("rect " + elem_id)
+            t0 = time.time()
+            while time.time() - t0 < 1.5:
+                m = re.search(r"#%s rect ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)" % re.escape(elem_id), self.text()[mark:])
+                if m:
+                    return tuple(float(v) for v in m.groups())
+                if "#%s: no box" % elem_id in self.text()[mark:]:
+                    break
+                time.sleep(0.1)
+            time.sleep(0.3)
+        return None
+
     def ui(self, calls):
         self.cmd("ui " + calls)
         time.sleep(0.4)
@@ -189,6 +206,17 @@ def scenario(port, ids, tokens, names):
         c.ui("clearPops()")
         c.click("tradeBtn")
         check(c.has("invList0") and c.has("trd_inv_0_4") and c.has("trd_inv_1_3"), "Trade opens both inventories")
+        # a trade item's createTip (hub-10.0.7.js:5470, 6839-6849, 6866-6876): the tooltip above the item, its top
+        # item.top - (tip.height + 5) - 4 and its left the item's, both from getBoundingClientRect
+        item = c.rect("trd_inv_0_4")
+        if item:
+            c.cmd("move %.0f %.0f" % (item[0] + item[2] / 2, item[1] + item[3] / 2))
+        tip = c.rect("knTip") if item else None
+        check(item and tip and abs(tip[1] - (item[1] - tip[3] - 9)) <= 1 and abs(tip[0] - item[0]) <= 1,
+              "the trade item's tooltip sits 9 px above it, left-aligned (v10's createTip): item %r tip %r" % (item, tip))
+        c.shot("trade-tip")
+        c.cmd("move 5 5")
+        check(wait(lambda: c.rect("knTip", 1.0) is None, 6), "cancelTip on mouseout removes it")
         c.click("trd_inv_0_4")
         c.click("trd_inv_1_3")
         check(c.has("trd_0_4") and c.has("trd_1_3"), "items added to both trade lists")

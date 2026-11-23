@@ -623,6 +623,16 @@ static kn_db_result *run_profile(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_PROFILE = {"profile", PROFILE_SQL_PG, run_profile};
 
+/* P_PROFILE_MATCHES(player_id): the profile's match_history / matchHistory (deob-10.0.7.js:113207-113221,
+ * hub-10.0.7.js:2758), C on every driver (ranked.c db_ranked_profile_history) */
+static kn_db_result *run_profile_matches(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t id = n > 0 && p[0] ? strtoll(p[0], NULL, 10) : 0;
+    cJSON *a = id > 0 ? db_ranked_profile_history(&x, id, 0) : cJSON_CreateArray();
+    return dbx_json(&x, "jsonb_build_array", a ? a : cJSON_CreateArray());
+}
+const kn_proc P_PROFILE_MATCHES = {"profile_matches", NULL, run_profile_matches};
+
 static kn_db_result *run_map_page(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     cJSON *o = dbx_row(&x,

@@ -182,7 +182,8 @@ fallbacks:
   `src=''` (:2340, :5330);
 - follows rows: always (:5366, :5388);
 - the maps list's "is Playing" pictures (frndPlyingH, :6513-6533). This block was missing and is added. Box
-  Office's presence says "In game", not "playing <map>", so it shows only for a krunker.io account.
+  Office's presence said "In game", not "playing <map>", so it showed only for a krunker.io account (fixed in
+  round 9: the presence now says "playing <map>").
 
 A krunker.io account's hub uses user-assets.krunker.io. The account page's approval moves the own picture's `?v=`
 past the hour, as v10's pfpUploaded does.
@@ -604,3 +605,133 @@ Each of these was compared line by line against hub-10.0.7.js, and every gap fou
 - **The profile's `sm`.** It reads "In game", not v10's "playing <map>".
 - **The gift popup's prefill.** v10 prefills "I like your <map> mod/map" from a creation's Gift. Not ported.
 - **createTip's vertical position** on trade items is not checked against v10.
+
+## Hub round 9, 2026-11-23
+
+Round 9 closes round 8's open items.
+
+### Match History
+
+**Which matches.** v10 reads only ranked history. Every `getMatchHistory` call passes `isRanked` true
+(deob-10.0.7.js:99311, hub-10.0.7.js:946). The game server builds `historyEntries` for every match
+(deob-10.0.7.js:190354-190560), but nothing reads them unranked. Box Office records ranked matches, as before
+(`mm_ranked_matches`, `mm_ranked_match_players`), so no migration is needed.
+
+**The shape.** `/match-history` and `/mm/ranked/history` match rows are `{map, date, region, score_alpha,
+score_bravo, historyEntries[]}`. Each entry is `{player_name, team (1 Alpha / 2 Bravo), score, kills, deaths,
+assists, objective_score, damage_done, rank, mmr_change}`. `region` is now v10's index (1 oc .. 5 sa,
+deob-10.0.7.js:16465-16471), not the code, because the component draws `regions[region].toUpperCase()`.
+
+**The profiles.** The profiles now carry the account's latest 20 finished ranked matches, every season and
+region, newest first:
+- the hub's `row.matchHistory` (profiles.c);
+- GET /players' `match_history` (social_gapi.c).
+
+Both come from a new proc, `P_PROFILE_MATCHES` (db_social.c → ranked.c `db_ranked_profile_history`). Each
+entry's rank is from that player's ranked profile for the match's season and region. The field is the
+component's `data` prop, so it is an array: it is sliced and counted (deob-10.0.7.js:110369-110381). v10's
+server is not shipped, so the count of 20 is Box Office's.
+
+**The component.** The component (svelte-1irqx9a, deob-10.0.7.js:110336-110640) is now one renderer,
+`client/src/ui/match_history.c`, shared by all three places that mount it:
+
+| Mount | Props | Source |
+|---|---|---|
+| Ranked popup | none: fetches pages of 5, pagination when there is more than one | deob-10.0.7.js:114115 |
+| In-game profile tab | `data = match_history`, pageSize 5, pagination always; "No recent matches." when empty | deob-10.0.7.js:113205-113221 |
+| Hub Stats tab | `data = matchHistory`, hasPagination false, showRegion true | hub-10.0.7.js:2376-2392 |
+
+What the renderer follows from v10:
+- **The viewer's own entry** (`player_name === playerName`) gives the rank, KDA, score, rating and WIN / LOSS.
+  The score line puts the viewer's team first. A missing entry or `mmr_change` field shows "0 Rating"
+  (`0 !== mine?.mmr_change`).
+- **The sort.**
+  - It is kept per match and applied again to the already sorted list. The sort is stable.
+  - At load it is score ascending, toggled once, so the scoreboard starts by score, descending.
+  - A click on the sorted ascending column turns it descending. A click on any other column sorts ascending
+    (deob-10.0.7.js:110410-110428).
+  - K/D compares `parseFloat(entry.kd)`, which is NaN, so the order stays and only the arrow moves.
+- **The clicks.** A click inside the scoreboard stops there. Previous / Next play `playTick(0.5)`.
+- **Leaving the tab.** Changing page, or leaving and coming back to the tab, builds the list again: collapsed,
+  with the default sort.
+
+The old renderers had bugs, now fixed:
+- The hub read rank and rating from the match, not the viewer's entry. It printed the region code raw and
+  sorted a new column descending.
+- In the ranked popup, a click on the scoreboard collapsed the match.
+- The in-game profile tab always said "No recent matches."
+
+Kept from KrunkNative: when the entries lack the viewer's name (a renamed account), the brain's rows still carry
+the viewer's own line at the top level, and that is shown.
+
+### Market item-detail tag badge
+
+v10_market.c's item detail (deob-10.0.7.js:109675-109688) now follows the Junkyard's rules (v10_junkyard.c):
+1. Black Market `#00ffff`;
+2. a `limT` name on `#41c300`;
+3. Vaulted `#666666` (not a paint: another season, or limited + noSpin outside the Item Shop);
+4. Limited `#faa332` (limited or blocked);
+5. otherwise no badge.
+
+### Presence: "playing <map>"
+
+The brain's presence now says `sm = "playing <map name>"`. It reads the map name of the friend's lobby from the
+registry (game_presence_status). Before, it said "In game". It is used by:
+- the hub's friends (`chtb`);
+- the chat header (`chs`);
+- the profile row.
+
+v10's hub shows it in three places: the chat bubble's tooltip (hub-10.0.7.js:2341), the Friends popup's line
+(:5333), and the maps list's "is Playing" pictures. The maps list matches `sm.replace("playing ", "")`
+against the map's name (:6520), so those pictures now show for Box Office accounts too. A friend in a lobby the
+registry does not know has a game id but no `sm`, so it shows "Online". v10's profile header shows only the
+online dot (:2777).
+
+### Gift popup
+
+- **Hub: `giftPopup(kind)`** (hub-10.0.7.js:5736-5750).
+  - A truthy kind (`?autoGift`) prefills the message: "I like your <mn> mod" when `kind == 1`, "... map"
+    otherwise.
+  - `mn` is the URL's `?mn=` when it holds only `[\w_\-.!]` (getParam, :2000-2006). Otherwise it is "", so the
+    message has two spaces.
+  - Without a kind, the message shows its placeholder.
+- **In game: `openPlayerProfile(name, {autoGift, assetName})`** (deob-10.0.7.js:112032-112038,
+  112331-112334, 222757).
+  - Once the profile load has settled, failed or not, the gift view opens for that name.
+  - Its message is "I like your <assetName> mod" (`autoGift === 1`) or "... map". Without a name it is
+    "I like your mod" / "I like your map".
+  - KrunkNative's handlers take the options as arguments: `openPlayerProfile(name, autoGift, assetName)`.
+- **The vote panels' tip link** (creation_vote.c) passes autoGift 2 with the map's name (:226239), and
+  autoGift 1 with the mod's name (:225878). Its wording is still Box Office's.
+- The profile's own Gift KR button opens the view with an empty message (:111931-111933).
+
+### Trade tooltips
+
+A trade item's createTip uses the page helper's formula (hub-10.0.7.js:5470, 6839-6849):
+- top `= item.top - (tip.height + 5) - 4`;
+- left `= item.left`.
+
+ui_tooltip.c already used this formula. economy_hub_e2e now measures it on a trade inventory item.
+
+One difference was found and fixed: the hub's createTip shows no tooltip for a free item (:6868-6870), but
+the hub drew one. It no longer does. The game page's helper, which does show free items in light grey, is
+unchanged.
+
+### Tests
+
+- **hub_creator_e2e:**
+  - bob's ranked match on the Stats tab: WIN 3 - 1, his KDA, score and rating, region NA, Gold 1 from his
+    entry, no pagination;
+  - the scoreboard: score descending, Damage ascending, K/D keeps the order;
+  - the gift prefill: map, and a bad `mn`;
+  - `giftPopup()` with its placeholder.
+- **v10_social_e2e:**
+  - carol's match on the in-game profile tab: LOSS 1 - 3 with her team first, her KDA and rating, Page 1 of 1;
+  - the scoreboard's sorts;
+  - `openPlayerProfile(name, 1, 'Neon')`, whose gift view reads "I like your Neon mod".
+- **economy_hub_e2e:** the trade item tooltip's position, and cancelTip.
+- **ranked_test, v10_api_account_test:** the history's region index (and its historyEntries).
+- **creation_vote_test:** the tip link's autoGift arguments.
+
+**Still open.** None of round 8's items.
+

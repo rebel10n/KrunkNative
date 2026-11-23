@@ -38,6 +38,7 @@
 #include <weapons.h>
 #include <badges.h>     // the profile's Badges tab and selected badge (badge_get / badge_texture)
 #include <ranked.h>     // the profile's rank chip (ranked_rank_name / color / icon)
+#include <match_history.h> // the profile's Match History tab: v10's MatchHistory component (svelte-1irqx9a)
 #include <ui_tooltip.h> // the Badges tab's tooltip
 #include "../viewer/viewer_store.h" // the Creations tab's Skins: the store table and its rarities
 #include <ctype.h>
@@ -120,6 +121,9 @@ typedef struct {
     int sales_range;
     cJSON *sales, *listings, *feed, *reports; // owned
     int sales_loading, listings_loading, feed_loading, reports_loading;
+    MhState mh;          // the Match History tab's component (a new one each time the tab shows)
+    int auto_gift;       // openPlayerProfile's autoGift: 1 a mod's creator, 2 a map's (0 none)
+    char asset_name[64]; // its assetName: the mod / map
     // clan view
     int applied, apply_busy;
     char apply_error[128];
@@ -1854,6 +1858,28 @@ static void profile_reports_load(View *v) {
     render_views();
 }
 
+// the profile's MatchHistory props (deob-10.0.7.js:113210-113219)
+static MhOpts profile_mh_opts(const View *v) {
+    return (MhOpts){.player = jstr(v->data, "player_name"), .has_pagination = 1, .with_data = 1, .page_size = 5,
+                    .fn_match = "v10sMhMatch", .fn_sort = "v10sMhSort", .fn_page = "v10sMhPage"};
+}
+
+static void gift_open(const char *who, const char *message);
+
+// the profile's autoGift (deob-10.0.7.js:112032-112038, 112331-112334): once the load settled, failed or not, the
+// gift view for the name it was opened with, its message "I like your <assetName> mod" (autoGift === 1) or
+// "... map", "I like your mod" / "map" without a name
+static void profile_auto_gift(View *v) {
+    if (!v->auto_gift) return;
+    const char *kind = v->auto_gift == 1 ? "mod" : "map";
+    char who[64], message[160];
+    snprintf(who, sizeof(who), "%s", v->name);
+    if (v->asset_name[0]) snprintf(message, sizeof(message), "I like your %s %s", v->asset_name, kind);
+    else snprintf(message, sizeof(message), "I like your %s", kind);
+    v->auto_gift = 0;
+    gift_open(who, message);
+}
+
 static void profile_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
     View *v = view_of(tag);
     if (!v) return;
@@ -1872,12 +1898,17 @@ static void profile_done(const int status, const cJSON *data, const cJSON *error
         v->feed_loading = gapi("GET", path, NULL, profile_feed_done, tag);
     }
     render_views();
+    profile_auto_gift(v);
 }
 
-static void open_profile(const char *name) {
+// window.openPlayerProfile(name, {autoGift, assetName}) (deob-10.0.7.js:222757-222760): KrunkNative's handlers take
+// the options as arguments, openPlayerProfile(name, autoGift, assetName)
+static void open_profile(const char *name, const int auto_gift, const char *asset_name) {
     if (!name || !name[0]) return;
     View *v = view_push(V_PROFILE);
     snprintf(v->name, sizeof(v->name), "%s", name);
+    v->auto_gift = auto_gift;
+    snprintf(v->asset_name, sizeof(v->asset_name), "%s", asset_name ? asset_name : "");
     v->loading = 1;
     v->sales_range = 3;
     char enc[160], path[200];
@@ -1886,6 +1917,9 @@ static void open_profile(const char *name) {
     if (!gapi("GET", path, NULL, profile_done, view_tag(v)) && !S.scenario) {
         v->loading = 0;
         snprintf(v->error, sizeof(v->error), "Failed to load profile.");
+        render_views();
+        profile_auto_gift(v); // the load settled (failed)
+        return;
     }
     render_views();
 }
@@ -2344,7 +2378,16 @@ static void sb_profile_right(StrBuf *sb, View *v) {
     case 3: sb_profile_badges(sb, d); break;
     case 4: sb_profile_titles(sb, d); break;
     case 5: sb_profile_creations(sb, v); break;
-    case 6: sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No recent matches.</div>"); break;
+    case 6: { // Match History (deob-10.0.7.js:113205-113221): none -> "No recent matches.", else the MatchHistory
+              // component with data = match_history, playerName = the profile's, pages of 5 (match_history.c)
+        const cJSON *mh = cJSON_GetObjectItem(d, "match_history");
+        if (!cJSON_GetArraySize(mh)) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No recent matches.</div>");
+        else {
+            const MhOpts o = profile_mh_opts(v);
+            mh_html(sb, mh, &v->mh, &o);
+        }
+        break;
+    }
     case 7: { // Reports (v10 "Reports", developers and moderators): the reports of this player, newest first
         if (v->reports_loading) sb_append(sb, "<div class=\"profile-detail-loading-inline svelte-1hghrmf\"><i class=\"material-icons spin svelte-1hghrmf\">hourglass_empty</i></div>");
         else if (!cJSON_GetArraySize(v->reports)) sb_append(sb, "<div class=\"profile-detail-empty svelte-1hghrmf\">No reports.</div>");
@@ -3358,6 +3401,17 @@ static void social_frame_send(const char *label, cJSON *a1, cJSON *a2, cJSON *a3
     cJSON_Delete(f);
 }
 
+// the gift view (_36860, deob-10.0.7.js:111709-111760): amount 100, the message initialMessage
+static void gift_open(const char *who, const char *message) {
+    char name[64];
+    snprintf(name, sizeof(name), "%s", who ? who : ""); // who may live in a view view_push drops
+    View *g = view_push(V_GIFT);
+    snprintf(g->name, sizeof(g->name), "%s", name);
+    snprintf(g_gift_amount, sizeof(g_gift_amount), "100");
+    snprintf(g_gift_msg, sizeof(g_gift_msg), "%s", message ? message : "");
+    render_views();
+}
+
 static void gift_send(View *v) {
     const long long amt = atoll(g_gift_amount);
     v->error[0] = 0;
@@ -3521,7 +3575,23 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "openPlayerProfile")) {
-        open_profile(arg_str(args, argc, 0));
+        open_profile(arg_str(args, argc, 0), argc > 1 ? (int) arg_num(args, argc, 1, 0) : 0, argc > 2 ? arg_str(args, argc, 2) : "");
+        return 1;
+    }
+    // the profile's Match History: a match opens / closes, a header sorts its scoreboard, Previous / Next
+    if (!strcmp(name, "v10sMhMatch") || !strcmp(name, "v10sMhSort") || !strcmp(name, "v10sMhPage")) {
+        View *v = top_view();
+        if (!v || v->type != V_PROFILE || !v->data) return 1;
+        const cJSON *mh = cJSON_GetObjectItem(v->data, "match_history");
+        const MhOpts o = profile_mh_opts(v);
+        if (name[6] == 'M') mh_toggle(&v->mh, (int) arg_num(args, argc, 0, -1));
+        else if (name[6] == 'S') {
+            mh_sort(&v->mh, mh, &o, (int) arg_num(args, argc, 0, -1), (int) arg_num(args, argc, 1, -1));
+            html_ui_stop_propagation();
+        } else {
+            if (!mh_page(&v->mh, mh, &o, (int) arg_num(args, argc, 0, 0))) return 1;
+        }
+        render_views();
         return 1;
     }
     if (!strcmp(name, "openClanView")) {
@@ -3728,6 +3798,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         view_pop();
     } else if (!strcmp(op, "ptab") && v && v->type == V_PROFILE) {
         v->tab = (int) arg_num(args, argc, 1, 0);
+        if (v->tab == 6) mh_reset(&v->mh); // the tab mounts a new MatchHistory
         if (v->tab != 3) ui_tooltip_cancel(); // leaving Badges drops its tooltip (deob-10.0.3.js:126021-126025)
         if (v->tab == 2 && !v->sales) profile_sales_load(v);
         if (v->tab == 7 && !v->reports && !v->reports_loading && v->data) profile_reports_load(v);
@@ -3796,11 +3867,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     } else if (!strcmp(op, "gift") && v && v->type == V_PROFILE && v->data) {
         char who[64];
         snprintf(who, sizeof(who), "%s", jstr(v->data, "player_name"));
-        View *g = view_push(V_GIFT);
-        snprintf(g->name, sizeof(g->name), "%s", who);
-        snprintf(g_gift_amount, sizeof(g_gift_amount), "100");
-        g_gift_msg[0] = 0;
-        render_views();
+        gift_open(who, ""); // the profile's Gift KR: {playerName} (deob-10.0.7.js:111931-111933)
     } else if (!strcmp(op, "giftsend") && v && v->type == V_GIFT) {
         gift_send(v);
     } else if (!strcmp(op, "report") && v && v->type == V_PROFILE && v->data) {

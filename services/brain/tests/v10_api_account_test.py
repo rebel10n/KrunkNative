@@ -192,8 +192,9 @@ def is_history(d):
         return False
     m = ms[0]
     entries = m.get("historyEntries") or []
+    # region: v10's index (eu 3), the component draws regions[region].toUpperCase() (deob-10.0.7.js:16465-16471, 110495)
     return (m.get("map") == 3 and m.get("score_alpha") == 3 and m.get("score_bravo") == 1 and m.get("mmr_change") == 20
-            and sorted(e.get("player_name") for e in entries) == ["alice", "bob"])
+            and m.get("region") == 3 and sorted(e.get("player_name") for e in entries) == ["alice", "bob"])
 
 
 def is_empty_history(d):

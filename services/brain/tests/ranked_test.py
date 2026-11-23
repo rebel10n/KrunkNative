@@ -301,6 +301,10 @@ async def scenario(pa, pb, pc, node, v7_seeded):
     m = (h.get("matchHistory") or {}).get("matches", [{}])[0] if code == 200 else {}
     check(code == 200 and m.get("mmr_change", 0) > 0 and m.get("victory") == 1 and m.get("map") == cfg["maps"][0] and m.get("map_name"),
           "match history: the match with its mmr_change (%s)" % {k: m.get(k) for k in ("mmr_change", "victory", "map_name")})
+    mine = [e for e in m.get("historyEntries", []) if e.get("player_name") == alice["name"]]
+    check(m.get("region") == 4 and len(m.get("historyEntries", [])) == 8 and mine and mine[0].get("mmr_change") == m.get("mmr_change"),
+          "match history in v10's shape: region as its index (na 4, deob-10.0.7.js:16465-16471), 8 historyEntries with alice's "
+          "mmr_change (%s)" % {k: m.get(k) for k in ("region", "mmr_change")})
     code, other_region = profile(pa, alice, region="eu")
     check(code == 200 and other_region["profile"]["total_matches"] == 0, "the eu profile is separate")
 

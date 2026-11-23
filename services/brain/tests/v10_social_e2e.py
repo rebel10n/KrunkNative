@@ -132,6 +132,27 @@ class Client:
     def click(self, elem_id):
         self.cmd("clickid " + elem_id); time.sleep(0.5)
 
+    def textof(self, elem_id, timeout=4.0):
+        m = self.mark()
+        self.cmd("textof " + elem_id)
+        if not self.wait_line("[ui_cmds] textof %s = '" % elem_id, m, timeout): return None
+        found = re.search(r"\[ui_cmds\] textof %s = '(.*)'" % re.escape(elem_id), self.text()[m:])
+        return found.group(1) if found else None
+
+    def value(self, elem_id, timeout=4.0):
+        m = self.mark()
+        self.cmd("value " + elem_id)
+        if not self.wait_line("value %s = '" % elem_id, m, timeout): return None
+        found = re.search(r"value %s = '(.*)'" % re.escape(elem_id), self.text()[m:])
+        return found.group(1) if found else None
+
+    def count(self, sel, timeout=4.0):
+        m = self.mark()
+        self.cmd("count " + sel)
+        if not self.wait_line("count %s = " % sel, m, timeout): return -1
+        found = re.search(r"count %s = (\d+)" % re.escape(sel), self.text()[m:])
+        return int(found.group(1)) if found else -1
+
     def chat_has(self, needle, timeout=10.0):
         """#chatList's text (textof) contains needle: the in-game chat lines (v10 _49706 / _49707)."""
         end = time.time() + timeout
@@ -190,6 +211,13 @@ def main():
         q("INSERT INTO clan_members (account_id, clan_id, rank, score) VALUES (?, ?, 3, 5000)", a, cid)
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?), (?, ?)", a, b, b, a)
         q("INSERT INTO chat_messages (sender_id, receiver_id, body) VALUES (?, ?, 'see you in game')", b, a)
+        # carol's ranked match (the profile's Match History, P_PROFILE_MATCHES): Alpha 3 - 1, carol on Bravo with alice
+        q("INSERT INTO mm_ranked_matches (match_id, queue_id, region, brain_id, status, result, finished_at, season, map_index, mode_index)"
+          " VALUES ('v10sm1', 'q', 'eu', 'b', 'done', ?, strftime('%Y-%m-%d %H:%M:%f', 'now'), 9, 2, 0)",
+          json.dumps({"teamScores": [3, 1], "winner": 0, "players": [{"accountId": c, "objective": 7}]}))
+        q("INSERT INTO mm_ranked_match_players (match_id, account_id, username, team, rating_key, rating_before, rating_after, kills, deaths, assists,"
+          " score, damage_done, victory) VALUES ('v10sm1', ?, ?, 0, 'v10', 1000, 1030, 25, 10, 3, 3300, 4000, 1),"
+          " ('v10sm1', ?, ?, 1, 'v10', 1000, 982, 12, 20, 2, 1800, 2100, 0)", a, names[0], c, names[2])
         A, B = Client(names[0], tokens[0], "alice"), Client(names[1], tokens[1], "bob")
         clients = [A, B]
         check(A.has("menuBtnSocial"), "the v10 main page is up (#menuBtnSocial)")
@@ -243,6 +271,31 @@ def main():
         A.click("v10sPtab7")  # Reports (moderators): gapi GET /players/<name>/reports
         check(A.has("v10sReport0"), "the Reports tab lists the report")
         A.shot("profile-reports")
+        # Match History (deob-10.0.7.js:113205-113221): GET /players' match_history in v10's MatchHistory, carol's line
+        A.click("v10sPtab6")
+        time.sleep(0.8)
+        mh = A.textof("v10sProfile") or ""
+        check(A.count(".match-entry.loss") == 1 and "LOSS" in mh and "1 - 3" in mh and "KDA: 12/20/2" in mh and "Score: 1800" in mh
+              and "-18 Rating" in mh, "Match History: carol's match, LOSS 1 - 3 (her team first), her KDA, score and rating: %r" % mh[-260:])
+        check(A.count(".match-region") == 0 and A.count(".pagination .page-info") == 1 and "Page 1 of 1" in mh,
+              "the profile's component: no region, pagination (data, hasPagination)")
+        A.ui("v10sMhMatch(0)")
+        rows = A.textof("v10sProfile") or ""
+        check(A.count(".match-details .table-row.current-player") == 1 and rows.find(names[0]) < rows.rfind(names[2]),
+              "a match opens into its scoreboard, score descending (alice 3300 above carol 1800)")
+        A.ui("v10sMhSort(0,2)")  # Kills: a new column sorts ascending (deob-10.0.7.js:110416)
+        rows = A.textof("v10sProfile") or ""
+        check(rows.rfind(names[2]) < rows.rfind(names[0]) and "Kills \u2191" in rows,
+              "Kills sorts ascending first (carol 12 above alice 25), its arrow up")
+        A.shot("profile-match-history")
+        A.ui("v10s('back')")
+        # openPlayerProfile(name, {autoGift: 1, assetName}) (deob-10.0.7.js:112032-112038, 112331-112334): the gift view
+        # opens over the profile with "I like your <mod> mod"
+        A.ui("openPlayerProfile('%s',1,'Neon')" % names[2])
+        check(A.has("v10sGiftWin", 10.0) and A.value("v10sGiftMsg") == "I like your Neon mod",
+              "autoGift 1: the gift view's message is \"I like your Neon mod\": %r" % A.value("v10sGiftMsg"))
+        A.ui("v10s('back')")
+        A.ui("v10s('back')")
         A.ui("v10s('back')")
         A.click("v10sTab1")
         peer = peer_session(names[2], tokens[2], names[0], 8.0)

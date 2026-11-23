@@ -353,6 +353,13 @@ def staff_profile(port, ids, tokens, names):
     q("UPDATE players SET player_stats = json_set(player_stats, '$.bdg', 29) WHERE player_id = ?", B)
     # season 9 (brain.ranked.season), placed (6 matches), 1000 + 100 * 3.5 = 1350: Gold 1 (rankedRank 7)
     q("INSERT INTO ranked_profiles (account_id, season, region, cr, wins, losses) VALUES (?, 9, 'na', '3.5', 4, 2)", B)
+    # bob's ranked match, the Match History tab's t.matchHistory (P_PROFILE_MATCHES): Alpha (bob) 3 - 1 Bravo (alice), NA
+    q("INSERT INTO mm_ranked_matches (match_id, queue_id, region, brain_id, status, result, finished_at, season, map_index, mode_index)"
+      " VALUES ('knr9m1', 'q', 'na', 'b', 'done', ?, strftime('%Y-%m-%d %H:%M:%f', 'now'), 9, 2, 0)",
+      json.dumps({"teamScores": [3, 1], "winner": 0, "players": [{"accountId": B, "objective": 5}]}))
+    q("INSERT INTO mm_ranked_match_players (match_id, account_id, username, team, rating_key, rating_before, rating_after, kills, deaths, assists,"
+      " score, damage_done, victory) VALUES ('knr9m1', ?, ?, 0, 'v10', 1000, 1024, 22, 15, 4, 3100, 3080, 1),"
+      " ('knr9m1', ?, ?, 1, 'v10', 1000, 980, 30, 12, 1, 2500, 2600, 0)", B, names[1], A, names[0])
     # the Raids tab's t.raidStats (raid_stats): Tortuga (18) 2 of 3 cleared
     q("INSERT INTO raid_stats (account_id, map_id, completions, attempts, best_time, ai_kills, boss_kills, deaths) VALUES (?, 18, 2, 3, 95000, 40, 2, 5)", B)
     # a clan with a Discord invite (the clan page's clan_link4)
@@ -375,9 +382,10 @@ def staff_profile(port, ids, tokens, names):
         check(wait(lambda: not q("SELECT 1 FROM feature_bans WHERE account_id = ? AND feature = 'chat' AND revoked_at IS NULL", B)),
               "Chat Unban revoked it")
         badges(c)
-        profile_stat_tabs(c)
+        profile_stat_tabs(c, names)
         settings_popup(c)
         premium_gift(c, names)
+        gift_prefill(c, names)
         clan_page(c)
     finally:
         c.close()
@@ -405,7 +413,7 @@ def badges(c):
     check(wait(lambda: c.count(".tooltip") == 0, 5), "cancelTip on mouseout removes it")
 
 
-def profile_stat_tabs(c):
+def profile_stat_tabs(c, names):
     """v10's six stat tabs (hub-10.0.7.js:2840-2850): Raids from t.raidStats (:2903-2948), Match History (:2950)"""
     check([c.textof("#statTab%d" % i) for i in range(6)] == ["General Stats", "Killstreaks", "Other Stats", "Class Stats", "Raids", "Match History"]
           and c.count("#statTab6") == 0, "the stat tabs: v10's six, no Season tab")
@@ -414,7 +422,27 @@ def profile_stat_tabs(c):
     check("Totals2/3 (67%)" in raids and "AI Kills40" in raids and "Boss Kills2" in raids and "Deaths5" in raids and "Tortuga" in raids,
           "the Raids tab sums the profile's raid_stats: %r" % raids[:160])
     c.ui("switchStat(5)")
-    check(c.text_has("#matchHistoryContainer", "No match history available.", 5), "Match History: none recorded")
+    # Match History (hub-10.0.7.js:2376-2392): {data: t.matchHistory, playerName, hasPagination: false, showRegion: true}
+    check(c.text_has("#matchHistoryContainer", "WIN", 10), "Match History: bob's ranked match: %r" % c.textof("#matchHistoryContainer"))
+    mh = c.textof("#matchHistoryContainer") or ""
+    check(c.count("#matchHistoryContainer .match-entry.win") == 1 and "3 - 1" in mh and "KDA: 22/15/4" in mh and "Score: 3100" in mh
+          and "+24 Rating" in mh, "bob's line: WIN 3 - 1, his KDA, score and rating (his own entry): %r" % mh)
+    check(c.text_has("#matchHistoryContainer .match-region", "NA") and "Gold 1" in mh
+          and c.count("#matchHistoryContainer .rank-icon[src$='rank_gold.svg'][alt='7']") == 1,
+          "the region (index 4: NA) and bob's rank from his entry (Gold 1, alt 7)")
+    check(c.count("#matchHistoryContainer .pagination") == 0, "no pagination (hasPagination false)")
+    c.ui("knPmMatch(0)")
+    rows = c.textof("#matchHistoryContainer .match-details") or ""
+    check(c.count("#matchHistoryContainer .match-details tbody .table-row") == 2 and rows.find(names[1]) < rows.find(names[0])
+          and "Score \u2193" in rows, "opened: the scoreboard by score, descending (bob 3100 above alice 2500): %r" % rows)
+    c.ui("knPmSort(0,7)")  # Damage: a new column sorts ascending (deob-10.0.7.js:110416)
+    rows = c.textof("#matchHistoryContainer .match-details") or ""
+    check(rows.find(names[0]) < rows.find(names[1]) and "Damage \u2191" in rows, "Damage ascending: alice 2600 above bob 3080: %r" % rows)
+    c.ui("knPmSort(0,5)")  # K/D: v10 sorts by parseFloat(entry.kd), NaN: the order stays, the arrow moves
+    rows = c.textof("#matchHistoryContainer .match-details") or ""
+    check(rows.find(names[0]) < rows.find(names[1]) and "K/D \u2191" in rows,
+          "K/D keeps the order (v10's NaN sort; by K/D bob 1.47 would be above alice 2.50): %r" % rows)
+    c.shot("match-history")
     c.ui("switchStat(0)")
 
 
@@ -446,6 +474,20 @@ def clan_page(c):
     """the clan page's Clan Discord button opens discord.gg/<clan_link4> (the clan's Discord invite)"""
     c.ui("clearPops();openURL('/social.html?p=clan&q=KNR8', 1)")
     check(wait(lambda: c.count(".clanBut[onclick*='discord.gg/knr8invite']") == 1, 30), "the clan page's Clan Discord carries clan_link4")
+
+
+def gift_prefill(c, names):
+    """giftPopup(kind) (hub-10.0.7.js:5736-5750): ?autoGift prefills "I like your <mn> map / mod" (getParam's
+    [\\w_\\-.!] only, :2000-2006); without one the message has its placeholder"""
+    c.ui("clearPops();openURL('/social.html?p=profile&q=%s&autoGift=2&mn=Sky_R9', 1)" % names[1])
+    check(c.has("giftMsg", 30) and wait(lambda: c.value("giftMsg") == "I like your Sky_R9 map", 10),
+          "?autoGift=2&mn=Sky_R9: \"I like your Sky_R9 map\": %r" % c.value("giftMsg"))
+    c.ui("clearPops();openURL('/social.html?p=profile&q=%s&autoGift=1&mn=a%%20b', 1)" % names[1])
+    check(c.has("giftMsg", 30) and wait(lambda: c.value("giftMsg") == "I like your  mod", 10),
+          "?autoGift=1 with an mn that is not [\\w_-.!]: \"I like your  mod\": %r" % c.value("giftMsg"))
+    c.ui("clearPops();giftPopup()")
+    check(c.value("giftMsg") == "" and c.count("#giftMsg[placeholder]") == 1, "giftPopup(): empty, the placeholder")
+    c.ui("clearPops()")
 
 
 def premium_gift(c, names):

@@ -113,11 +113,15 @@ extern const kn_proc P_LOGIN_SUCCESS, P_LOGIN_FAILED, P_REGISTER, P_REGISTER_PRE
 
 /* ---- social (db_social.c) */
 extern const kn_proc P_POST_FULL, P_FEED, P_CLAN_CREATE, P_CLAN_REQUEST, P_CLAN_DATA_OF, P_CLAN_LEAVE,
-    P_CLAN_KICK, P_CLAN_ROLE, P_CLAN_FUNDS, P_CLAN_ANSWER, P_CLAN_DECLINE_ALL, P_CLAN_DISCORD, P_CLAN_PAGE, P_MAIL_READ, P_CHAT_THREAD, P_PROFILE, P_MAP_PAGE, P_MOD_PAGE, P_PUBLISH_MAP, P_SET_HACK,
+    P_CLAN_KICK, P_CLAN_ROLE, P_CLAN_FUNDS, P_CLAN_ANSWER, P_CLAN_DECLINE_ALL, P_CLAN_DISCORD, P_CLAN_PAGE, P_MAIL_READ, P_CHAT_THREAD, P_PROFILE, P_PROFILE_MATCHES, P_MAP_PAGE, P_MOD_PAGE, P_PUBLISH_MAP, P_SET_HACK,
     P_SET_FEATURED, P_SET_CREATOR, P_MAP_SNAPSHOT, P_MAP_DATA_SET;
 /* a published map's versions (map_versions, 0392): the live data stored as version map_updatecounter, the newest kept */
 #define MAP_VERSIONS_KEEP 20
 int db_map_snapshot(Dbx *x, const char *map_id);
+
+/* a profile's Match History (ranked.c): the account's latest finished ranked matches in v10's /match-history
+ * shape ({map, date, region, score_alpha, score_bravo, historyEntries[]}), newest first; limit <= 0 is 20 */
+cJSON *db_ranked_profile_history(Dbx *x, int64_t account, int limit);
 
 /* ---- the v10 Social hub (db_social_v10.c): POST /social/post, giveaway draws */
 extern const kn_proc P_POST_CREATE_V10, P_GIVEAWAY_SETTLE, P_MATCH_END_SAVE, P_SHARE_MATCH;

@@ -5,7 +5,7 @@
  * io_uf / io_psd / io_rps; matchmaker/socialWs.ts "r", "f", "gfs", "gfg").
  */
 #include "acct_internal.h"
-#include "game_presence.h" /* game_presence_get: "In game" (profile, chat header) */
+#include "game_presence.h" /* game_presence_status: "playing <map>" (the profile's status text) */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,7 +75,7 @@ static void like_escape(const char *in, char *out, size_t cap) {
 /* profile query: P_PROFILE (db_social.c) */
 
 /* The profile reply waits for the presence lookup (social_eb.c): row.st = online (the header's
- * dot), row.sm = "In game" while the player is in a game (v10's status text). */
+ * dot), row.sm = "playing <map>" while the player is in a game (v10's status text, hub-10.0.7.js:5333, 6520). */
 typedef struct ProfileWait {
     SocialSession *s; /* held */
     cJSON *frame;     /* ["0", "profile", sub, row, games, mods, follow, assets] */
@@ -89,16 +89,51 @@ static void profile_status_done(void *ud, const int *online, size_t n) {
     if (row) {
         cJSON_DeleteItemFromObjectCaseSensitive(row, "st");
         cJSON_AddNumberToObject(row, "st", on);
-        char game[96] = "";
-        int locked = 0;
-        if (on && game_presence_get(w->id, game, sizeof game, &locked) == 1 && game[0]) {
+        char sm[96] = "";
+        if (on && game_presence_status(w->id, sm, sizeof sm, NULL, 0) == 1 && sm[0]) {
             cJSON_DeleteItemFromObjectCaseSensitive(row, "sm");
-            cJSON_AddStringToObject(row, "sm", "In game");
+            cJSON_AddStringToObject(row, "sm", sm);
         }
     }
     social_send(w->s, w->frame);
     social_unhold(w->s);
     free(w);
+}
+
+static void profile_status(SocialSession *s, cJSON *f, const int64_t id) {
+    ProfileWait *w = calloc(1, sizeof *w);
+    if (!w) {
+        social_send(s, f);
+        return;
+    }
+    w->id = id;
+    w->frame = f;
+    w->s = social_hold(s);
+    social_online_lookup(&id, 1, profile_status_done, w);
+}
+
+/* row.matchHistory: the Match History tab's data (hub-10.0.7.js:2758, 2376-2392), the component's `data` prop: an
+ * array of v10's /match-history matches (it slices and counts it, deob-10.0.7.js:110369-110381), the latest ranked
+ * matches (P_PROFILE_MATCHES) */
+typedef struct MatchesWait {
+    cJSON *frame;
+    int64_t id;
+} MatchesWait;
+
+static void profile_matches_done(SocialSession *s, kn_db_result *res, void *extra) {
+    MatchesWait *m = extra;
+    cJSON *matches = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!kn_db_ok(res)) acct_db_error(res, "profile matches");
+    cJSON *row = cJSON_GetArrayItem(m->frame, 3);
+    if (cJSON_IsObject(row)) {
+        if (!cJSON_IsArray(matches)) {
+            cJSON_Delete(matches);
+            matches = cJSON_CreateArray();
+        }
+        cJSON_DeleteItemFromObjectCaseSensitive(row, "matchHistory");
+        cJSON_AddItemToObject(row, "matchHistory", matches);
+    } else cJSON_Delete(matches);
+    profile_status(s, m->frame, m->id);
 }
 
 static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -130,16 +165,16 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_AddItemToArray(f, follow);
     cJSON_AddItemToArray(f, cJSON_DetachItemFromObject(obj, "assets"));
     cJSON_Delete(obj);
-    ProfileWait *w = calloc(1, sizeof *w);
-    if (!w) {
-        social_send(s, f);
-        return;
+    const int64_t id = cJSON_IsNumber(pid) ? (int64_t) pid->valuedouble : 0;
+    MatchesWait *m = calloc(1, sizeof *m);
+    char ids[24];
+    snprintf(ids, sizeof ids, "%lld", (long long) id);
+    if (m) {
+        m->frame = f;
+        m->id = id;
     }
-    w->id = cJSON_IsNumber(pid) ? (int64_t) pid->valuedouble : 0;
-    w->frame = f;
-    w->s = social_hold(s);
-    const int64_t id = w->id;
-    social_online_lookup(&id, 1, profile_status_done, w);
+    /* social_call frees m without calling back when the query is refused: the frame is still ours */
+    if (!m || social_call(s, &P_PROFILE_MATCHES, KN_DB_ARGS(ids), profile_matches_done, m) != 0) profile_status(s, f, id);
 }
 
 static void profile_page(SocialSession *s, PageCtx *c, const char *name) {

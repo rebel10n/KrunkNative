@@ -664,12 +664,10 @@ static void history_count(ReqCtx *c) {
 }
 
 /* v10's match entry: historyEntries (every player of the match: player_name, team 1 Alpha / 2
- * Bravo, score, kills, assists, deaths, objective_score, damage_done, mmr_change, rank) */
-static void on_history_entries(kn_db_result *res, void *ud) {
-    ReqCtx *c = ud;
-    if (!kn_db_ok(res)) return db_fail(c, "ranked history players", res);
-    cJSON *players = kn_db_result_to_json(res);
-    cJSON *matches = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(c->out, "matchHistory"), "matches");
+ * Bravo, score, kills, assists, deaths, objective_score, damage_done, mmr_change, rank), the shape the
+ * MatchHistory component reads (deob-10.0.7.js:110441-110600) and the game server's matchInfo.historyEntries
+ * builds (deob-10.0.7.js:190393-190419, 190478-190524) */
+static void history_fill_entries(cJSON *matches, const cJSON *players, const int64_t me) {
     cJSON *m;
     cJSON_ArrayForEach(m, matches) {
         const char *id = kn_json_str(m, "match_id", "");
@@ -698,7 +696,7 @@ static void on_history_entries(kn_db_result *res, void *ud) {
             const double before = kn_json_num(p, "rating_before", 0), after = kn_json_num(p, "rating_after", before);
             cJSON_AddNumberToObject(e, "mmr_change", after - before);
             cJSON_AddNumberToObject(e, "rank", ranked_rank_of(kn_json_num(p, "cr", 0), (int) kn_json_num(p, "matches", 0)));
-            if (acc == c->id) cJSON_AddNumberToObject(m, "rank", kn_json_num(e, "rank", 0));
+            if (acc == me) cJSON_AddNumberToObject(m, "rank", kn_json_num(e, "rank", 0));
             cJSON_AddItemToArray(entries, e);
         }
         /* the teams' scores (the game server's teamScores; older results: the winner 1 - 0) */
@@ -716,8 +714,73 @@ static void on_history_entries(kn_db_result *res, void *ud) {
         cJSON_AddNumberToObject(m, "score_bravo", bravo);
         cJSON_Delete(result);
     }
+}
+
+static void on_history_entries(kn_db_result *res, void *ud) {
+    ReqCtx *c = ud;
+    if (!kn_db_ok(res)) return db_fail(c, "ranked history players", res);
+    cJSON *players = kn_db_result_to_json(res);
+    history_fill_entries(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(c->out, "matchHistory"), "matches"), players, c->id);
     cJSON_Delete(players);
     history_count(c);
+}
+
+/* a history row as v10 sends it: the map's name, the caller's mmr_change, is_ranked, and the region as v10's index
+ * (1 oc .. 5 sa: the component draws regions[region].toUpperCase(), deob-10.0.7.js:16465-16471, 110483) */
+static void history_row_v10(cJSON *row) {
+    const int map = (int) kn_json_num(row, "map", -1);
+    const int catalog = map >= 0 ? map_catalog_official_index(map) : -1; // a mapIndex
+    const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
+    const char *pool = ranked_pool_map_name(map);
+    cJSON_AddStringToObject(row, "map_name", pool ? pool : m ? m->name : "");
+    const double before = kn_json_num(row, "rating_before", 0), after = kn_json_num(row, "rating_after", before);
+    cJSON_AddNumberToObject(row, "mmr_change", after - before);
+    cJSON_AddBoolToObject(row, "is_ranked", 1);
+    const cJSON *region = cJSON_GetObjectItemCaseSensitive(row, "region");
+    if (cJSON_IsString(region)) cJSON_ReplaceItemInObjectCaseSensitive(row, "region", cJSON_CreateNumber(ranked_region_index(region->valuestring)));
+}
+
+#define HISTORY_MATCH_COLS                                                                                                        \
+    "SELECT m.match_id, {epoch_ms:m.finished_at} AS date__i, m.map_index AS map__i, m.mode_index AS mode__i,"                      \
+    " m.region, m.season AS season__i, mp.team AS team__i, mp.victory AS victory__i, mp.kills AS kills__i,"                        \
+    " mp.deaths AS deaths__i, mp.assists AS assists__i, mp.score AS score__i, mp.damage_done AS damage_done__i,"                   \
+    " mp.rating_before AS rating_before__i, mp.rating_after AS rating_after__i, mp.abandoned AS abandoned__b,"                     \
+    " mp.rp AS rp__i, coalesce({text:m.result}, '{}') AS result"                                                                   \
+    " FROM mm_ranked_match_players mp JOIN mm_ranked_matches m ON m.match_id = mp.match_id"
+#define HISTORY_PLAYER_COLS                                                                                                       \
+    "SELECT mp.match_id, mp.account_id AS account_id__i, mp.username AS player_name, mp.team AS team__i, mp.kills AS kills__i,"    \
+    " mp.deaths AS deaths__i, mp.assists AS assists__i, mp.score AS score__i, mp.damage_done AS damage_done__i,"                   \
+    " mp.rating_before AS rating_before__i, mp.rating_after AS rating_after__i, coalesce(rp.cr, 0) AS cr__f,"                     \
+    " coalesce(rp.wins + rp.losses + rp.draws, 0) AS matches__i"
+
+/* A profile's match_history / matchHistory (deob-10.0.7.js:113207-113221, hub-10.0.7.js:2758, 2376-2392): the
+ * account's latest finished ranked matches, every season and region, in the /match-history shape. v10 reads only
+ * ranked history (every getMatchHistory call passes isRanked true: deob-10.0.7.js:99311, hub-10.0.7.js:946), and
+ * its server is not shipped, so the count is Box Office's: limit (the in-game profile pages them by 5). */
+cJSON *db_ranked_profile_history(Dbx *x, const int64_t account, const int limit) {
+    char lim[16];
+    snprintf(lim, sizeof lim, "%d", limit > 0 ? limit : 20);
+    cJSON *matches = dbx_rows(x, SQL(.any = HISTORY_MATCH_COLS " WHERE mp.account_id = $1 AND m.status = 'done' ORDER BY m.finished_at DESC LIMIT {int:$2}"),
+                              KN_DB_ARGS(I64S(account), lim));
+    if (!matches) return NULL;
+    cJSON *row;
+    cJSON_ArrayForEach(row, matches) history_row_v10(row);
+    if (!cJSON_GetArraySize(matches)) return matches;
+    /* the ranked profile of each player in that match's season and region */
+    cJSON *players = dbx_rows(x, SQL(.any = HISTORY_PLAYER_COLS
+                                     " FROM mm_ranked_match_players mp JOIN (SELECT m.match_id, m.season, m.region FROM mm_ranked_match_players me"
+                                     " JOIN mm_ranked_matches m ON m.match_id = me.match_id WHERE me.account_id = $1 AND m.status = 'done'"
+                                     " ORDER BY m.finished_at DESC LIMIT {int:$2}) pg ON pg.match_id = mp.match_id"
+                                     " LEFT JOIN ranked_profiles rp ON rp.account_id = mp.account_id AND rp.season = pg.season AND rp.region = pg.region"
+                                     " ORDER BY mp.match_id, mp.team, mp.score DESC"),
+                              KN_DB_ARGS(I64S(account), lim));
+    if (!players) {
+        cJSON_Delete(matches);
+        return NULL;
+    }
+    history_fill_entries(matches, players, account);
+    cJSON_Delete(players);
+    return matches;
 }
 
 static void on_history(kn_db_result *res, void *ud) {
@@ -727,22 +790,12 @@ static void on_history(kn_db_result *res, void *ud) {
     cJSON *a = cJSON_AddArrayToObject(mh, "matches");
     for (int i = 0; i < kn_db_rows(res); i++) {
         cJSON *row = kn_db_row_to_json(res, i);
-        const int map = (int) kn_json_num(row, "map", -1);
-        const int catalog = map >= 0 ? map_catalog_official_index(map) : -1; // a mapIndex
-        const MapCatalogEntry *m = catalog >= 0 ? map_catalog_at((size_t) catalog) : NULL;
-        const char *pool = ranked_pool_map_name(map);
-        cJSON_AddStringToObject(row, "map_name", pool ? pool : m ? m->name : "");
-        const double before = kn_json_num(row, "rating_before", 0), after = kn_json_num(row, "rating_after", before);
-        cJSON_AddNumberToObject(row, "mmr_change", after - before);
-        cJSON_AddBoolToObject(row, "is_ranked", 1);
+        history_row_v10(row);
         cJSON_AddItemToArray(a, row);
     }
     if (!kn_db_rows(res)) return history_count(c);
     /* every player of this page's matches (a derived table: MySQL takes no LIMIT in IN) */
-    static const kn_sql q = {.any = "SELECT mp.match_id, mp.account_id AS account_id__i, mp.username AS player_name, mp.team AS team__i, mp.kills AS kills__i,"
-                                    " mp.deaths AS deaths__i, mp.assists AS assists__i, mp.score AS score__i, mp.damage_done AS damage_done__i,"
-                                    " mp.rating_before AS rating_before__i, mp.rating_after AS rating_after__i, coalesce(rp.cr, 0) AS cr__f,"
-                                    " coalesce(rp.wins + rp.losses + rp.draws, 0) AS matches__i"
+    static const kn_sql q = {.any = HISTORY_PLAYER_COLS
                                     " FROM mm_ranked_match_players mp JOIN (SELECT m.match_id FROM mm_ranked_match_players me"
                                     " JOIN mm_ranked_matches m ON m.match_id = me.match_id WHERE me.account_id = $1 AND m.season = {int:$2} AND m.region = $3"
                                     " AND m.status = 'done' ORDER BY m.finished_at DESC LIMIT {int:$4} OFFSET {int:$5}) pg ON pg.match_id = mp.match_id"
@@ -763,12 +816,7 @@ static void history_account(void *ud, kn_http_req *req, const int64_t id, const 
     (void) name;
     c->id = id;
     c->out = cJSON_CreateObject();
-    static const kn_sql q = {.any = "SELECT m.match_id, {epoch_ms:m.finished_at} AS date__i, m.map_index AS map__i, m.mode_index AS mode__i,"
-                                    " m.region, m.season AS season__i, mp.team AS team__i, mp.victory AS victory__i, mp.kills AS kills__i,"
-                                    " mp.deaths AS deaths__i, mp.assists AS assists__i, mp.score AS score__i, mp.damage_done AS damage_done__i,"
-                                    " mp.rating_before AS rating_before__i, mp.rating_after AS rating_after__i, mp.abandoned AS abandoned__b,"
-                                    " mp.rp AS rp__i, coalesce({text:m.result}, '{}') AS result"
-                                    " FROM mm_ranked_match_players mp JOIN mm_ranked_matches m ON m.match_id = mp.match_id"
+    static const kn_sql q = {.any = HISTORY_MATCH_COLS
                                     " WHERE mp.account_id = $1 AND m.season = {int:$2} AND m.region = $3 AND m.status = 'done'"
                                     " ORDER BY m.finished_at DESC LIMIT {int:$4} OFFSET {int:$5}"};
     char acc[24], season[16], limit[16], offset[16];

@@ -33,6 +33,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <ranked.h>
+#include <match_history.h> // v10's MatchHistory component (svelte-1irqx9a)
 #include <region_names.h> // region_id_of: a saved region is its v10 id
 #include <ranked_route.h>   // which backend: krunker.io first, then KrunkNative
 #include <krunker_account.h> // the krunker.io account (krunker_account_signed_in, its name and level)
@@ -61,7 +62,6 @@ static const char *const k_tabs[TAB_COUNT] = {"Home", "Profile", "Leaderboard", 
 enum { MM_IDLE, MM_SEARCHING, MM_FOUND };
 
 #define HISTORY_PAGE 5          // _36203 pageSize 5
-#define MATCHES_MAX 16
 
 static struct {
     int tab;
@@ -86,9 +86,7 @@ static struct {
     int board_page;               // leaderboard page (1-based)
     int history_page;             // match history page (1-based)
     int expanded;                 // progression details open
-    int match_open[MATCHES_MAX];  // match history: expanded entries
-    char match_sort[MATCHES_MAX][24];
-    int match_desc[MATCHES_MAX];
+    MhState mh;                   // match history: expanded matches, their scoreboards' order (match_history.h)
     struct {                      // the message overlay (_34187)
         int visible;
         char title[64], text[256], button[24], color[16], icon[16];
@@ -350,6 +348,15 @@ static const V10Req *get_history(void) {
     snprintf(path, sizeof(path), "/mm/ranked/history?token=%s&season=%d&region=%s&limit=%d&offset=%d", t, current_season(), my_region(), HISTORY_PAGE,
              R.history_page - 1);
     return v10_get(path, DATA_TTL_MS);
+}
+
+// the component's props and state for the fetched page (match_history.h)
+static MhOpts history_opts(void) {
+    const V10Req *r = get_history();
+    return (MhOpts){.player = active_name(), .has_pagination = 1, .page_size = HISTORY_PAGE, .page = R.history_page,
+                    .total_pages = (int) v10_num(cJSON_GetObjectItem(r->json, "matchHistory"), "totalPages", 1), .loading = r->status == 0,
+                    .error = r->status != 200 && r->status != 0 ? "Failed to load match history. Please try again." : NULL,
+                    .fn_match = "knRkMatch", .fn_sort = "knRkSort", .fn_page = "knRkHistoryPage"};
 }
 
 static const V10Req *get_shop(void) {
@@ -1214,6 +1221,11 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     }
     if (strncmp(name, "knRk", 4)) return -1;
     if (!strcmp(name, "knRkTab")) {
+        // the Match History tab mounts a new MatchHistory each time it shows: page 1, collapsed (deob-10.0.7.js:114113-114116)
+        if (arg0 == TAB_HISTORY && R.tab != TAB_HISTORY) {
+            R.history_page = 1;
+            mh_reset(&R.mh);
+        }
         if (arg0 >= 0 && arg0 < TAB_COUNT) R.tab = arg0;
     } else if (!strcmp(name, "knRkOverlay")) { // the overlay's button / Escape
         const int was_shown = R.overlay.visible;
@@ -1290,23 +1302,14 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
         const int pages = (int) v10_num(cJSON_GetObjectItem(r->json, "matchHistory"), "totalPages", 1);
         const int next = R.history_page + arg0;
         if (next >= 1 && next <= (pages > 0 ? pages : 1)) {
-            R.history_page = next; // v10 rebuilds the page's entries: collapsed, sorted by score again (v10:108074-108078)
-            memset(R.match_open, 0, sizeof(R.match_open));
-            memset(R.match_sort, 0, sizeof(R.match_sort)); // v10 builds each page's entries again at the default sort (v10:108072-108080)
-            memset(R.match_desc, 0, sizeof(R.match_desc));
+            mh_reset(&R.mh); // v10 rebuilds the page's entries: collapsed, sorted by score again (deob-10.0.7.js:110386-110396)
+            R.history_page = next;
         }
     } else if (!strcmp(name, "knRkMatch")) {
-        if (arg0 >= 0 && arg0 < MATCHES_MAX) R.match_open[arg0] = !R.match_open[arg0];
-    } else if (!strcmp(name, "knRkSort")) { // (match, column)
-        const int col = arg_num(args, argc, 1, 0);
-        static const char *const keys[] = {"player_name", "score", "kills", "assists", "deaths", "kd", "objective_score", "damage_done"};
-        if (arg0 >= 0 && arg0 < MATCHES_MAX && col >= 0 && col < 8) {
-            if (!strcmp(R.match_sort[arg0], keys[col])) R.match_desc[arg0] = !R.match_desc[arg0];
-            else {
-                snprintf(R.match_sort[arg0], sizeof(R.match_sort[0]), "%s", keys[col]);
-                R.match_desc[arg0] = 0;
-            }
-        }
+        mh_toggle(&R.mh, arg0);
+    } else if (!strcmp(name, "knRkSort")) { // (match, column): v10's sortBy (match_history.c)
+        const MhOpts o = history_opts();
+        mh_sort(&R.mh, cJSON_GetObjectItem(cJSON_GetObjectItem(get_history()->json, "matchHistory"), "matches"), &o, arg0, arg_num(args, argc, 1, 0));
         html_ui_stop_propagation();
     } else if (!strcmp(name, "knRkItem")) {
         const cJSON *s = shop_row(arg0);
@@ -1617,134 +1620,12 @@ static void gen_leaderboard(StrBuf *sb) {
     sb_append(sb, "</div></div></div>");
 }
 
-// a history entry's sort value
-static double entry_num(const cJSON *e, const char *key) {
-    if (!strcmp(key, "kd")) {
-        const double k = v10_num(e, "kills", 0), d = v10_num(e, "deaths", 0);
-        return d > 0 ? k / d : k;
-    }
-    return v10_num(e, key, 0);
-}
-
-static const char *g_sort_key;
-static int g_sort_desc;
-static int cmp_entries(const void *a, const void *b) {
-    const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
-    int c;
-    if (!strcmp(g_sort_key, "player_name")) c = strcmp(v10_str(x, "player_name"), v10_str(y, "player_name"));
-    else {
-        const double dx = entry_num(x, g_sort_key), dy = entry_num(y, g_sort_key);
-        c = dx < dy ? -1 : dx > dy ? 1 : 0;
-    }
-    return g_sort_desc ? -c : c;
-}
-
-// _36203 match history (svelte-1irqx9a): 5 per page, an entry expands into the scoreboard
+// _36203 match history (svelte-1irqx9a, match_history.c), mounted without props (deob-10.0.7.js:114115): playerName is
+// the signed-in name, it fetches its pages of 5 (getMatchHistory), pagination when there is more than one page
 static void gen_history(StrBuf *sb) {
     const V10Req *r = get_history();
-    const cJSON *mh = cJSON_GetObjectItem(r->json, "matchHistory");
-    const cJSON *rows = cJSON_GetObjectItem(mh, "matches");
-    const int loading = r->status == 0;
-    const char *me = active_name();
-    sb_append(sb, "<div class=\"match-history svelte-1irqx9a\">");
-    if (loading && !cJSON_GetArraySize(rows)) {
-        sb_append(sb, "<div class=\"loading svelte-1irqx9a\">Loading match history...</div></div>");
-        return;
-    }
-    if (r->status != 200 && !loading) {
-        sb_append(sb, "<div class=\"error svelte-1irqx9a\">Failed to load match history. Please try again.</div></div>");
-        return;
-    }
-    if (!cJSON_GetArraySize(rows)) {
-        sb_append(sb, "<div class=\"no-matches svelte-1irqx9a\">No match history available.</div></div>");
-        return;
-    }
-    sb_append(sb, "<div class=\"match-list svelte-1irqx9a\">");
-    int index = 0;
-    const cJSON *m;
-    cJSON_ArrayForEach(m, rows) {
-        const cJSON *entries = cJSON_GetObjectItem(m, "historyEntries");
-        const cJSON *mine = NULL, *e;
-        cJSON_ArrayForEach(e, entries) {
-            if (!strcmp(v10_str(e, "player_name"), me)) mine = e;
-        }
-        // KrunkNative rows carry the player's own stats at the top level too
-        if (!mine) mine = m;
-        const int rank = (int) v10_num(mine, "rank", 0);
-        const int team = (int) v10_num(mine, "team", 1);
-        const double sa = v10_num(m, "score_alpha", 0), sbv = v10_num(m, "score_bravo", 0);
-        int win;
-        if (cJSON_GetObjectItem(m, "score_alpha")) win = (team == 1 && sa > sbv) || (team == 2 && sbv > sa);
-        else win = v10_num(m, "victory", 0) > 0;
-        char score[32];
-        if (team == 2) snprintf(score, sizeof(score), "%.0f - %.0f", sbv, sa);
-        else snprintf(score, sizeof(score), "%.0f - %.0f", sa, sbv);
-        char date[16] = "";
-        const time_t t = (time_t) (v10_num(m, "date", 0) / 1000.0);
-        struct tm tm;
-#ifdef _WIN32
-        localtime_s(&tm, &t);
-#else
-        localtime_r(&t, &tm);
-#endif
-        strftime(date, sizeof(date), "%d/%m/%Y", &tm);
-        const int change = (int) v10_num(mine, "mmr_change", 0);
-        sb_appendf(sb, "<div class=\"match-entry %s svelte-1irqx9a\" onclick=\"playTick(0.5);knRkMatch(%d)\"><div class=\"match-summary svelte-1irqx9a\">"
-                       "<img alt=\"map thumbnail\" class=\"map-thumbnail svelte-1irqx9a\" src=\"./img/maps/map_%d.png\"> <div class=\"match-info svelte-1irqx9a\">"
-                       "<div class=\"rank-display svelte-1irqx9a\"><img class=\"rank-icon svelte-1irqx9a\" src=\"./%s\" alt=\"%d\"> <span class=\"rank svelte-1irqx9a\">%s</span> "
-                       "<span class=\"match-date svelte-1irqx9a\">%s</span> <!----></div> <div class=\"stats svelte-1irqx9a\"><span class=\"stat svelte-1irqx9a\">KDA: %.0f/%.0f/%.0f</span> "
-                       "<span class=\"stat svelte-1irqx9a\">Score: %.0f</span> ",
-                   win ? "win" : "loss", index, (int) v10_num(m, "map", 0), ranked_rank_icon(rank), rank, ranked_rank_name(rank), date, v10_num(mine, "kills", 0),
-                   v10_num(mine, "deaths", 0), v10_num(mine, "assists", 0), v10_num(mine, "score", 0));
-        if (change) sb_appendf(sb, "<span class=\"stat %s svelte-1irqx9a\">%s%d Rating</span>", change > 0 ? "positive" : "negative", change > 0 ? "+" : "", change);
-        else sb_append(sb, "<!---->");
-        sb_appendf(sb, "</div></div> <div class=\"match-result svelte-1irqx9a\"><div class=\"result svelte-1irqx9a\">%s</div> <div class=\"score svelte-1irqx9a\">%s</div></div></div> ",
-                   win ? "WIN" : "LOSS", score);
-        if (index < MATCHES_MAX && R.match_open[index] && cJSON_GetArraySize(entries)) {
-            static const char *const keys[] = {"player_name", "score", "kills", "assists", "deaths", "kd", "objective_score", "damage_done"};
-            static const char *const labels[] = {"Player", "Score", "Kills", "Assists", "Deaths", "K/D", "Objective", "Damage"};
-            const char *key = R.match_sort[index][0] ? R.match_sort[index] : "score";
-            const int desc = R.match_sort[index][0] ? R.match_desc[index] : 1; // v10's default: score, descending (v10:108078, toggled from asc at :108099)
-            sb_append(sb, "<div class=\"match-details svelte-1irqx9a\" onclick=\"\"><table class=\"table-container svelte-1irqx9a\"><thead><tr class=\"table-row svelte-1irqx9a\">");
-            for (int c = 0; c < 8; c++)
-                sb_appendf(sb, "<td class=\"table-header sortable svelte-1irqx9a\" onclick=\"playTick(0.5);knRkSort(%d,%d)\">%s %s</td>", index, c, labels[c],
-                           !strcmp(key, keys[c]) ? (desc ? "\xe2\x86\x93" : "\xe2\x86\x91") : "");
-            sb_append(sb, "</tr></thead><tbody>");
-            const int n = cJSON_GetArraySize(entries);
-            const cJSON **sorted = calloc((size_t) n, sizeof(*sorted));
-            int k = 0;
-            cJSON_ArrayForEach(e, entries) if (sorted) sorted[k++] = e;
-            g_sort_key = key;
-            g_sort_desc = desc;
-            if (sorted) qsort(sorted, (size_t) k, sizeof(*sorted), cmp_entries);
-            for (int j = 0; sorted && j < k; j++) {
-                const cJSON *x = sorted[j];
-                const int xr = (int) v10_num(x, "rank", 0);
-                const double kills = v10_num(x, "kills", 0), deaths = v10_num(x, "deaths", 0);
-                sb_appendf(sb, "<tr class=\"table-row %ssvelte-1irqx9a\"><td class=\"table-cell svelte-1irqx9a\"><div class=\"player-info svelte-1irqx9a\">"
-                               "<img class=\"player-rank-icon svelte-1irqx9a\" src=\"./%s\" alt=\"%d\"> <span class=\"%s svelte-1irqx9a\">",
-                           !strcmp(v10_str(x, "player_name"), me) ? "current-player " : "", ranked_rank_icon(xr), xr, (int) v10_num(x, "team", 1) == 2 ? "blue-team" : "red-team");
-                sb_append_esc(sb, v10_str(x, "player_name"));
-                sb_appendf(sb, "</span></div></td><td class=\"table-cell svelte-1irqx9a\">%.0f</td><td class=\"table-cell svelte-1irqx9a\">%.0f</td><td class=\"table-cell svelte-1irqx9a\">%.0f</td>"
-                               "<td class=\"table-cell svelte-1irqx9a\">%.0f</td><td class=\"table-cell svelte-1irqx9a\">%.2f</td><td class=\"table-cell svelte-1irqx9a\">%.0f</td>"
-                               "<td class=\"table-cell svelte-1irqx9a\">%.0f</td></tr>",
-                           v10_num(x, "score", 0), kills, v10_num(x, "assists", 0), deaths, deaths > 0 ? kills / deaths : kills, v10_num(x, "objective_score", 0),
-                           v10_num(x, "damage_done", 0));
-            }
-            free(sorted);
-            sb_append(sb, "</tbody></table></div>");
-        } else sb_append(sb, "<!---->");
-        sb_append(sb, "</div>");
-        index++;
-    }
-    const int pages = (int) v10_num(mh, "totalPages", 1);
-    sb_append(sb, "</div> ");
-    if (pages > 1)
-        sb_appendf(sb, "<div class=\"pagination svelte-1irqx9a\"><button class=\"page-btn svelte-1irqx9a\"%s onclick=\"knRkHistoryPage(-1)\">&lt; Previous</button> "
-                       "<span class=\"page-info svelte-1irqx9a\">Page %d of %d</span> <button class=\"page-btn svelte-1irqx9a\"%s onclick=\"knRkHistoryPage(1)\">Next &gt;</button></div>",
-                   R.history_page == 1 || loading ? " disabled" : "", R.history_page, pages, R.history_page >= pages || loading ? " disabled" : "");
-    else sb_append(sb, "<!---->");
-    sb_append(sb, "</div>");
+    const MhOpts o = history_opts();
+    mh_html(sb, cJSON_GetObjectItem(cJSON_GetObjectItem(r->json, "matchHistory"), "matches"), &R.mh, &o);
 }
 
 // _37915 shop (svelte-1gtpoav) with _37839 items (svelte-1q06uv7)
@@ -1914,9 +1795,7 @@ static void open_popup(void) {
     invalidate(); // v10's component fetches on mount, nothing kept from an earlier visit (v10:98587-98639)
     R.tab = TAB_HOME; // the component starts on Home every time it mounts
     R.board_page = R.history_page = 1;
-    memset(R.match_open, 0, sizeof(R.match_open));
-    memset(R.match_sort, 0, sizeof(R.match_sort));
-    memset(R.match_desc, 0, sizeof(R.match_desc));
+    mh_reset(&R.mh);
     if (R.state == MM_IDLE && !R.status_lock) fetch_connection();
     char *html = gen_popup();
     v10_popup_show(POPUP_CLASS, html, render);
@@ -1956,7 +1835,7 @@ void ranked_ui_scenario(const cJSON *state) {
     R.tab = (int) v10_num(state, "tab", 0);
     if (R.tab < 0 || R.tab >= TAB_COUNT) R.tab = 0;
     const cJSON *open = cJSON_GetObjectItem(state, "matchOpen");
-    if (cJSON_IsNumber(open) && open->valueint >= 0 && open->valueint < MATCHES_MAX) R.match_open[open->valueint] = 1;
+    if (cJSON_IsNumber(open)) mh_toggle(&R.mh, open->valueint);
     const cJSON *ov = cJSON_GetObjectItem(state, "overlay");
     if (cJSON_IsObject(ov))
         show_overlay(v10_str(ov, "title"), v10_str(ov, "description"), v10_str(ov, "button")[0] ? v10_str(ov, "button") : "OK",

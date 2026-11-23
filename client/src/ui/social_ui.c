@@ -31,6 +31,7 @@
 #include <social.h>
 #include <badges.h>    // badge_get: the earned badges of a profile (Badges tab)
 #include <ranked.h>    // ranked_rank_icon: the profile header's rank (rankedRank)
+#include <match_history.h> // the Match History tab: v10's MatchHistory component (svelte-1irqx9a)
 #include <v10_social.h> // v10_gapi: the giveaway post (gapi POST /social/post)
 #include <ui_logic.h>
 #include <ui_vgrid.h> // the market / inventory / item lists are virtual grids
@@ -1715,119 +1716,24 @@ static void append_raid_stats(StrBuf *sb, const cJSON *raids) {
     }
 }
 
-// The Match History tab: v10 mounts its MatchHistory component (hub-10.0.7.js:1105-1520, svelte-1irqx9a) on
+// The Match History tab: v10 mounts its MatchHistory component (hub-10.0.7.js:1090-1520, svelte-1irqx9a) on
 // #matchHistoryContainer with {data: t.matchHistory, playerName, hasPagination: false, showRegion: true}
-// (switchStat, :2376-2392); an entry opens into its scoreboard, sorted by a header's column.
-#define PM_MAX 64
+// (switchStat, :2376-2392); an entry opens into its scoreboard, sorted by a header's column (match_history.c).
 static struct {
-    cJSON *data;
-    unsigned char open[PM_MAX];
-    signed char sort[PM_MAX]; // 0 the default (score, descending); else column + 1, negative ascending
+    cJSON *data; // t.matchHistory: the profile's latest ranked matches
+    MhState st;
 } g_pm;
 
-static double pm_entry_num(const cJSON *e, const int col) {
-    static const char *const keys[] = {"player_name", "score", "kills", "assists", "deaths", "kd", "objective_score", "damage_done"};
-    if (col == 5) {
-        const double k = jnum(e, "kills"), d = jnum(e, "deaths");
-        return d > 0 ? k / d : k;
-    }
-    return jnum(e, keys[col]);
-}
-static int g_pm_col, g_pm_desc;
-static int pm_cmp(const void *a, const void *b) {
-    const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
-    int c;
-    if (!g_pm_col) {
-        const char *nx = jstr(x, "player_name"), *ny = jstr(y, "player_name");
-        c = strcmp(nx ? nx : "", ny ? ny : "");
-    } else {
-        const double dx = pm_entry_num(x, g_pm_col), dy = pm_entry_num(y, g_pm_col);
-        c = dx < dy ? -1 : dx > dy ? 1 : 0;
-    }
-    return g_pm_desc ? -c : c;
+static MhOpts pm_opts(void) {
+    return (MhOpts){.player = g_hub.profile_name, .show_region = 1, .with_data = 1, .page_size = 5,
+                    .fn_match = "knPmMatch", .fn_sort = "knPmSort", .fn_page = "knPmPage"};
 }
 
 static void hub_match_history_render(void) {
     if (!el("matchHistoryContainer")) return;
     StrBuf sb = {0};
-    const char *me = g_hub.profile_name;
-    sb_append(&sb, "<div class=\"match-history svelte-1irqx9a\">");
-    if (!cJSON_GetArraySize(g_pm.data)) sb_append(&sb, "<div class=\"no-matches svelte-1irqx9a\">No match history available.</div>");
-    else {
-        sb_append(&sb, "<div class=\"match-list svelte-1irqx9a\">");
-        int index = 0;
-        const cJSON *m;
-        cJSON_ArrayForEach(m, g_pm.data) {
-            const cJSON *entries = cJSON_GetObjectItemCaseSensitive(m, "historyEntries"), *mine = NULL, *e;
-            cJSON_ArrayForEach(e, entries) {
-                const char *pn = jstr(e, "player_name");
-                if (pn && !strcmp(pn, me)) mine = e;
-            }
-            const int team = mine ? (int) jnum(mine, "team") : 0; // Alpha 1, Bravo 2
-            const double sa = jnum(m, "score_alpha"), sbv = jnum(m, "score_bravo");
-            const int win = mine && ((team == 1 && sa > sbv) || (team == 2 && sbv > sa));
-            char score[48];
-            if (team == 2) snprintf(score, sizeof(score), "%.0f - %.0f", sbv, sa);
-            else snprintf(score, sizeof(score), "%.0f - %.0f", sa, sbv);
-            const int rank = (int) jnum(m, "rank");
-            char date[16] = "";
-            const time_t tt = (time_t) (jnum(m, "date") / 1000.0);
-            struct tm tm;
-#ifdef _WIN32
-            localtime_s(&tm, &tt);
-#else
-            localtime_r(&tt, &tm);
-#endif
-            strftime(date, sizeof(date), "%d/%m/%Y", &tm);
-            sb_appendf(&sb, "<div class=\"match-entry %s svelte-1irqx9a\" onclick=\"playTick(0.5);knPmMatch(%d)\"><div class=\"match-summary svelte-1irqx9a\">"
-                            "<img alt=\"map thumbnail\" class=\"map-thumbnail svelte-1irqx9a\" src=\"./img/maps/map_%d.png\"> <div class=\"match-info svelte-1irqx9a\">"
-                            "<div class=\"rank-display svelte-1irqx9a\"><img class=\"rank-icon svelte-1irqx9a\" src=\"./%s\"> <span class=\"rank svelte-1irqx9a\">%s</span> "
-                            "<span class=\"match-date svelte-1irqx9a\">%s</span> <span class=\"match-region svelte-1irqx9a\">",
-                       win ? "win" : "loss", index, (int) jnum(m, "map"), ranked_rank_icon(rank), ranked_rank_name(rank), date);
-            sb_append_esc(&sb, jstr(m, "region") ? jstr(m, "region") : "");
-            sb_appendf(&sb, "</span></div> <div class=\"stats svelte-1irqx9a\"><span class=\"stat svelte-1irqx9a\">KDA: %.0f/%.0f/%.0f</span> <span class=\"stat svelte-1irqx9a\">Score: %.0f</span> ",
-                       jnum(mine ? mine : m, "kills"), jnum(mine ? mine : m, "deaths"), jnum(mine ? mine : m, "assists"), jnum(mine ? mine : m, "score"));
-            const int change = (int) jnum(m, "mmr_change");
-            if (change) sb_appendf(&sb, "<span class=\"stat %s svelte-1irqx9a\">%s%d Rating</span>", change > 0 ? "positive" : "negative", change > 0 ? "+" : "", change);
-            else sb_append(&sb, "<!---->");
-            sb_appendf(&sb, "</div></div> <div class=\"match-result svelte-1irqx9a\"><div class=\"result svelte-1irqx9a\">%s</div> <div class=\"score svelte-1irqx9a\">%s</div></div></div> ",
-                       win ? "WIN" : "LOSS", score);
-            if (index < PM_MAX && g_pm.open[index] && cJSON_GetArraySize(entries)) {
-                static const char *const labels[] = {"Player", "Score", "Kills", "Assists", "Deaths", "K/D", "Objective", "Damage"};
-                const int col = g_pm.sort[index] ? abs(g_pm.sort[index]) - 1 : 1, desc = g_pm.sort[index] ? g_pm.sort[index] > 0 : 1;
-                sb_append(&sb, "<div class=\"match-details svelte-1irqx9a\"><table class=\"table-container svelte-1irqx9a\"><thead><tr class=\"table-row svelte-1irqx9a\">");
-                for (int c = 0; c < 8; c++)
-                    sb_appendf(&sb, "<td class=\"table-header sortable svelte-1irqx9a\" onclick=\"playTick(0.5);knPmSort(%d,%d)\">%s %s</td>", index, c, labels[c],
-                               c == col ? (desc ? "\xe2\x86\x93" : "\xe2\x86\x91") : "");
-                sb_append(&sb, "</tr></thead><tbody>");
-                const int n = cJSON_GetArraySize(entries);
-                const cJSON **sorted = calloc((size_t) n, sizeof(*sorted));
-                int k = 0;
-                cJSON_ArrayForEach(e, entries) if (sorted) sorted[k++] = e;
-                g_pm_col = col;
-                g_pm_desc = desc;
-                if (sorted) qsort(sorted, (size_t) k, sizeof(*sorted), pm_cmp);
-                for (int j = 0; sorted && j < k; j++) {
-                    const cJSON *x = sorted[j];
-                    const int xr = (int) jnum(x, "rank");
-                    const double kills = jnum(x, "kills"), deaths = jnum(x, "deaths");
-                    const char *pn = jstr(x, "player_name");
-                    sb_appendf(&sb, "<tr class=\"table-row %ssvelte-1irqx9a\"><td class=\"table-cell svelte-1irqx9a\"><div class=\"player-info svelte-1irqx9a\"><img class=\"player-rank-icon svelte-1irqx9a\" src=\"./%s\"> <span class=\"%s svelte-1irqx9a\">",
-                               pn && !strcmp(pn, me) ? "current-player " : "", ranked_rank_icon(xr), (int) jnum(x, "team") == 2 ? "blue-team" : "red-team");
-                    sb_append_esc(&sb, pn ? pn : "");
-                    sb_appendf(&sb, "</span></div></td><td class=\"table-cell svelte-1irqx9a\">%.0f</td><td class=\"table-cell svelte-1irqx9a\">%.0f</td><td class=\"table-cell svelte-1irqx9a\">%.0f</td>"
-                                    "<td class=\"table-cell svelte-1irqx9a\">%.0f</td><td class=\"table-cell svelte-1irqx9a\">%.2f</td><td class=\"table-cell svelte-1irqx9a\">%.0f</td><td class=\"table-cell svelte-1irqx9a\">%.0f</td></tr>",
-                               jnum(x, "score"), kills, jnum(x, "assists"), deaths, deaths > 0 ? kills / deaths : kills, jnum(x, "objective_score"), jnum(x, "damage_done"));
-                }
-                free(sorted);
-                sb_append(&sb, "</tbody></table></div>");
-            } else sb_append(&sb, "<!---->");
-            sb_append(&sb, "</div>");
-            index++;
-        }
-        sb_append(&sb, "</div> <!---->"); // hasPagination false: no pagination
-    }
-    sb_append(&sb, "</div>");
+    const MhOpts o = pm_opts();
+    mh_html(&sb, g_pm.data, &g_pm.st, &o);
     char *html = sb_finish(&sb);
     set_html("matchHistoryContainer", html);
     free(html);
@@ -2103,8 +2009,7 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     sb_append(&sb, "</div></div><div></div><div></div>");
     cJSON_Delete(g_pm.data); // the Match History tab's t.matchHistory (switchStat mounts it)
     g_pm.data = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(t, "matchHistory"), 1);
-    memset(g_pm.open, 0, sizeof(g_pm.open));
-    memset(g_pm.sort, 0, sizeof(g_pm.sort));
+    mh_reset(&g_pm.st);
     sb_appendf(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>%s</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div style='margin-top:10px;margin-left: 8px;'><span style='color: rgba(255,255,255,0.4);'>Data Range</span><select class='rangeSelect' onchange='changeDateRange2(this.value)'><option value='0'>1 week</option><option value='1'>2 weeks</option><option value='2'>3 weeks</option><option value='3' selected>1 month</option><option value='4'>2 months</option><option value='5'>3 months</option><option value='6'>4 months</option></select></div><div class='graphHolder'><div class='graphHeader'><span class='graphHeaderTxt'>%s</span><span id='totalSalesHeader' class='graphHeaderTotal'>0</span></div><canvas id='profSales'></canvas></div></div><div></div>",
                I18N("social.profile.sales", "Sales"), I18N("social.profile.sales.market", "Market Sales"));
     html = sb_finish(&sb);
@@ -4841,7 +4746,7 @@ static void chat_sidebar(const AccountInfo *acc) {
     hub_send(f);
 }
 
-// a friend's status line: "In game" (sm) / "Online" / "Offline"
+// a friend's status line: "playing <map>" (sm) / "Online" / "Offline"
 static const char *friend_status(const cJSON *r) {
     if (!jnum(r, "st")) return "Offline";
     const char *sm = jstr(r, "sm");
@@ -5611,7 +5516,11 @@ H(h_remove_friend) {
 H(h_create_tip) {
     UNUSED;
     if (!ev || !ev->target) return 1;
-    if (!(int) arg_n(args, argc, 1, 0)) { // createTip(el): an item card's tooltip (hub-10.0.7.js:6879-6884; ui_tooltip.c)
+    if (!(int) arg_n(args, argc, 1, 0)) { // createTip(el): an item card's tooltip (hub-10.0.7.js:6866-6876; ui_tooltip.c)
+        char idx[16] = "";
+        html_dom_get_attr(ev->target, "data-index", idx, sizeof(idx));
+        const ViewerSkin *sk = idx[0] ? viewer_skin(atoi(idx)) : NULL;
+        if (sk && (sk->flags & VS_FREE)) return 1; // the hub's: no tooltip on a free item (:6868-6870)
         ui_tooltip_item(ev->target);
         return 1;
     }
@@ -6189,9 +6098,33 @@ H(h_gift_popup) {
         I18N_F(req, "social.market.req", "lvl {0} required", lvl);
     }
     econ_new_op(g_gift_op, sizeof(g_gift_op), "kr");
+    // giftPopup(kind) (hub-10.0.7.js:5736-5750): a truthy kind (?autoGift, a creation's Gift) prefills the message
+    // "I like your <mn> mod" (kind == 1) or "... map", mn the URL's ?mn= when it holds only [\w_\-.!] (getParam,
+    // :2000-2006), else ""; without one the message has its placeholder
+    int kind = 0; // 0 none, 1 mod, 2 map
+    if (argc > 0 && (args[0].kind == HTML_ARG_NUM || args[0].kind == HTML_ARG_BOOL) && args[0].num != 0) kind = args[0].num == 1 ? 1 : 2; // true == 1
+    else if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str && args[0].str[0]) {
+        char *end = NULL;
+        const double v = strtod(args[0].str, &end);
+        while (end && isspace((unsigned char) *end)) end++;
+        kind = end && end != args[0].str && !*end && v == 1 ? 1 : 2; // kind == 1: "1" == 1
+    }
+    char mn[128] = "";
+    if (kind && query_param(g_hub.query, "mn", mn, sizeof(mn)))
+        for (const char *p = mn; *p; p++)
+            if (!isalnum((unsigned char) *p) && !strchr("_-.!", *p)) {
+                mn[0] = 0;
+                break;
+            }
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='popHeader'>%s</div><div id='giftKRBody'><div id='giftAmntFee'>Fee: None</div><input id='giftIn' oninput='calcGiftFee(this)' type='number' placeholder='%s KR' min='0' max='%.0f' step='1'><textarea id='giftMsg' rows='5' placeholder='%s'></textarea>",
-               I18N("social.market.gift", "Gift KR"), I18N("social.market.gift.amount", "Gift Amount in"), g_econ.gift_max, I18N("social.market.gift.msg", "Leave a message"));
+    sb_appendf(&sb, "<div class='popHeader'>%s</div><div id='giftKRBody'><div id='giftAmntFee'>Fee: None</div><input id='giftIn' oninput='calcGiftFee(this)' type='number' placeholder='%s KR' min='0' max='%.0f' step='1'><textarea id='giftMsg' rows='5'",
+               I18N("social.market.gift", "Gift KR"), I18N("social.market.gift.amount", "Gift Amount in"), g_econ.gift_max);
+    if (kind) {
+        sb_append(&sb, ">I like your ");
+        sb_append_esc(&sb, mn);
+        sb_append(&sb, kind == 1 ? " mod" : " map");
+    } else sb_appendf(&sb, " placeholder='%s'>", I18N("social.market.gift.msg", "Leave a message"));
+    sb_append(&sb, "</textarea>");
     sb_append(&sb, "<div id='cPostSaleBtn' class='pGiftButton' style='display:none;background-color:#2b2b2b'>Not enough KR</div>");
     sb_appendf(&sb, "<div id='postSaleBtn' class='pGiftButton' %s%sonmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>%s</div></div>",
                req[0] ? "style='background-color:#2b2b2b'" : "", req[0] ? "" : "onclick='giftUser()'", req[0] ? req : I18N("social.market.gift", "Gift KR"));
@@ -7238,18 +7171,14 @@ H(h_open_creation_tab) {
 // knPmMatch(i) / knPmSort(i, column): an entry opens / closes, a header sorts its scoreboard (again: the other way)
 H(h_pm_match) {
     UNUSED;
-    const int i = (int) arg_n(args, argc, 0, -1);
-    if (i < 0 || i >= PM_MAX) return 1;
-    g_pm.open[i] = !g_pm.open[i];
+    mh_toggle(&g_pm.st, (int) arg_n(args, argc, 0, -1));
     hub_match_history_render();
     return 1;
 }
 H(h_pm_sort) {
     UNUSED;
-    const int i = (int) arg_n(args, argc, 0, -1), col = (int) arg_n(args, argc, 1, -1);
-    if (i < 0 || i >= PM_MAX || col < 0 || col > 7) return 1;
-    const int cur = g_pm.sort[i] ? abs(g_pm.sort[i]) - 1 : 1, desc = g_pm.sort[i] ? g_pm.sort[i] > 0 : 1;
-    g_pm.sort[i] = (signed char) ((col + 1) * (cur == col ? (desc ? -1 : 1) : 1));
+    const MhOpts o = pm_opts();
+    mh_sort(&g_pm.st, g_pm.data, &o, (int) arg_n(args, argc, 0, -1), (int) arg_n(args, argc, 1, -1));
     if (ev && ev->target) html_ui_stop_propagation();
     hub_match_history_render();
     return 1;
@@ -7258,7 +7187,10 @@ H(h_pm_sort) {
 H(h_switch_stat) {
     UNUSED;
     const int tab = (int) arg_n(args, argc, 0, 0);
-    if (tab == STAT_TAB_COUNT - 1) hub_match_history_render(); // Match History: mounted when chosen
+    if (tab == STAT_TAB_COUNT - 1) { // Match History: mounted when chosen, a new component each time
+        mh_reset(&g_pm.st);
+        hub_match_history_render();
+    }
     else if (el("matchHistoryContainer")) set_html("matchHistoryContainer", "");
     for (int i = 0; i < STAT_TAB_COUNT; ++i) {
         char id[16], sel[24];

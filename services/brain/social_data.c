@@ -8,7 +8,7 @@
  * functions of postgres/0104_social_functions.sql or their C versions.
  */
 #include "acct_internal.h"
-#include "game_presence.h" /* game_presence_get: "In game" (chat header) */
+#include "game_presence.h" /* game_presence_status: "playing <map>" (the friends, the chat header) */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -179,7 +179,7 @@ static void rows_done(SocialSession *s, kn_db_result *res, void *extra) {
  * viewer's friends (mutual follows, as social_eb.c's friends:list), hub-10.0.7.js:2203-2207 (the request), 2321-2346
  * (the bubbles: online first, a status dot, the unread count, startChat with the status text and game) and 5324-5343
  * (showFriends: premium mark and picture, verified mark, Join while in a game, Remove Friend). cht = unread from that
- * friend, st = online (any brain), sm = "In game" and gid = the game id while the friend is in a game (game_presence),
+ * friend, st = online (any brain), sm = "playing <map>" and gid = the game id while the friend is in a game (game_presence),
  * sub = premium, plf = verified. */
 typedef struct ChatFriends {
     SocialSession *s; /* held */
@@ -194,11 +194,10 @@ static void chat_friends_online(void *ud, const int *online, size_t n) {
         const int on = i < n && online[i];
         i++;
         cJSON_AddNumberToObject(r, "st", on);
-        char game[96] = "";
-        int locked = 0;
-        if (on && game_presence_get((int64_t) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "fid")), game, sizeof game, &locked) == 1
+        char game[96] = "", sm[96] = "";
+        if (on && game_presence_status((int64_t) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "fid")), sm, sizeof sm, game, sizeof game) == 1
             && game[0]) {
-            cJSON_AddStringToObject(r, "sm", "In game");
+            if (sm[0]) cJSON_AddStringToObject(r, "sm", sm);
             cJSON_AddStringToObject(r, "gid", game);
         }
     }
@@ -253,7 +252,7 @@ void sh_chat_blobs(SocialSession *s, const cJSON *f) {
 }
 
 /* ["chs", {id, st, sm}]: the chat peer's presence for the header (v10: Online / Offline, or the
- * "In game" status text), sent with the thread on "ctd" */
+ * "playing <map>" status text), sent with the thread on "ctd" */
 typedef struct ChatStatus {
     SocialSession *s; /* held */
     int64_t id;
@@ -265,9 +264,8 @@ static void chat_status_done(void *ud, const int *online, size_t n) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "id", (double) w->id);
     cJSON_AddBoolToObject(o, "st", on);
-    char game[96] = "";
-    int locked = 0;
-    if (on && game_presence_get(w->id, game, sizeof game, &locked) == 1 && game[0]) cJSON_AddStringToObject(o, "sm", "In game");
+    char sm[96] = "";
+    if (on && game_presence_status(w->id, sm, sizeof sm, NULL, 0) == 1 && sm[0]) cJSON_AddStringToObject(o, "sm", sm);
     social_send_n(w->s, "chs", 1, o);
     social_unhold(w->s);
     free(w);

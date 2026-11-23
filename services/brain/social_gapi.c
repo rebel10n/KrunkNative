@@ -609,6 +609,38 @@ int social_profile_rank(cJSON *row) {
     return rank;
 }
 
+static void profile_presence(SocialSession *s, const int64_t rid, cJSON *row) {
+    ProfileWait *w = calloc(1, sizeof *w);
+    if (!w) {
+        cJSON_Delete(row);
+        return;
+    }
+    w->s = social_hold(s);
+    w->rid = rid;
+    w->data = row;
+    const int64_t id = kn_json_int(row, "player_id", 0);
+    social_online_lookup(&id, 1, profile_online, w);
+}
+
+/* match_history: the in-game profile's Match History tab (deob-10.0.7.js:113205-113221), the component's data
+ * prop, an array of v10's /match-history matches (deob-10.0.7.js:110369-110381): the latest ranked matches */
+typedef struct MatchesWait {
+    int64_t rid;
+    cJSON *data;
+} MatchesWait;
+
+static void profile_matches_done(SocialSession *s, kn_db_result *res, void *extra) {
+    MatchesWait *m = extra;
+    cJSON *matches = kn_db_ok(res) ? acct_db_json(res) : NULL;
+    if (!kn_db_ok(res)) acct_db_error(res, "profile matches");
+    if (!cJSON_IsArray(matches)) {
+        cJSON_Delete(matches);
+        matches = cJSON_CreateArray();
+    }
+    cJSON_AddItemToObject(m->data, "match_history", matches);
+    profile_presence(s, m->rid, m->data);
+}
+
 static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     GCtx *c = extra;
     cJSON *obj = kn_db_ok(res) ? acct_db_json(res) : NULL;
@@ -650,7 +682,7 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON *raids = cJSON_DetachItemFromObjectCaseSensitive(row, "raidStats"); /* raid_stats (P_PROFILE's raidStats) */
     cJSON_AddItemToObject(row, "raid_stats", cJSON_IsArray(raids) ? raids : cJSON_CreateArray());
     if (!cJSON_IsArray(raids)) cJSON_Delete(raids);
-    cJSON_AddItemToObject(row, "match_history", cJSON_CreateArray());
+    /* match_history: P_PROFILE_MATCHES fills it (profile_matches_done) */
     /* player_badge: the earned badge indices (player_badges) as v10's "1,5,9" (deob-10.0.3.js:125762) */
     cJSON *badges = cJSON_DetachItemFromObjectCaseSensitive(row, "badges"), *b;
     char list[1024] = "";
@@ -685,16 +717,15 @@ static void profile_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_DeleteItemFromObjectCaseSensitive(row, "ranked_rank");
     cJSON_AddNumberToObject(row, "ranked_rank", rank);
     cJSON_Delete(obj);
-    ProfileWait *w = calloc(1, sizeof *w);
-    if (!w) {
-        cJSON_Delete(row);
-        return;
+    MatchesWait *mw = calloc(1, sizeof *mw);
+    char ids[24];
+    snprintf(ids, sizeof ids, "%lld", (long long) kn_json_int(row, "player_id", 0));
+    if (mw) {
+        mw->rid = c->rid;
+        mw->data = row;
     }
-    w->s = social_hold(s);
-    w->rid = c->rid;
-    w->data = row;
-    const int64_t id = kn_json_int(row, "player_id", 0);
-    social_online_lookup(&id, 1, profile_online, w);
+    /* social_call frees mw without calling back when the query is refused: the row is still ours */
+    if (!mw || social_call(s, &P_PROFILE_MATCHES, KN_DB_ARGS(ids), profile_matches_done, mw) != 0) profile_presence(s, c->rid, row);
 }
 
 static void players_profile(SocialSession *s, const GapiReq *r, const char *name) {

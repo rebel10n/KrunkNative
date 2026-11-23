@@ -40,4 +40,10 @@ int game_presence_get(int64_t account_id, char *game_id, size_t n, int *password
  * gameMode, gameMap, gamePlayers and gameMaxPlayers to obj. Nothing when the lobby is not known. */
 void game_presence_describe(const char *game_id, cJSON *obj);
 
+/* The friends' status text of the hub (v10's sm: the chat bubbles' tooltip, the Friends popup's line, the map list's
+ * "friends playing", which takes the map's name as sm.replace("playing ", ""): hub-10.0.7.js:2341, 5333, 6520):
+ * "playing <map name>" while the account plays in a known lobby of this brain's nodes, and its game id into game_id.
+ * 1 = in a game (sm "" when the lobby is not known), 0 = in no game (sm and game_id ""). */
+int game_presence_status(int64_t account_id, char *sm, size_t n, char *game_id, size_t gn);
+
 #endif

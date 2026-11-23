@@ -83,16 +83,18 @@ static void render_map(void) {
         html_dom_set_html(box, "");
         return;
     }
-    char who[48], label[80], html[640];
+    char who[48], what[160], label[80], html[800];
     js_arg(who, sizeof(who), g_map.creator);
+    js_arg(what, sizeof(what), g_map.name);
     esc(label, sizeof(label), I18N("kn.creationVote.tip", "Tip the creator"));
+    // openPlayerProfile(creator, {autoGift: 2, assetName: map}) (:226239): the gift view says "I like your <map> map"
     snprintf(html, sizeof(html),
-             "<span class=\"voteHint\" onclick='openPlayerProfile(\"%s\")'>%s</span>"
+             "<span class=\"voteHint\" onclick='openPlayerProfile(\"%s\",2,\"%s\")'>%s</span>"
              "<span class=\"kn-vote-pair\">"
              "<i id=\"mapVoteD\" class=\"material-icons vote\" onclick=\"voteMap(%d,-1)\">thumb_down</i>"
              "<i id=\"mapVoteU\" class=\"material-icons vote\" onclick=\"voteMap(%d,1)\">thumb_up</i>"
              "</span>",
-             who, label, g_map.id, g_map.id);
+             who, what, label, g_map.id, g_map.id);
     html_dom_set_html(box, html);
 }
 
@@ -112,16 +114,18 @@ static void render_mod(void) {
     }
     const HtmlElem hold = html_dom_by_id("modVoteHold");
     if (hold) {
-        char who[48], label[80], html[640];
+        char who[48], what[160], label[80], html[800];
         js_arg(who, sizeof(who), g_mod.creator);
+        js_arg(what, sizeof(what), g_mod.name);
         esc(label, sizeof(label), I18N("kn.creationVote.tip", "Tip the creator"));
+        // openPlayerProfile(creator, {autoGift: 1, assetName: mod}) (:225878): "I like your <mod> mod"
         snprintf(html, sizeof(html),
-                 "<span class=\"voteHint vHR\" onclick='openPlayerProfile(\"%s\")'>%s</span>"
+                 "<span class=\"voteHint vHR\" onclick='openPlayerProfile(\"%s\",1,\"%s\")'>%s</span>"
                  "<span class=\"kn-vote-pair\">"
                  "<i id=\"modVoteD\" class=\"material-icons vote\" onclick=\"voteMod(%d,-1)\">thumb_down</i>"
                  "<i id=\"modVoteU\" class=\"material-icons vote\" onclick=\"voteMod(%d,1)\">thumb_up</i>"
                  "</span>",
-                 who, label, g_mod.id, g_mod.id);
+                 who, what, label, g_mod.id, g_mod.id);
         html_dom_set_html(hold, html);
         html_dom_set_display(hold, "");
     }

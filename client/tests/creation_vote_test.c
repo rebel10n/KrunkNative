@@ -62,12 +62,13 @@ int main(void) {
     // a hosted map fills #mapVote with both buttons
     creation_vote_set_map(4242, "Arena", "alice");
     CHECK(strstr(g_els[0].html, "id=\"mapVoteU\"") && strstr(g_els[0].html, "id=\"mapVoteD\""), "map buttons rendered");
-    CHECK(strstr(g_els[0].html, "voteMap(4242,1)") && strstr(g_els[0].html, "openPlayerProfile(\"alice\")"), "map handlers");
+    // the tip opens the creator's profile with autoGift 2 and the map's name (deob-10.0.7.js:226239)
+    CHECK(strstr(g_els[0].html, "voteMap(4242,1)") && strstr(g_els[0].html, "openPlayerProfile(\"alice\",2,\"Arena\")"), "map handlers");
 
     // a creator name cannot break out of the inline handler
     creation_vote_set_map(4242, "Arena", "al\"ice');x()//");
     CHECK(!strstr(g_els[0].html, "x()") || !strstr(g_els[0].html, "');x"), "creator is sanitised");
-    CHECK(strstr(g_els[0].html, "openPlayerProfile(\"alicex\")") != NULL, "creator keeps its safe characters");
+    CHECK(strstr(g_els[0].html, "openPlayerProfile(\"alicex\",2,\"Arena\")") != NULL, "creator keeps its safe characters");
 
     // an upvote posts to the brain, removes the buttons and tells the player
     g_sends = 0;
@@ -111,6 +112,7 @@ int main(void) {
     creation_vote_set_mod(55, "Neon", "carol");
     CHECK(!strcmp(g_els[1].display, "block") && !strcmp(g_els[2].html, "Neon"), "mod panel shown with its name");
     CHECK(strstr(g_els[3].html, "voteMod(55,-1)") && strstr(g_els[3].html, "id=\"modVoteU\""), "mod buttons rendered");
+    CHECK(strstr(g_els[3].html, "openPlayerProfile(\"carol\",1,\"Neon\")") != NULL, "mod tip: autoGift 1 and the mod's name (deob-10.0.7.js:225878)");
     press("voteMod", 55, -1);
     CHECK(!strcmp(g_path, "POST /mods/55/vote") && g_sent_vote == -1 && !strcmp(g_els[3].display, "none"), "mod downvote");
     creation_vote_set_mod(0, NULL, NULL);
