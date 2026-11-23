@@ -53,3 +53,23 @@ are in `target.md` "10.0.7"; this audit looks for anything else the client draws
   support desk); Box Office has not written its own. connect_ux_e2e (banned).
 - **Not checked here:** the svelte components' inner layouts window by window (the uidiff scenarios cover
   them where captures exist), and the HUD's in-game behaviour (owned by the gameplay audit).
+
+## In-game windows, line by line (2026-11-23)
+
+The windows outside the hub, each compared element by element and handler by handler with `deob-10.0.7.js`
+(the earlier rounds had checked them against 10.0.2 / 10.0.3 or by screenshot only). Every gap below is fixed
+unless its row says otherwise; the differences kept on purpose are in `doc/v10/kn-additions.md` ("In-game
+windows"). Tests: the rows' e2e names, all registered in CTest.
+
+| Area | Gaps found | Main fixes | Left open | Tests |
+| --- | --- | --- | --- | --- |
+| Store / shop | 14, plus the collection fold | `bundlePopup` in v10's order (NAME, INFO, KR / Junk / Premium days, 12 slots with collections folded into one "+N" slot, music, `lastBundlePopupShown`); the "gbdr" automatic popup with its 8-hour cap and the conditional bundles; the home card's priority order; Premium Benefits modal; getReadableTime; vouchPop on krunker.io; Eterno Retry; View Tickets; the home dots in place; `#purchaseResponse` click-to-hide (:215745-215950, :128613, :224172) | none | `store_bundle_e2e`, `kio_checkout_test` |
+| Battle Pass | 11 | the skip cap, `claimItemRes` with funds and junk, no creator code, the 3.5 s double-charge guard, v10's gift form, purchase errors, the wheel scroll, no end-screen panel in custom games, a level purchase's badge (:219183-219588) | `bpStatusText` kept (KN's tick hook) | `bp_scenario_e2e`, `brain_season`, `brain_rewards` |
+| Challenges / daily rewards | 13 | displayProgress / displayGoal, the 8-field `chlR` with junk / titles / RP, `chgC` / `uchp`, RP and title tiles, the capped bar, the locked Daily Spin click, daily BPP (migration 0397) (:180768-180806, :215154-215197, :225195-225229) | Box Office's mid-match `chgC` (game-server side) | `chal_card_e2e`, `brain_progress`, `brain_daily_spin` |
+| Events / spins / raffle | 20 | the brain's `/data/spins` and `swu`, a ticket's own wheel, pools as slices, promo / infoText, ticket spins, the "+ More" modal, the lottery's data, charges, pushes and texts, eventPopup's `challengeSkins` and colour, the spin history filter, years in getReadableTime, the map spinners on the same data (:224283-224790, :127588-128541, :228451-228488) | spin `instances` and "Purchase More" (no item instances / no catalogue), the lottery bulbs' blink | `prize_wheel_scenario_e2e`, `lottery_scenario_e2e`, `brain_lottery`, `brain_live_events` |
+| Ranked | 17 | start / cancel sounds, `$rankedAllRegions` before any queue, FlyingCurrency to Shop, Escape on the overlay, a closed popup's pending error, `has-scroll-bar`, the merged overlay state, the banner's Found / Connecting text, ticking shop countdowns, per-row Buying, the RP tween, refetch on tab mount; the chat line's [Join Queue] action (NET_EXT_KN_CHAT_ACTIONS) (:113305-114975, :228042-228061) | none | `server/tests/ranked_menu_e2e.py`, `ranked_krunker_e2e.py`, `chat_actions_e2e` |
+| Turf Wars / clan war | 12 | clan logos everywhere v10 draws one, tab switches resetting state, Deputy take-downs, the panel's locked territory, v10's error texts, no extra sounds, Daily View's flow, the take-down callback (:143421-146591). v10.0.7 has no clan-war popups | none | `brain_turf` (+ sqlite / mysql), uidiff `kn-turf*` |
+| Leaderboards / profile | 17 | v10's fetch errors and resets (also the ranked Rating / Matches tabs), `player_eventcount` / `player_skinvalue` boards, KPD fields, staff Chat Ban / Flag / Verify, Reports rows, Sales chart / errors / listing cards, the hidden classes, deep links (:112109-113283, :140052-140850, :230147-230168) | KrunkCup's data (no tournament model) | `brain_social_v10`, `brain_v10_social_e2e` |
+
+Nothing in these windows needed the menu agent's files except one: `v10_menu.c`'s shop-button note
+(`store_item_update`) still reads the compiled-in wheels, not the brain's `/data/spins`.

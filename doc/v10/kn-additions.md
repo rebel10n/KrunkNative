@@ -124,3 +124,36 @@ them out of the gap list.
 Multi-round Defuse is listed separately in the follow-ups because the user picked "keep the fixes"
 for the group while this one is a v10 bug KN currently *copies*. If multi-round Defuse should be
 playable, reset the bomb, the defuse count and lives at round start and delete this row.
+
+## In-game windows: differences kept in the v10.0.7 sweep (2026-11-23)
+
+The line-by-line sweep of the store, Battle Pass, challenges, events / spins / raffle, ranked, Turf Wars,
+leaderboards and profile windows against `deob-10.0.7.js` (doc/v10/parity-audit-2026-11-20-ui.md, "In-game
+windows") ported every gap it found except these, which are kept on purpose. Audits should leave them out.
+
+| Window | v10.0.7 | KrunkNative (kept) | Why / where |
+|---|---|---|---|
+| Ranked popup | `.home-container` watches resizes and DOM mutations for `has-scroll-bar` | measured after each render and on open | no MutationObserver in the native page; `ranked_ui.c` |
+| Ranked popup | "Connecting to match..." until the game says so | the same, capped at 15 s | a join that never settles must not leave the banner up; `ranked_ui.c` |
+| Ranked shop | the row is looked up again after the confirm | the same, but a shop still loading uses the row the dialog opened for | `ranked_ui.c` |
+| Chat | the official server decides which lines carry `extra.actions` | Box Office puts [Join Queue] on the brain's queued-for-ranked line | the only ranked line Box Office's server sends; `server/src/net.c` |
+| Battle Pass > Challenges | daily challenges only | also a "Weekly Challenges" block | Box Office's weekly rows (23-26) would be shown nowhere else; `battlepass_ui.c` |
+| Challenges | `chgC` mid-match ("Finish the game to complete") from the game server | Box Office sends `chgC` at the match end; the mid-match form only comes from krunker.io servers | kn_brain decides completions at the match commit, the game server only counts events |
+| Challenges | official daily BPP values | 50, and 25 for the spray and assist rows (migration 0397) | no official capture of the dailies; the values are the offline v10 sandbox fixture's |
+| Profile > Sales | a canvas line chart | a bar strip over the same zero-filled days | `v10_social.c` |
+| Profile staff actions | `/moderation/*` and `/players/:name/verify` over gapi | the same routes to kn_brain over HTTP with `?token=` | the social-socket tunnel does not carry them |
+| Profile data | `player_elo4` is the junk balance | the brain fills `player_elo4` with the junk wallet's text | v10 reads Junk from that field; `db_social.c` |
+| Profile / leaderboards deep links | `?profile=` / `?leaderboards=` | web build only | the desktop client has no page URL; `client/src/main.c` |
+| Market listings on a profile | a listing's nametag | Box Office listings have none | no item instances (doc/v10/ui.md, Market) |
+| Community events | only `http(s)://` links | Box Office's relative `/?play=` and `/social.html` links too | the brain knows no public web base; `v10_news.c`, `community.c` |
+| Prize wheels | spin data and lottery pushes on the game socket | `swu`, `lotEnt`, `lotWinP`, `lotEnd` on the social socket | the client talks only to kn_brain |
+| Prize wheels | a spin's `instances` (wear, serial) | not sent | no item instances |
+| Prize wheels | Spin Error's "Purchase More" (a catalogue entry for the ticket) | not shown | Box Office has no ticket catalogue (no payments) |
+| Prize wheels | no Free KR wheel in 10.0.7 | the Free KR wheel through `claimReward` | earlier Box Office addition; `store_ui.c` |
+| Raffle | no deadline | a 15 s deadline and a Retry button on a load that never answers | `v10_misc_popups.c` |
+| Events | every event ends | an open-ended event shows no "Ends in" line | operators may run one without an end |
+| Turf Wars | `clans/<id>.png?v=<n>` user assets | Box Office logos from `/api/clans/<id>/logo?v=<n>` | the brain serves the approved logo; `turf_ui.c` |
+| Turf Wars | a failed day change shows the error | the prompt and the error | `turf_ui.c` |
+| Turf Wars | the post is filtered out after a take-down | the board reloads | `turf_ui.c` |
+| Turf Wars | Daily View fetched each time | a failed read is cached for 30 s like every Turf read | `turf_ui.c` `TTL_MS` |
+| Turf Wars | `isDeputy` from the account | `is_deputy` comes from krunker.io accounts only | Box Office accounts have no Deputy role |
