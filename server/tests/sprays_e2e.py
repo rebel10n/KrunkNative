@@ -399,7 +399,8 @@ def shots(first, count, step, work, name):
 # The watcher looks down all the time and takes a shot every second.
 WATCHER_SCRIPT = "0 play\n500 state\n" + "".join("%d look 0 -1.6\n" % (t * 1000) for t in range(1, 45)) + "{shots}45000 quit\n"
 # Customize (windows[2].tabIndex = 2, showWindow(3)) > Spray (showWindow(9): Select Spray), the
-# spray's card is listed and its onclick (selectSpray) picks it, Play; then look down and spray with
+# spray's card is listed (found with the window's Search Item box: v10 sorts by rarity, the free ones last,
+# deob-10.0.7.js:220243-220256, so a card can be anywhere in the virtual grid) and its onclick (selectSpray) picks it, Play; then look down and spray with
 # the spray key (F), shots after it. The look comes 2.2 s before the spray: the watcher shoots every
 # second, so its last frame before the decal shows the sprayer already still (looking down). (The handler is called, not clicked: at the bottom of the list
 # a card can sit under the window's edge.)
@@ -407,9 +408,9 @@ PICK_SCRIPT = """0 menu
 500 clickid customizeButton
 1500 frames {work}/{name}_customize 1
 1600 call showWindow 9
-3000 setscroll skinList 100000
-3300 setscroll skinList 100000
-3600 setscroll skinList 100000
+2600 clickid itemSearch
+2700 type {query}
+2800 call searchItems
 3900 scroll @list skinList
 4000 nodes @card .noBtnCard[data-index='{spray}']
 4100 frames {work}/{name}_picker 1
@@ -456,7 +457,7 @@ def account_case(brain_port, node, owner, owner_token):
     watcher, wlog = client("watcher", brain_port, WATCHER_SCRIPT.format(shots=shots(1500, 43, 1000, WORK, "watch")), {})
     check("2: the watching guest plays", wait_for(lambda: playing(read_log(wlog)), 60), read_log(wlog)[-300:])
     node.console("bring all %d %d %d" % SPOT)
-    sprayer, slog = client("owner", brain_port, PICK_SCRIPT.format(work=WORK, name="owner", spray=CLICKBAIT,
+    sprayer, slog = client("owner", brain_port, PICK_SCRIPT.format(work=WORK, name="owner", spray=CLICKBAIT, query="Clickbait",
                                                                     shots=shots(12500, 7, 1000, WORK, "owner_after")),
                            {"krunker_username": owner, "krunker_token": owner_token})
     check("2: the account plays", wait_for(lambda: playing(read_log(slog)), 60), read_log(slog)[-300:])
@@ -486,7 +487,7 @@ def account_case(brain_port, node, owner, owner_token):
 
 
 def guest_cases(brain_port, node):
-    p, log = client("guest", brain_port, PICK_SCRIPT.format(work=WORK, name="guest", spray=POISN,
+    p, log = client("guest", brain_port, PICK_SCRIPT.format(work=WORK, name="guest", spray=POISN, query="Poisn",
                                                             shots=shots(12500, 7, 1000, WORK, "guest_after")), {})
     if wait_for(lambda: playing(read_log(log)), 60):
         node.console("bring all %d %d %d" % SPOT)

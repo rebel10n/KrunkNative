@@ -162,7 +162,8 @@ def run(tag, script_text, timeout=240):
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(work, "state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_INPUT_SCRIPT": script,
                 "KRUNKNATIVE_FIXED_DELTA": str(FRAME_MS), "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_AUDIO_LOG": "1",
-                "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_HTML_IMAGE_LOG": "1"})
+                # KRUNKNATIVE_DEBUG=2: audio.c logs each play at verbose level 2 (KN_LOG_VERBOSE2)
+                "KRUNKNATIVE_DEBUG": "2", "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_HTML_IMAGE_LOG": "1"})
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
