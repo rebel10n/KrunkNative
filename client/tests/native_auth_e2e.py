@@ -6,8 +6,8 @@ local kn_brain (sqlite, temp dir) and services/common/tests/fake_smtp.py:
   email (email, Tab, username, Tab, password, Register) -> the verification mail -> its link verifies ->
   logout -> login with Enter -> logout -> Forgot password? -> the recover card -> the reset mail -> the
   code typed into the reset steps (account_ui.c, in window 5's frame) -> a new password -> signed in ->
-  the old password is refused and the new one logs in. Plus: a login while the account server is down
-  says why (not "Please try again.").
+  the old password is refused and the new one logs in -> flagged for hacking, its login shows v10.0.7's BANNED
+  popup. Plus: a login while the account server is down says why (not "Please try again.").
 
   python3 -I client/tests/native_auth_e2e.py BUILD_DIR      (repository root)
 Headless client_bin (KRUNKNATIVE_HEADLESS=1, null audio, no DISPLAY, private XDG dirs), a local
@@ -247,6 +247,29 @@ def scenario(brain_url, game_port, smtp, db):
     check("login with the new password", log.count(f"[account] logged in as {NAME}") >= 1)
     ok = sqlite3.connect(db).execute("SELECT count(*) FROM email_tokens WHERE kind = 'reset' AND used_at IS NULL").fetchone()
     check("the reset code is used up", ok and ok[0] == 0, repr(ok))
+
+    # 6. an account flagged for hacking: its login shows v10.0.7's BANNED popup (genericPopup "contPop",
+    #    deob-10.0.7.js:216854-216855) and skips the rest of the login (the promo prefs, the deletion confirm)
+    con = sqlite3.connect(db)
+    n = con.execute("UPDATE players SET player_hack = 1 WHERE player_id = (SELECT id FROM accounts WHERE username = ?)", (NAME,)).rowcount
+    con.commit()
+    check("the account is flagged for hacking (players.player_hack)", n == 1, repr(n))
+    con.close()
+    log = run_client("banned", f"""0 menu
+1500 call showWindow 5
+2000 call logoutAcc
+2400 clickid knV10LoginMode
+2600 clickid accName
+2700 type {NAME}
+2800 clickid accPass
+2900 type new_pass_2
+3000 clickid knV10LoginSubmit
+6000 vis @ban genericPop popupHolder
+6100 quit
+""", brain_url, game_port)
+    check("a flagged account still logs in", f"[account] logged in as {NAME}" in log)
+    check("its login shows the BANNED popup", "[account] BANNED: the account is flagged for hacking" in log and
+          vis(log, "ban").get("genericPop") == "1", str(vis(log, "ban")))
 
 
 def down_scenario(game_port):

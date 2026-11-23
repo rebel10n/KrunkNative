@@ -44,6 +44,16 @@ int main(void) {
     audio_apply_setting("dialogueVolume", "0");
     CHECK(near(audio_sound_volume("medal_1"), 0.0f) && near(audio_sound_volume("shoe_2"), 0.5f) &&
           near(audio_sound_volume("weapon_2"), 0.4f), "dialogueVolume 0 mutes medal_1 only");
+    // window.activeHacker (deob-10.0.7.js:216841): every clip is keyed name + "hckd" (sound/fart_0.mp3) and keeps the
+    // category of its name (soundCats[name], :200724-200735); it is set once and stays for the page
+    CHECK(!audio_active_hacker(), "no activeHacker by default");
+    audio_set_active_hacker(1);
+    audio_set_active_hacker(0);
+    CHECK(audio_active_hacker(), "activeHacker stays once set (window.activeHacker is never cleared)");
+    CHECK(near(audio_sound_volume("weapon_2hckd"), 0.4f) && near(audio_sound_volume("medal_1hckd"), 0.0f) &&
+              near(audio_sound_volume("tick_0hckd"), 0.6f),
+          "a hacked clip plays at its name's category: weapon_2hckd %g, medal_1hckd %g, tick_0hckd %g",
+          audio_sound_volume("weapon_2hckd"), audio_sound_volume("medal_1hckd"), audio_sound_volume("tick_0hckd"));
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

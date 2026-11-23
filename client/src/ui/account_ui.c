@@ -74,6 +74,7 @@
 #include <double_xp_offer.h> // the end screen's 2x XP answer on the krunker.io game socket ("rrqdxp")
 #include <app_backend.h>     // app_backend_official_session(): the router's / a child window's official connection
 #include <rent_servers_ui.h> // "dsrvl"
+#include <audio.h>           // audio_set_active_hacker: v10's window.activeHacker
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT I18N("generic.wait", "Please wait...") // v7 showAccountResponse(i18n.t("generic.wait"))
@@ -111,6 +112,7 @@ static cJSON *g_raid_stats;      // the Box Office account's raidStats (owned; k
 static int g_req_del;            // acc.reqDel (v10 player_cancelrequest): "Processing Deletion" (account_life.c)
 static void deletion_answer(const cJSON *frame); // requestConfirm's answer (Account Privacy, below)
 static void deletion_confirm(int flag);      // requestConfirm(flag): rpc("rqd", flag)
+static void banned_popup(void);              // the BANNED popup of a hacker-flagged account's login
 static char g_twitch_id[64];     // acc.twitchId (setData [44]): the linked Twitch user id, "" none
 static char g_twitch_name[64];   // acc.twitch (setData [23]): the linked Twitch login, "" none
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
@@ -1635,8 +1637,30 @@ static void account_response(const cJSON *frame) {
     // v10's account carries activeChallenges from the login on (deob-10.0.7.js:225216): the mid-match
     // CHALLENGE_COMPLETED [index, ...] the game server has kn_brain send indexes into it
     account_challenges_request();
+    if (g_acc.hack) audio_set_active_hacker(1); // `acc.hack && (window.activeHacker = true)` (deob-10.0.7.js:216841)
+    if (!had && g_acc.hack) {
+        // an account flagged for hacking gets the BANNED popup in place of the rest of the login (:216854-216855)
+        banned_popup();
+        return;
+    }
     if (!had) promo_after_login(); // getPreference and the opt-in popup (deob-10.0.7.js:216865-216873)
     if (!had && g_req_del) deletion_confirm(0); // `acc.reqDel && requestConfirm(0)` (deob-10.0.7.js:216885)
+}
+
+// genericPopup(..., "contPop") of a login whose account is flagged for hacking (deob-10.0.7.js:216854-216855): "BANNED",
+// account.banned.hack, account.banned.appeal and the appeal address. The address is Krunker's (FRVR's) own: v10 prints
+// it, and Box Office has no appeal desk of its own to name instead.
+static void banned_popup(void) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='text-align:center'><div style='font-size:80px;color:#eb3434'>BANNED</div><div style='color:#fff'>");
+    sb_append(&sb, I18N("account.banned.hack", "This account has been banned for Hacking."));
+    sb_append(&sb, "</div><div style='color:#fff'>");
+    sb_append(&sb, I18N("account.banned.appeal", "If you want to appeal your ban, contact:"));
+    sb_append(&sb, "</div><div style='margin-top:10px;color:#3483eb'>krunker+banappeal@frvr.com</div><div style='height:10px'></div></div>");
+    char *html = sb_finish(&sb);
+    v10_popup_show("contPop", html, NULL);
+    free(html);
+    KN_LOG_DEBUG1("[account] BANNED: the account is flagged for hacking (the rest of the login is skipped)\n");
 }
 
 // The signed-in account ends here: the server hears logoutAcc and the session leaves storage. The

@@ -119,6 +119,10 @@ void audio_play_3d_fade(const char *name, vec3 position, float range, float volu
 void audio_stop(const char *name);
 void audio_stop_3d_loops(void);
 void audio_stop_all(void);
+// window.activeHacker (deob-10.0.7.js:216841): an account flagged for hacking signed in; from then on every sound but
+// an asset's plays sound/fart_0 (getSound, :200724-200735) until the client restarts (v10: the page reloads).
+void audio_set_active_hacker(int on);
+int audio_active_hacker(void);
 // The file of `name` changed (a resource pack came or went, mod_pack.c): its playing voices
 // stop and the next play reads and decodes the file again (v7 SOUND.updateSound).
 void audio_reload(const char *name);

@@ -243,6 +243,30 @@ static int sound_is_asset(const char *name) {
     return !strncmp(name, AUDIO_ASSET_PREFIX, sizeof(AUDIO_ASSET_PREFIX) - 1);
 }
 
+// window.activeHacker (deob-10.0.7.js:216841, set at the login of an account flagged for hacking, never cleared on the
+// page): getSound keys every clip name + "hckd" and loads /sound/fart_0.mp3 for each one that is not an asset sound,
+// with the category of the name (:200724-200735); getActive looks it up by the same key (:200744).
+#define AUDIO_HACKED_SUFFIX "hckd"
+static int g_active_hacker;
+
+void audio_set_active_hacker(const int on) {
+    if (on) g_active_hacker = 1; // the page keeps it until it reloads
+}
+
+int audio_active_hacker(void) { return g_active_hacker; }
+
+static int sound_is_hacked(const char *name) {
+    const size_t n = strlen(name), s = sizeof(AUDIO_HACKED_SUFFIX) - 1;
+    return !sound_is_asset(name) && n > s && !strcmp(name + n - s, AUDIO_HACKED_SUFFIX);
+}
+
+// the clip key of a sound name: name + "hckd" for an active hacker (not an asset sound)
+static const char *sound_key(const char *name, char *buf, const size_t size) {
+    if (!name || !g_active_hacker || sound_is_asset(name)) return name;
+    snprintf(buf, size, "%s" AUDIO_HACKED_SUFFIX, name);
+    return buf;
+}
+
 // The file of a clip under assets/: sound/<name>.mp3, or user-assets/<id>/sound.mp3; an asset id whose last part is
 // sound* is the file itself (getSound: `/\/sound[^/]*$/.test(src) ? src + ".mp3" : src + "/sound.mp3"`,
 // deob-10.0.3.js:225205): a custom skin's skins/<_id>/sound_swap / sound_inspect (user-assets/skins/<_id>/sound_swap.mp3).
@@ -252,6 +276,8 @@ static void clip_relative_path(const char *name, char *out, const size_t size) {
         const char *last = strrchr(id, '/');
         if (last && !strncmp(last + 1, "sound", 5) && !strchr(last + 1, '/')) snprintf(out, size, "user-assets/%s.mp3", id);
         else snprintf(out, size, "user-assets/%s/sound.mp3", id);
+    } else if (sound_is_hacked(name)) {
+        snprintf(out, size, "sound/fart_0.mp3");
     } else {
         snprintf(out, size, "sound/%s.mp3", name);
     }
@@ -268,6 +294,17 @@ static const struct {
 
 static int sound_category(const char *name) {
     if (sound_is_asset(name)) return AUDIO_CAT_ASSET;
+    if (sound_is_hacked(name)) { // soundCats[the name]
+        char base[AUDIO_NAME_MAX];
+        snprintf(base, sizeof(base), "%.*s", (int) (strlen(name) - (sizeof(AUDIO_HACKED_SUFFIX) - 1)), name);
+        for (size_t i = 0; i < sizeof(SOUND_CATS) / sizeof(SOUND_CATS[0]); i++) {
+            if (!strcmp(SOUND_CATS[i].name, base)) return SOUND_CATS[i].category;
+        }
+        for (size_t i = 0; i < sizeof(KN_SOUND_CATS) / sizeof(KN_SOUND_CATS[0]); i++) {
+            if (!strcmp(KN_SOUND_CATS[i].name, base)) return KN_SOUND_CATS[i].category;
+        }
+        return -1;
+    }
     for (size_t i = 0; i < sizeof(SOUND_CATS) / sizeof(SOUND_CATS[0]); i++) {
         if (!strcmp(SOUND_CATS[i].name, name)) return SOUND_CATS[i].category;
     }
@@ -545,7 +582,8 @@ static void play_request_handle(const char *name, const VoiceKind kind, const in
                                 const int distance_model, const uint32_t handle) {
     if (!g_audio.ready) return;
 
-    const int clip = clip_find(name, 1);
+    char key[AUDIO_NAME_MAX];
+    const int clip = clip_find(sound_key(name, key, sizeof(key)), 1);
     if (clip < 0) return;
     if (g_audio.clips[clip].state == CLIP_FAILED) return;
 
@@ -1005,7 +1043,8 @@ int audio_apply_setting(const char *key, const char *value) {
 
 void audio_preload(const char *name) {
     if (!g_audio.ready) return;
-    const int clip = clip_find(name, 1);
+    char key[AUDIO_NAME_MAX];
+    const int clip = clip_find(sound_key(name, key, sizeof(key)), 1);
     if (clip >= 0 && g_audio.clips[clip].state == CLIP_UNLOADED) g_audio.clips[clip].state = CLIP_QUEUED;
 }
 
@@ -1070,7 +1109,8 @@ static void stop_matching(const int clip, const int only_kind, const VoiceKind k
 
 void audio_stop(const char *name) {
     if (!g_audio.ready) return;
-    const int clip = clip_find(name, 0);
+    char key[AUDIO_NAME_MAX];
+    const int clip = clip_find(sound_key(name, key, sizeof(key)), 0);
     if (clip < 0) return;
     if (g_audio.log) KN_LOG_VERBOSE2("[audio] t=%.3f stop %s\n", audio_now(), name);
     stop_matching(clip, 1, VOICE_2D);
