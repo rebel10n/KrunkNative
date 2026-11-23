@@ -804,6 +804,10 @@ kio-battlepass-e2e: build ## The Battle Pass on an official krunker.io game (bat
 kio-junkyard-e2e: build ## The Junkyard on an official krunker.io game (v10_junkyard.c): "recps" / "crft" on the game socket after "en", krunker.io's recipes against the account's materials, v10's confirmation, craftRes' "<t> remaining", no second "recps" (krunker.io stubs, headless)
 	timeout 400 $(PYTHON) -I client/tests/kio_junkyard_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-chatban-e2e
+kio-chatban-e2e: build ## The punish popup's Chat Ban on an official krunker.io game (hud_ui.c): getChatBan / chatBan on krunker.io's gapi with the Bearer, v10's label and chat lines, nothing to the brain (krunker.io stubs, headless)
+	timeout 400 $(PYTHON) -I client/tests/kio_chatban_e2e.py $(DEBUG_DIR)
+
 .PHONY: kio-store-e2e
 kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs, every purchase / spin / redeem read-only, Box Office's store again after leaving
 	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)

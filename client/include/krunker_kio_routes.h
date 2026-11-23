@@ -61,5 +61,8 @@ size_t krunker_kio_gapi_path(char *out, size_t n, const char *kn_path);
 //   DELETE /clans/<id>/logo                (removeLogo; uploadLogo is multipart FormData: not here)
 //   POST /clans/<id>/recruitment {post}    DELETE /clans/<id>/recruitment   (createOrUpdateRecruitment / removeRecruitment)
 //   POST /clans/<id>/apply                 (applyToClan, no body)
-// <id> is digits; no query. Anything else is 0 (not sent).
+// <id> is digits; no query. Also the punish popup's Chat Ban (deob-10.0.7.js:27208-27217), exact:
+//   POST /moderation/chat {player_name, ban}   GET /moderation/chat/<name>   (chatBan / getChatBan; <name> one
+//                                                                             encoded segment, at most 64 characters)
+// Anything else is 0 (not sent).
 int krunker_kio_gapi_write(const char *method, const char *path);

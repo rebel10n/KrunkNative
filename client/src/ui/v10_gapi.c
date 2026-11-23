@@ -10,8 +10,9 @@
 // {data, error} answers unwrapped as v10's _10067 does (v10:26094). The reads go there: GETs of the
 // player / social / clan / Turf Wars groups the Social hub, the profile and the clan views use. The
 // only writes that go there are v10.0.7's clan writes (krunker_kio_gapi_write: the MOTD, loot config,
-// banner colour, logo removal, recruitment post and apply, deob-10.0.7.js:26838-26924), with their
-// JSON body and the account's Bearer. Anything else (follow, vote, comment, post, gift, report, other
+// banner colour, logo removal, recruitment post and apply, deob-10.0.7.js:26838-26924) and the punish
+// popup's Chat Ban (chatBan POST /moderation/chat and its getChatBan GET, deob-10.0.7.js:27208-27217),
+// with their JSON body and the account's Bearer. Anything else (follow, vote, comment, post, gift, report, other
 // groups) is not ported for the krunker.io account and is not sent at all (0: the caller's own
 // failure path); the kn_brain socket is held meanwhile, so nothing reaches the Box Office account either.
 #include <backend.h>

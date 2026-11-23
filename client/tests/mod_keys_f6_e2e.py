@@ -11,7 +11,9 @@ Headless client_bin runs (offline Kanji, input scripts, private XDG_CONFIG_HOME)
   3. game page with the chat field focused (Enter): F6 does nothing, no editor route.
   4. Clockwork played, the editor's last session is Atomic (its autosave): F6 opens Clockwork
      ("[editor] opened the staged map: Clockwork"), never the autosave.
-  5. a custom map played (a Clockwork copy named "F6 Probe"): F6 opens that map the same way.
+  5. a custom map played (a Clockwork copy named "F6 Probe"): F6 opens that map the same way, staged as v10.0.7's
+     edMp stages one: the staged JSON (KRUNKNATIVE_MAP_TO_EDIT_DUMP, captured before the editor consumes it) has
+     its objects' `col: false` and `l: false` dropped, a true col and a numeric l 0 kept.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -36,13 +38,14 @@ ATOMIC = "assets/maps/official/23_atomic.json"
 STAGED = "[editor] opened the staged map: "
 AUTOSAVE = "[editor] restored the last session: "
 EDITOR_UP = "[editor] entered ("  # the editor window's page is up (logged after the map is chosen)
+DUMP = os.path.join(WORK, "staged.json")  # KRUNKNATIVE_MAP_TO_EDIT_DUMP: the staged JSON, before the editor consumes it
 results = []
 
 
 def check(name, ok, detail=""):
     ok = bool(ok)
     results.append(ok)
-    print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + detail) if detail else ''}", flush=True)
+    print(f"{'PASS' if ok else 'FAIL'}  {name}{('  -- ' + str(detail)) if detail else ''}", flush=True)
 
 
 def run(name, script, timeout=240, map_path=KANJI, until=None):
@@ -57,7 +60,8 @@ def run(name, script, timeout=240, map_path=KANJI, until=None):
     # KRUNKNATIVE_DEBUG=2: the [account] / [mm] / [preview] / console lines it waits on are level 1-2 (5f55eef1)
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_DEBUG": "2", "XDG_CONFIG_HOME": CFG, "XDG_STATE_HOME": os.path.join(WORK, "state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_FIXED_DELTA": "16.667",
+                "KRUNKNATIVE_MAP_TO_EDIT_DUMP": DUMP})
     with open(log, "w") as out:
         p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", map_path], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -115,11 +119,37 @@ def main():
     with open(CLOCKWORK) as f:
         probe = json.load(f)
     probe["name"] = "F6 Probe"
+    # edMp's staging, which F6 shares (deob-10.0.7.js:228218): `col === false` and `l === false` are deleted, nothing else
+    # (a true col and a numeric l 0 stay)
+    objs = probe["objects"]
+    for i in (0, 1, 2):
+        objs[i]["col"] = False
+    for i in (3, 4):
+        objs[i]["l"] = False
+    objs[5]["col"] = True
+    objs[6]["l"] = 0
     custom = os.path.join(WORK, "f6_probe.json")
     with open(custom, "w") as f:
         json.dump(probe, f)
     text = run("custom", "0 play\n500 down F6\n600 up F6\n", map_path=custom, until=EDITOR_UP)
     check("custom map: the editor opens that map", STAGED + "F6 Probe" in text and AUTOSAVE not in text, f"log {WORK}/custom.log")
+    check("custom map: the staging drops 3 col false and 2 l false (the log)",
+          "[editor] mapToEdit staged (" in text and "3 col false and 2 l false dropped" in text, f"log {WORK}/custom.log")
+    try:
+        with open(DUMP) as f:
+            staged = json.load(f)
+    except (OSError, ValueError) as e:
+        staged = {"error": str(e)}
+    so = staged.get("objects") or []
+    check("custom map: the staged JSON (KRUNKNATIVE_MAP_TO_EDIT_DUMP) is the map, every object kept",
+          staged.get("name") == "F6 Probe" and len(so) == len(objs), (staged.get("name"), len(so), len(objs)))
+    check("custom map: no staged object has col false or l false",
+          len(so) == len(objs) and not any(o.get("col") is False or o.get("l") is False for o in so) and
+          all("col" not in so[i] for i in (0, 1, 2)) and all("l" not in so[i] for i in (3, 4)),
+          [{k: so[i].get(k) for k in ("col", "l")} for i in range(min(5, len(so)))])
+    check("custom map: a true col and a numeric l 0 stay (=== false only)",
+          len(so) > 6 and so[5].get("col") is True and so[6].get("l") == 0 and so[6].get("l") is not False,
+          (so[5] if len(so) > 5 else None, so[6] if len(so) > 6 else None))
 
     ok = all(results)
     print(f"{'PASS' if ok else 'FAIL'}: {sum(results)}/{len(results)}")

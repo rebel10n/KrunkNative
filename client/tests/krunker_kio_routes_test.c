@@ -180,6 +180,19 @@ int main(void) {
         CHECK(!krunker_kio_gapi_write(refused[i].method, refused[i].path), "%s %s is not sent", refused[i].method ? refused[i].method : "(null)",
               refused[i].path ? refused[i].path : "(null)");
 
+    // 6d. the punish popup's Chat Ban on gapi (deob-10.0.7.js:27208-27217): exactly chatBan and getChatBan
+    CHECK(krunker_kio_gapi_write("POST", "/moderation/chat"), "POST /moderation/chat is chatBan");
+    CHECK(krunker_kio_gapi_write("GET", "/moderation/chat/StubFoe"), "GET /moderation/chat/<name> is getChatBan");
+    CHECK(krunker_kio_gapi_write("GET", "/moderation/chat/a%20b"), "an encoded name is one segment");
+    const struct {
+        const char *method, *path;
+    } mod_refused[] = {{"GET", "/moderation/chat"},          {"PUT", "/moderation/chat"},          {"POST", "/moderation/chat/x"},
+                       {"DELETE", "/moderation/chat/x"},     {"GET", "/moderation/chat/"},         {"GET", "/moderation/chat/a/b"},
+                       {"GET", "/moderation/chat/a?x=1"},    {"POST", "/moderation/chat?x=1"},     {"POST", "/moderation/flag"},
+                       {"GET", "/moderation/chat/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}};
+    for (size_t i = 0; i < sizeof(mod_refused) / sizeof(mod_refused[0]); i++)
+        CHECK(!krunker_kio_gapi_write(mod_refused[i].method, mod_refused[i].path), "%s %s is not sent", mod_refused[i].method, mod_refused[i].path);
+
     // 7. a mirror moves the data client: the webhooks and the streams follow KRUNKNATIVE_KRUNKER_DATA_API
     env_clear();
     setenv("KRUNKNATIVE_KRUNKER_DATA_API", "http://127.0.0.1:9101/api/", 1);

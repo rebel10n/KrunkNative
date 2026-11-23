@@ -181,31 +181,47 @@ void s2c_ui_tick(Client *client) {
 
 #define MAP_TO_EDIT_KEY "mapToEdit" // the editor's checkEdit reads it first (editor_io.c ed_map_restore; ui_mod_keys.c)
 
+// KRUNKNATIVE_MAP_TO_EDIT_DUMP=<path> (tests: mod_keys_f6_e2e): the staged JSON is also written there, as the editor
+// consumes mapToEdit (and clears it) as soon as it opens
+static void stage_dump(const char *text) {
+    const char *p = getenv("KRUNKNATIVE_MAP_TO_EDIT_DUMP");
+    if (!p || !*p || !text) return;
+    FILE *f = fopen(p, "w");
+    if (!f) return;
+    fputs(text, f);
+    fclose(f);
+}
+
 // edMp's staging (deob-10.0.7.js:228218): the map's objects lose `col: false` and `l: false`, then it is saved as
 // mapToEdit; a map that does not parse is saved as it came (the try's catch). F6 (ui_mod_keys.c) stages the same way.
 void s2c_ui_stage_map_to_edit(const char *json, const size_t len) {
     if (!json || !len) return;
     char *text = NULL;
+    int cols = 0, ls = 0;
     cJSON *map = cJSON_ParseWithLength(json, len);
     const cJSON *objects = cJSON_GetObjectItemCaseSensitive(map, "objects");
     if (cJSON_IsArray(objects)) { // JSON.parse(map).objects.forEach: col === false / l === false deleted
         cJSON *o;
         cJSON_ArrayForEach(o, objects) {
-            if (cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "col"))) cJSON_DeleteItemFromObjectCaseSensitive(o, "col");
-            if (cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "l"))) cJSON_DeleteItemFromObjectCaseSensitive(o, "l");
+            if (cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "col"))) cJSON_DeleteItemFromObjectCaseSensitive(o, "col"), cols++;
+            if (cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "l"))) cJSON_DeleteItemFromObjectCaseSensitive(o, "l"), ls++;
         }
         text = cJSON_PrintUnformatted(map);
     }
     cJSON_Delete(map);
+    KN_LOG_VERBOSE2("[editor] mapToEdit staged (%zu bytes): %d col false and %d l false dropped%s\n", len, cols, ls,
+                    text ? "" : " (not a map: staged as it came)");
     if (!text) { // the try's catch: the map as it came
         text = malloc(len + 1);
         if (!text) return;
         memcpy(text, json, len);
         text[len] = 0;
         html_storage_set(MAP_TO_EDIT_KEY, text);
+        stage_dump(text);
         free(text);
     } else {
         html_storage_set(MAP_TO_EDIT_KEY, text);
+        stage_dump(text);
         cJSON_free(text);
     }
 }

@@ -168,8 +168,20 @@ int krunker_kio_gapi_write(const char *method, const char *path) {
         const char *method, *tail;
     } writes[] = {{"PUT", "/motd"},           {"DELETE", "/motd"},        {"PUT", "/loot-config"}, {"POST", "/banner-color"},
                   {"DELETE", "/logo"},        {"POST", "/recruitment"},   {"DELETE", "/recruitment"}, {"POST", "/apply"}};
+    if (!method || !path) return 0;
+    // the punish popup's Chat Ban (v10.0.7's moderation client, deob-10.0.7.js:27208-27217, used at :224084-224125):
+    // chatBan, POST /moderation/chat {player_name, ban}, and getChatBan, GET /moderation/chat/<encodeURIComponent(name)>.
+    // The GET is here, not with the group reads (v10_gapi.c kio_readable), as it is staff-only and exact: one name
+    // segment (no '/', no query, at most 64 characters)
+    if (!strcmp(method, "POST") && !strcmp(path, "/moderation/chat")) return 1;
+    static const char chat[] = "/moderation/chat/";
+    if (!strcmp(method, "GET") && !strncmp(path, chat, sizeof(chat) - 1)) {
+        const char *name = path + sizeof(chat) - 1;
+        const size_t len = strlen(name);
+        return len > 0 && len <= 64 && !strpbrk(name, "/?#");
+    }
     static const char clans[] = "/clans/";
-    if (!method || !path || strncmp(path, clans, sizeof(clans) - 1) != 0) return 0;
+    if (strncmp(path, clans, sizeof(clans) - 1) != 0) return 0;
     const char *id = path + sizeof(clans) - 1, *tail = id;
     while (*tail >= '0' && *tail <= '9') tail++;
     if (tail == id || tail - id > 12) return 0;

@@ -35,6 +35,7 @@
 #include "klog.h"
 #include <backend_ui.h> // active_account: the local player's clan in the player list
 #include <backend.h>    // backend_http_request / backend_social_send_text: the punish popup's Flag and Chat Ban
+#include <v10_social.h> // v10_gapi: a krunker.io account's Chat Ban (krunker.io's gapi)
 #include <client.h>
 
 // Game-event entry points (prototypes belong in client/include/ui_logic.h):
@@ -5090,16 +5091,13 @@ static void plist_chat_ban_label(const int uid, const int banned) {
 
 // chatBanPlayer's answer (deob-10.0.7.js:224104-224125): an error is "Chat ban failed: <error>", a request that
 // failed outright "Chat ban failed", else the label flips and the chat reads "Chat banned / Chat unbanned <name>"
-static void plist_chat_ban_done(void *user, const int status, const char *body, const size_t length) {
-    (void) length;
-    ChatBanReq *r = user;
-    cJSON *res = body ? cJSON_Parse(body) : NULL;
-    const cJSON *err = cJSON_GetObjectItem(res, "error");
+static void plist_chat_ban_answer(ChatBanReq *r, const int status, const cJSON *data, const cJSON *err) {
+    (void) data;
     const char *msg = cJSON_IsString(err) ? err->valuestring : cJSON_GetStringValue(cJSON_GetObjectItem(err, "message"));
     char line[160];
     if (err && !cJSON_IsNull(err)) {
         snprintf(line, sizeof(line), "Chat ban failed: %s", msg ? msg : "Error");
-    } else if (status != 200 || !res) {
+    } else if (status != 200) {
         snprintf(line, sizeof(line), "Chat ban failed");
     } else {
         plist_chat_ban_set(r->uid, r->ban);
@@ -5107,8 +5105,45 @@ static void plist_chat_ban_done(void *user, const int status, const char *body, 
         snprintf(line, sizeof(line), "%s %s", r->ban ? "Chat banned" : "Chat unbanned", r->name);
     }
     hud_ui_add_chat_line_on(line, "#fff", -1);
+}
+
+// punishPopup's getChatBan (deob-10.0.7.js:224084-224090): {data: {chat_banned}} sets player.chatBanned and the label
+static void plist_chat_ban_state(const ChatBanReq *r, const int status, const cJSON *data, const cJSON *err) {
+    const cJSON *v = cJSON_GetObjectItem(data, "chat_banned");
+    if (status == 200 && v && (!err || cJSON_IsNull(err))) {
+        plist_chat_ban_set(r->uid, cJSON_IsTrue(v));
+        plist_chat_ban_label(r->uid, cJSON_IsTrue(v));
+    }
+}
+
+// the Box Office answers (kn_brain over HTTP: the {data, error} body)
+static void plist_chat_ban_done(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    ChatBanReq *r = user;
+    cJSON *res = body ? cJSON_Parse(body) : NULL;
+    plist_chat_ban_answer(r, res ? status : 0, cJSON_GetObjectItem(res, "data"), cJSON_GetObjectItem(res, "error"));
     cJSON_Delete(res);
     free(r);
+}
+
+static void plist_chat_ban_got(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    ChatBanReq *r = user;
+    cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
+    plist_chat_ban_state(r, status, cJSON_GetObjectItem(res, "data"), cJSON_GetObjectItem(res, "error"));
+    cJSON_Delete(res);
+    free(r);
+}
+
+// the krunker.io answers (v10_gapi: krunker.io's gapi with the account's Bearer, {data, error} unwrapped)
+static void plist_chat_ban_kio_done(void *user, const int status, const cJSON *data, const cJSON *error) {
+    plist_chat_ban_answer(user, status, data, error);
+    free(user);
+}
+
+static void plist_chat_ban_kio_got(void *user, const int status, const cJSON *data, const cJSON *error) {
+    plist_chat_ban_state(user, status, data, error);
+    free(user);
 }
 
 static void plist_moderation_url(char *url, const size_t n, const char *path) {
@@ -5117,56 +5152,59 @@ static void plist_moderation_url(char *url, const size_t n, const char *path) {
     snprintf(url, n, "%s%s?token=%s", backend_url(), path, enc);
 }
 
-// punishPopup's getChatBan (deob-10.0.7.js:224084-224090): {data: {chat_banned}} sets player.chatBanned and the label
-static void plist_chat_ban_got(void *user, const int status, const char *body, const size_t length) {
-    (void) length;
-    ChatBanReq *r = user;
-    cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
-    const cJSON *err = cJSON_GetObjectItem(res, "error");
-    const cJSON *v = cJSON_GetObjectItem(cJSON_GetObjectItem(res, "data"), "chat_banned");
-    if (v && (!err || cJSON_IsNull(err))) {
-        plist_chat_ban_set(r->uid, cJSON_IsTrue(v));
-        plist_chat_ban_label(r->uid, cJSON_IsTrue(v));
+// the request's player: NULL when there is none or no account backend to ask (Box Office: the brain and its
+// session token; krunker.io: its gapi, v10's moderation client, krunker_kio_routes.c krunker_kio_gapi_write)
+static ChatBanReq *plist_chat_ban_req(const int uid) {
+    const char *alias = uid >= 0 ? hud_plist_alias(uid) : NULL;
+    if (!alias || !alias[0]) return NULL;
+    if (account_backend() != ACCOUNT_BACKEND_KRUNKER) {
+        const char *token = account_session_token();
+        if (!backend_enabled() || !token || !token[0]) return NULL;
     }
-    cJSON_Delete(res);
-    free(r);
+    ChatBanReq *r = calloc(1, sizeof *r);
+    if (!r) return NULL;
+    r->uid = uid;
+    snprintf(r->name, sizeof(r->name), "%s", alias);
+    return r;
 }
 
-// GET /moderation/chat/:name (services/brain/v10_mods.c), the session token as the caller
+// getChatBan: GET /moderation/chat/<encodeURIComponent(name)> (deob-10.0.7.js:27208-27212)
 static void plist_chat_ban_fetch(const int uid) {
-    const char *alias = uid >= 0 ? hud_plist_alias(uid) : NULL;
-    const char *token = account_session_token();
-    if (!alias || !alias[0] || !backend_enabled() || !token || !token[0]) return;
-    ChatBanReq *r = calloc(1, sizeof *r);
+    ChatBanReq *r = plist_chat_ban_req(uid);
     if (!r) return;
-    r->uid = uid;
-    snprintf(r->name, sizeof(r->name), "%s", alias);
     char enc[200], path[260], url[1024];
-    backend_url_encode(enc, sizeof enc, alias);
+    backend_url_encode(enc, sizeof enc, r->name);
     snprintf(path, sizeof path, "/moderation/chat/%s", enc);
-    plist_moderation_url(url, sizeof url, path);
-    if (!backend_http_request("GET", url, NULL, plist_chat_ban_got, r)) free(r);
+    int sent;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        sent = v10_gapi("GET", path, NULL, plist_chat_ban_kio_got, r);
+    } else {
+        plist_moderation_url(url, sizeof url, path);
+        sent = backend_http_request("GET", url, NULL, plist_chat_ban_got, r);
+    }
+    if (!sent) free(r);
 }
 
-// POST /moderation/chat {player_name, ban} (services/brain/v10_mods.c), the session token as the caller
+// chatBan: POST /moderation/chat {player_name, ban} (deob-10.0.7.js:27213-27217)
 static void plist_chat_ban(const int uid) {
-    const char *alias = uid >= 0 ? hud_plist_alias(uid) : NULL;
-    const char *token = account_session_token();
-    if (!alias || !alias[0] || !backend_enabled() || !token || !token[0]) return;
-    ChatBanReq *r = calloc(1, sizeof *r);
+    ChatBanReq *r = plist_chat_ban_req(uid);
     if (!r) return;
-    r->uid = uid;
     r->ban = !plist_chat_banned(uid);
-    snprintf(r->name, sizeof(r->name), "%s", alias);
-    char url[1024];
-    plist_moderation_url(url, sizeof url, "/moderation/chat");
     cJSON *b = cJSON_CreateObject();
-    cJSON_AddStringToObject(b, "player_name", alias);
+    cJSON_AddStringToObject(b, "player_name", r->name);
     cJSON_AddBoolToObject(b, "ban", r->ban);
-    char *json = cJSON_PrintUnformatted(b);
+    int sent = 0;
+    if (account_backend() == ACCOUNT_BACKEND_KRUNKER) {
+        sent = v10_gapi("POST", "/moderation/chat", b, plist_chat_ban_kio_done, r);
+    } else {
+        char url[1024];
+        plist_moderation_url(url, sizeof url, "/moderation/chat");
+        char *json = cJSON_PrintUnformatted(b);
+        sent = json && backend_http_request("POST", url, json, plist_chat_ban_done, r);
+        free(json);
+    }
     cJSON_Delete(b);
-    if (!json || !backend_http_request("POST", url, json, plist_chat_ban_done, r)) free(r);
-    free(json);
+    if (!sent) free(r);
 }
 
 // Inline handlers this module owns (ui_handlers.c h_fallback); -1 = not ours.
