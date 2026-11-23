@@ -64,16 +64,18 @@ function(krunknative_add_html_sources target)
 endfunction ()
 
 # The engine proper: client/src/html/engine/*.c (native only).
-file(GLOB HTML_ENGINE_SOURCES client/src/html/engine/*.c)
-file(GLOB HTML_ENGINE_HEADERS client/src/html/engine/*.h)
+# CONFIGURE_DEPENDS: every build tree (native, web, worktrees) picks up a new or removed .c / .h at its next build
+# without a manual reconfigure (CMake re-checks the globs; CMake >= 3.12, older ignores the keyword with a warning).
+file(GLOB HTML_ENGINE_SOURCES CONFIGURE_DEPENDS client/src/html/engine/*.c)
+file(GLOB HTML_ENGINE_HEADERS CONFIGURE_DEPENDS client/src/html/engine/*.h)
 
 include_directories(shared/include)
 # The debug output level (shared/include/klog.h): client sources that several targets compile use
 # KN_LOG_DEBUG1 / KN_LOG_VERBOSE2, so every executable of this directory links kn_klog (end of file).
 add_library(kn_klog STATIC shared/src/klog.c shared/include/klog.h)
 
-file(GLOB_RECURSE SHARED_SOURCES shared/src/*.c)
-file(GLOB_RECURSE SHARED_HEADERS shared/include/*.h)
+file(GLOB_RECURSE SHARED_SOURCES CONFIGURE_DEPENDS shared/src/*.c)
+file(GLOB_RECURSE SHARED_HEADERS CONFIGURE_DEPENDS shared/include/*.h)
 
 # Build version (shared/include/build_info.h): cmake/kn_version.cmake writes
 # generated/kn_version.h (git describe, commit, commit time, build time) at configure time and
@@ -101,8 +103,8 @@ target_include_directories(kn_build_info PRIVATE "${CMAKE_BINARY_DIR}/generated"
 add_dependencies(kn_build_info kn_version)
 
 set(CLIENT_BINARY client_bin)
-file(GLOB_RECURSE CLIENT_SOURCES client/src/*.c)
-file(GLOB_RECURSE CLIENT_HEADERS client/include/*.h)
+file(GLOB_RECURSE CLIENT_SOURCES CONFIGURE_DEPENDS client/src/*.c)
+file(GLOB_RECURSE CLIENT_HEADERS CONFIGURE_DEPENDS client/include/*.h)
 
 # client/src/html is added per target below (engine, web_dom.c or stub.c); the C UI
 # logic in client/src/ui is part of every client build.
@@ -183,8 +185,8 @@ else ()
 endif ()
 
 set(SERVER_BINARY server_bin)
-file(GLOB_RECURSE SERVER_SOURCES server/src/*.c)
-file(GLOB_RECURSE SERVER_HEADERS server/include/*.h)
+file(GLOB_RECURSE SERVER_SOURCES CONFIGURE_DEPENDS server/src/*.c)
+file(GLOB_RECURSE SERVER_HEADERS CONFIGURE_DEPENDS server/include/*.h)
 
 # Server core (server/include/server.h): connections, packet dispatch, broadcast, the tick
 # step, accounts and config. server_bin links it with its network frontend (the rest of
@@ -1854,7 +1856,7 @@ else ()
 
     # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks
     # sources only, and ks_front_test (lexer/parser/checker + shared/tests/ks suite)
-    file(GLOB KS_SOURCES shared/src/ks/*.c)
+    file(GLOB KS_SOURCES CONFIGURE_DEPENDS shared/src/ks/*.c)
     add_executable(ksc tools/ks/ksc.c tools/ks/ksc_run.c ${KS_SOURCES})
     target_link_libraries(ksc PRIVATE m)
     set(KS_FRONT_SOURCES shared/src/ks/ks_lex.c shared/src/ks/ks_parse.c shared/src/ks/ks_check.c shared/src/ks/ks_api_table.c
@@ -1978,7 +1980,7 @@ else ()
             LIBS lexbor)
         krunknative_html_engine_test(html_svg_test
             SOURCES ${KN_ENGINE_DIR}/tests/test_svg.c ${KN_ENGINE_DIR}/svg.c ARGS ${CMAKE_SOURCE_DIR})
-        file(GLOB KN_ENGINE_LAYOUT_SOURCES ${KN_ENGINE_DIR}/layout_*.c)
+        file(GLOB KN_ENGINE_LAYOUT_SOURCES CONFIGURE_DEPENDS ${KN_ENGINE_DIR}/layout_*.c)
         krunknative_html_engine_test(html_layout_test GL
             SOURCES ${KN_ENGINE_DIR}/tests/test_layout.c ${KN_ENGINE_LAYOUT_SOURCES}
                     ${KN_ENGINE_DIR}/dom.c ${KN_ENGINE_DIR}/css_sheet.c ${KN_ENGINE_DIR}/css_cascade.c
