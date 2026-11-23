@@ -718,6 +718,13 @@ if (Python3_FOUND)
     add_test(NAME brain_v10_studios_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_studios_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_studios_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    # the v10 main menu shell against kn_brain and two brain-linked server_bin nodes through headless client_bin:
+    # the signed-in and guest headers, the nav, Find Game, Quick Match's excludeGame / excludeRecent, Register,
+    # Logout and Login (server/tests/v10_menu_e2e.py)
+    add_test(NAME brain_v10_menu_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/v10_menu_e2e.py ${CMAKE_BINARY_DIR}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_menu_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "brain;db;ui;e2e")
     # v10.0.7's sandbox Skin Manager through a headless client_bin --sandbox (client/src/ui/v10_skin_manager.c)
     add_test(NAME brain_v10_skin_manager_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_skin_manager_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

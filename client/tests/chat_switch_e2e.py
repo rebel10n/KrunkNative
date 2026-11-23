@@ -78,7 +78,10 @@ def run(name, script, timeout=180):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": CFG, "XDG_STATE_HOME": os.path.join(WORK, "state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_FIXED_DELTA": "16.667"})
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_FIXED_DELTA": "16.667",
+                # the offline sandbox's server log (server/src/sandbox.c sandbox_log_write) is a level-2 line
+                # since 5f55eef1 (KN_LOG_VERBOSE2): without it the log probe sees no "[sandbox] [chat]" line
+                "KRUNKNATIVE_DEBUG": "2"})
     env.setdefault("KRUNKNATIVE_ASSETS_DIR", os.path.join(REPO, "assets"))
     with open(log, "w") as out:
         p = subprocess.Popen([f"{BUILD}/client_bin", "--offline", "assets/maps/official/10_kanji.json"], stdout=out,
@@ -93,6 +96,11 @@ def run(name, script, timeout=180):
         text = f.read()
     counts = {m.group(1): int(m.group(2)) for m in re.finditer(r"\[input_script\] nodes t=\d+ (@\S+) elements=\d+ match=(\d+)", text)}
     return counts, text
+
+
+def server_got(log, text):
+    # the sandbox server's chat line for `text` (server/src/net.c: "[chat] <name>: <text>"), not the client's echo
+    return re.search(r"\[sandbox\] \[chat[^\]]*\] [^\n:]+: " + re.escape(text) + r"$", log, re.M) is not None
 
 
 def open_settings(t, label):
@@ -142,7 +150,7 @@ def main():
     check("A: a bot's line is shown", n.get("@a-b1", 0) == n.get("@a-b0", 0) + 1, str(n))
     check("A: a system line is shown", n.get("@a-l1", 0) == n.get("@a-l0", 0) + 1, str(n))
     check("A: plain text sent from the chat box is shown (echo)", n.get("@a-p2", 0) == n.get("@a-p1", 0) + 1, str(n))
-    check("A: plain text sent by default reaches the server (positive control for the log probe)", "typed-plain-default" in log)
+    check("A: plain text sent by default reaches the server (positive control for the log probe)", server_got(log, "typed-plain-default"))
     check("A: the chat box still takes /clear (the command path)", n.get("@a-l2", 0) > 0 and n.get("@a-l3") == 0, str(n))
     check("A: nothing stored, or on, in the store", stored() in (None, "true"), f"stored {stored()!r}")
 
@@ -177,7 +185,7 @@ def main():
     check("B: a human line after the switch is off is not shown", n.get("@b-after") == n.get("@b-cleared"), str(n))
     check("B: a bot line after the switch is off is not shown", n.get("@b-bafter") == n.get("@b-bcleared"), str(n))
     check("B: a system line is still shown", n.get("@b-sys", 0) > 0, str(n))
-    check("B: plain text sent while off reaches the server (the server log has it)", "typed-plain-off" in log)
+    check("B: plain text sent while off reaches the server (the server log has it)", server_got(log, "typed-plain-off"))
     check("B: its echo, an incoming human line, is hidden while off", n.get("@b-typed") == n.get("@b-after"), str(n))
 
     # C1. the stored false survives a restart: in game, a human line is not shown
@@ -213,7 +221,7 @@ def main():
     check("C: clicking the switch on checks it and stores true", n.get("@c-on") == 1 and stored() == "true", f"{n} stored {stored()!r}")
     check("C: a human player's line is shown once it is on", n.get("@c-p2") == 1, str(n))
     check("C: plain text from the chat box is shown (echo)", n.get("@c-p3", 0) == n.get("@c-p2", 0) + 1, str(n))
-    check("C: the typed line reached the server", "typed-plain-on" in log)
+    check("C: the typed line reached the server", server_got(log, "typed-plain-on"))
 
     ok = all(results)
     print(f"{'PASS' if ok else 'FAIL'}: {sum(results)}/{len(results)}")

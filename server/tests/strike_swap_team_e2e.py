@@ -37,6 +37,8 @@ HELLO_1_4 = bytes([1, 4, 2, 1])  # protocol 1.4: NET_PACKET_EXT peers
 INIT, SPAWN, KILL, CHAT, CHAT_SEND, EXT = 2, 4, 10, 9, 8, 254
 TEAM = 42                        # NET_PACKET_TEAM: NetTeamPacket "<iifi" (uid, team, health, max_health)
 EXT_SWAP_TEAM = 0x8110           # NET_EXT_KN_SWAP_TEAM: C -> S NetSwapTeamPacket { uint8 team }
+EXT_SERVER_NAMES = 0x8121        # NET_EXT_KN_SERVER_NAMES: S -> C NetServerNamesPacket (packed: u8 count,
+NAMES_MAX, NAME_ENTRY = 8, 36    #   8 x {int32 uid, char[32] name}, char[200] template; "$" = names[i] in order)
 SPAWN_FMT = "<iBBiifi3f2f32si7i"  # kn_proto.spawn_info's layout; index 4 is the team
 CHAT_FMT = "<iB32s288s"           # NetChatPacket: the text is field 3
 results = []
@@ -106,8 +108,24 @@ class Player(kn_proto.Conn):
         return out
 
     def chat_lines(self, mark):
+        """The chat lines since packets[mark]: NET_PACKET_CHAT, and the server lines that name players, which a
+        1.4 (EXT) peer gets as NET_EXT_KN_SERVER_NAMES ("Red (N): $, $", shared/src/chat_commands.c cmd_teams),
+        composed here as the client composes them (each "$" is the next name)."""
         n = struct.calcsize(CHAT_FMT)
-        return [kn_proto.uncstr(struct.unpack(CHAT_FMT, p[:n])[3]) for t, p in self.packets[mark:] if t == CHAT and len(p) >= n]
+        out = []
+        for t, p in self.packets[mark:]:
+            if t == CHAT and len(p) >= n:
+                out.append(kn_proto.uncstr(struct.unpack(CHAT_FMT, p[:n])[3]))
+            elif t == EXT and len(p) >= 3 and struct.unpack("<H", p[:2])[0] == EXT_SERVER_NAMES:
+                body = p[2:]
+                count = min(body[0], NAMES_MAX)
+                names = [kn_proto.uncstr(body[1 + i * NAME_ENTRY + 4: 1 + (i + 1) * NAME_ENTRY]) for i in range(count)]
+                parts = kn_proto.uncstr(body[1 + NAMES_MAX * NAME_ENTRY:]).split("$")
+                line = parts[0]
+                for i, rest in enumerate(parts[1:]):
+                    line += (names[i] if i < len(names) else "") + rest
+                out.append(line)
+        return out
 
     def kills(self, mark):
         return sum(1 for t, _ in self.packets[mark:] if t == KILL)
