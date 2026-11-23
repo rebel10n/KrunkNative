@@ -78,10 +78,12 @@ static void hz_ammo(const Client *client) {
     const Player *me = client->me;
     if (!client->in_game || !me || !me->active || !zombies_finite_ammo(me) || !me->weapon) return;
     const GameMode *mode = client->game.mode;
-    const int ammo_limit = mode && mode->config.ammo_limit > 0;
+    const int ammo_limit = mode && mode->config.has_ammo_limit; // ammoLimit != null (a 0 counts)
+    const int no_reloads = mode && mode->config.no_reloads;     // noReloads: #ammoMax "", no #reloadMsg (deob-10.0.7.js:174679)
     const int reserve = hz_reserve(me);
     char text[32];
-    if (ammo_limit || reserve <= 0) snprintf(text, sizeof(text), "| -");
+    if (no_reloads) text[0] = 0;
+    else if (ammo_limit || reserve <= 0) snprintf(text, sizeof(text), "| -");
     else snprintf(text, sizeof(text), "| %d", reserve);
     const HtmlElem max = html_dom_by_id("ammoMax");
     if (max) hz_set_text(max, text);
@@ -89,7 +91,7 @@ static void hz_ammo(const Client *client) {
     // reloadMsg: the weapon has a magazine, it is empty, no ammoLimit, and the reserve can refill it
     const int slot = me->loadout_index;
     const int empty = slot >= 0 && slot < me->loadout_size && me->ammo[slot] <= 0;
-    const int need = me->weapon->ammo && !me->weapon->melee && empty && !ammo_limit && reserve > 0;
+    const int need = me->weapon->ammo && !me->weapon->melee && empty && !ammo_limit && reserve > 0 && !no_reloads;
     const HtmlElem reload = html_dom_by_id("reloadMsg");
     if (reload) hz_set_display(reload, need ? "block" : "none");
 }

@@ -78,7 +78,7 @@ typedef struct {
     int show_hit_ind;        // showHitInd: directional hit indicators (HUD)
     char hit_color[RS_COLOR_MAX];            // hitColor
     int show_dmg;            // showDMG: damage numbers (HUD)
-    int dmg_color;           // dmgColor: colour the damage numbers
+    char dmg_color[RS_COLOR_MAX];            // dmgColor: the damage numbers' colour (v10 val #DE292F, a colour setting)
     char crit_color[RS_COLOR_MAX];           // critColor
     float dmg_scale;         // dmgScale (HUD: font = v * 30)
     int show_kills, show_kill_c, show_deaths, show_score, show_streak, show_ping, show_net_stat, show_fps; // DOM toggles

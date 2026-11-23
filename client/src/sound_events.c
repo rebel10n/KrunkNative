@@ -593,7 +593,7 @@ static void preload_common(void) {
     static const char *COMMON[] = {
         "tick_0", "step_0", "step_1", "step_2", "jump_0", "jump_1", "reload_1", "reload_2", "aim_0", "aim_1",
         "case_0", "case_1", "swsh_0_0", "swsh_0_1", "swsh_def_0", "swsh_def_1", "slide_0", "melee_equip",
-        "hit_0", "impact_0", "headshot_0", "bounce_0",
+        "hit_0", "crit_0", "impact_0", "headshot_0", "bounce_0",
     };
     for (size_t i = 0; i < sizeof(COMMON) / sizeof(COMMON[0]); i++) audio_preload(COMMON[i]);
     for (size_t i = 0; i < sizeof(WEAPON_SOUNDS) / sizeof(WEAPON_SOUNDS[0]); i++) audio_preload(WEAPON_SOUNDS[i].sound);
@@ -629,8 +629,9 @@ void sound_events_tick(Client *client, const float now, const float delta) {
     audio_update(ear, yaw, pitch);
 }
 
-void sound_events_hitmarker(void) {
-    audio_play("hit_0", 3.1f, 0, 1.0f);
+// DO_DAMAGE (deob-10.0.7.js:228134): SOUND.play(crit ? "crit_0" : "hit_0", 2.1) unless the hit is silent
+void sound_events_hitmarker(const int crit) {
+    audio_play(crit ? "crit_0" : "hit_0", 2.1f, 0, 1.0f);
 }
 
 void sound_events_kill(const int headshot, const Player *killer, const int weapon_index) {

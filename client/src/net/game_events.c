@@ -18,6 +18,7 @@
 #include <strike_hud_fx.h>   // STRIKE_DMG_KEY_AI: the Strike damage numbers' bot key (events_strike_damage_number)
 #include <hud_modes.h>
 #include <html_ui.h>
+#include <limits.h> // INT_MIN: the kill-feed row takes the icon's own icnPad
 #include <ui_logic.h>
 #include <sound_events.h>
 #include <vfx.h>
@@ -89,16 +90,14 @@ void client_net_send(Client *client, const NetPacketType type, const void *paylo
     if (socket >= 0) client_net_send_packet(socket, type, payload, length);
 }
 
-// fp(chatInput.value) -> "ct". The server enforces the same 3 messages / 1 s burst
-// limit by disconnecting; a client that keeps under it never gets kicked.
+// iíiiiíì(chatInput.value) -> "ct" (deob-10.0.7.js:226586): every line goes to the server; v10 has no client-side
+// limit, the server's 3 messages / 1 s burst limit disconnects a client that goes over it.
 void client_chat_send(Client *client, const char *text) {
-    static NetChatLimiter limiter;
     NetChatSendPacket packet;
 
     if (!client || !text) return;
     if (!net_chat_sanitize(packet.text, sizeof(packet.text), text, strlen(text))) return;
     if (!client->offline && client->net_socket < 0) return;
-    if (!net_chat_allow(&limiter, (float) glfwGetTime())) return;
     object_manager_ui_chat_sent(packet.text); // KrunkNative: `/give <weapon>` equips it once given
 
     if (social_server_v7(client)) { // v7 f1909: "ct", channel (#chatSwitch), msg
@@ -113,6 +112,13 @@ void client_chat_send(Client *client, const char *text) {
 // NET_EXT_KN_HIT_DAMAGE: the exact damage of the NET_PACKET_HIT right behind it (net_ext.h)
 static NetHitDamagePacket g_hit_damage;
 static int g_hit_damage_valid;
+
+// NET_EXT_KN_HIT_SILENT / NET_EXT_KN_KILL_PACKAGE (official lobbies, net_ext.h): the next HIT plays no sound; the
+// next KILL's package streak icon
+static NetHitSilentPacket g_hit_silent;
+static int g_hit_silent_valid;
+static NetKillPackagePacket g_kill_package;
+static int g_kill_package_valid;
 
 // NET_EXT_KN_STRIKE_KILL_FLAG: the killer's Country Flag for the Strike kill card, sent right before
 // the KILL it belongs to (net_ext.h); events_kill takes it when that KILL's killer matches.
@@ -182,8 +188,10 @@ static const char *events_card_url(const int index, char *out, const size_t n) {
     return out[0] ? out : NULL;
 }
 
-// f1975: the killer's weapon [name] = its skin's name in the rarity colour (the skin on the
-// loadout slot of the killing weapon, the melee skin on a melee kill, "Fists" on a fist kill).
+// The death card's killer weapon [name] (deob-10.0.7.js:227476-227491) = its skin's name in the rarity colour (the
+// skin on the loadout slot of the killing weapon, the melee skin on a melee kill), else the weapon's name. v10.0.7's
+// card gets a boolean where the kill info was (:227493), so its "Fists" (info.fs) never shows: `fists` is the Strike
+// kill card's (strike_hud.c), the v10 card passes 0.
 static const char *events_weapon_label(const Player *killer, const Weapon *weapon, const int weapon_index, const int fists,
                                        const char **color) {
     *color = NULL;
@@ -203,6 +211,12 @@ static const char *events_weapon_label(const Player *killer, const Weapon *weapo
     if (!skin || !skin->name) return weapon->name ? weapon->name : "";
     if (skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count) *color = g_viewer_rarities[skin->rarity].color;
     return skin->name;
+}
+
+// A player's clan tag as the kill feed shows it (player.clan; Hide player names drops it in hud_ui.c): its account's.
+static const char *events_clan(const Player *player) {
+    const NetPlayerInfoPacket *info = player ? player_accounts_get(player->uid) : NULL;
+    return info && info->account_id > 0 && info->clan[0] ? info->clan : NULL;
 }
 
 // v7 ENT pcStatIndex (getSavedVal("pcStatIndex"), Change Loadout's player card stat), right before
@@ -226,6 +240,8 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     // synced yet - a join race, the KILL beating the victim's "0"/ADD_PLAYERS - is dropped whole,
     // with no kill-feed row, death card, marker or FX. Without this guard the feed printed the
     // literal events_name() fallback, e.g. "unknown committed neck rope". v10 never shows that.
+    const int package_valid = g_kill_package_valid;
+    g_kill_package_valid = 0;
     if (!victim) return;
 
     // io_killPlayer: overlay.addDeathMarker for a teammate, ourselves or anyone while spectating
@@ -253,16 +269,39 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         const Weapon *feed_weapon = weapon ? weapon : killer->weapon;
         const int feed_flags = (packet->wallbang ? HUD_FEED_WALLBANG : 0) | (packet->fists & NET_KILL_FISTS ? HUD_FEED_FISTS : 0) |
                                (packet->fists & NET_KILL_THROWN ? HUD_FEED_THROWN : 0) | (packet->fists & NET_KILL_HIDE_FEED ? HUD_FEED_HIDDEN : 0);
-        hud_ui_add_killfeed_flags(client, self ? NULL : events_name(client, killer, killer_shown, sizeof(killer_shown)), !self && killer == client->me, victim_name,
-                                  victim && victim == client->me, feed_weapon && feed_weapon->icon ? feed_weapon->icon : NULL, packet->headshot,
-                                  stk, feed_flags);
+        // the names (deob-10.0.7.js:227507-227508): the local team's players green, the others red, each with its clan
+        const int local_team = hud_ui_local_team(client);
+        const ViewerSkin *melee_skin = killer->skins.melee >= 0 ? viewer_skin(killer->skins.melee) : NULL;
+        const HudFeedKill row = {
+            .killer = self ? NULL : events_name(client, killer, killer_shown, sizeof(killer_shown)),
+            .killer_is_you = !self && killer == client->me,
+            .killer_ally = local_team && local_team == killer->team,
+            .killer_clan = self ? NULL : events_clan(killer),
+            .victim = victim_name,
+            .victim_is_you = victim == client->me,
+            .victim_ally = local_team && local_team == victim->team,
+            .victim_clan = events_clan(victim),
+            .weapon_icon = feed_weapon && feed_weapon->icon ? feed_weapon->icon : NULL,
+            .weapon_pad = INT_MIN,
+            .melee = feed_weapon && feed_weapon->melee,
+            .melee_skin_id = melee_skin && melee_skin->id > 0 ? melee_skin->id : 0, // store.skins[meleeIndex].id || 0
+            .headshot = packet->headshot,
+            .streak = stk,
+            .package = package_valid && g_kill_package.victim_uid == packet->victim_uid ? g_kill_package.package : -1,
+            .flags = feed_flags,
+        };
+        hud_ui_add_killfeed_kill(client, &row);
         strike_hud_killfeed(client, self ? NULL : events_name(client, killer, killer_shown, sizeof(killer_shown)), !self && killer == client->me, victim_name,
                             victim && victim == client->me, weapon, packet->headshot, packet->fists & NET_KILL_THROWN ? 1 : 0,
                             packet->wallbang ? 1 : 0, packet->fists & NET_KILL_HIDE_FEED ? 1 : 0);
     } else {
-#ifdef HUD_UI_HAVE_KILLFEED_SUICIDE
-        if (!(packet->fists & NET_KILL_HIDE_FEED)) hud_ui_add_killfeed_suicide(client, victim_name, victim && victim == client->me);
-#endif
+        if (!(packet->fists & NET_KILL_HIDE_FEED)) {
+            const int local_team = hud_ui_local_team(client);
+            const HudFeedKill row = {.victim = victim_name, .victim_is_you = victim == client->me,
+                                     .victim_ally = local_team && local_team == victim->team, .victim_clan = events_clan(victim),
+                                     .suicide = 1, .streak = -1, .package = -1};
+            hud_ui_add_killfeed_kill(client, &row);
+        }
         strike_hud_killfeed(client, NULL, 0, victim_name, victim && victim == client->me, NULL, 0, 0, 0, packet->fists & NET_KILL_HIDE_FEED ? 1 : 0);
     }
 
@@ -278,12 +317,14 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     menu_view_death_cam(client, by_other && client->game.config.kill_cams ? killer : NULL);
 
     char killer_card[256], my_card[256], pc_value[sizeof(g_death_info.pc_stat_value) + 1];
+    int strike_fists = 0; // the Strike kill card's "Fists" (FRVR's card, not v10's)
     if (by_other) {
         const int weapon_index = death && death->weapon_index >= 0 ? death->weapon_index : packet->weapon_index;
         const Weapon *killer_weapon = death && death->weapon_index >= 0 ? events_weapon(client, death->weapon_index) : weapon;
         card.killer = events_name(client, killer, killer_shown, sizeof(killer_shown));
         card.hide_extras = player_names_extras_hidden(killer == client->me); // the killer's level and card stat
-        card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, (packet->fists & NET_KILL_FISTS) || (death && death->fists), &card.weapon_color);
+        card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, 0, &card.weapon_color);
+        strike_fists = ((packet->fists & NET_KILL_FISTS) || (death && death->fists)) && (!killer_weapon || killer_weapon->melee);
         card.class_index = packet->killer_class >= 0 ? packet->killer_class : 0;
         if (death) {
             card.level = player_card_class_level(death->class_stat); // f1975: the killer's class level from "3" [1]
@@ -299,9 +340,8 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         }
         card.killer_card_url = events_card_url(killer->cosmetics_v7.player_card, killer_card, sizeof(killer_card));
         card.my_card_url = events_card_url(victim->cosmetics_v7.player_card, my_card, sizeof(my_card));
-        // (otherPlayer.level <= 10 || !level) && account && !Game.isCustom: "[key] to Report"
-        const NetPlayerInfoPacket *info = player_accounts_get(killer->uid);
-        card.report = active_account() && !game_config_is_custom(&client->game) && (!info || info->level <= 10);
+        // v10.0.7 computes "[key] to Report" ((level <= 10 || !level) && account && !isCustom) but its card draws '' in
+        // that slot (deob-10.0.7.js:227467, :227493): no report prompt
         // our "lvl": account.stats["c" + classIndex] (guests: lvl 1)
         const AccountInfo *acc = active_account();
         char key[8];
@@ -326,7 +366,12 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     g_strike_kill_flag_valid = 0;
 
     hud_ui_show_death(client, &card);
-    strike_hud_death(client, &card, killer && killer != victim ? killer : NULL); // the Strike kill card
+    HudKillCard strike_card = card;
+    if (strike_fists) {
+        strike_card.weapon = "Fists";
+        strike_card.weapon_color = NULL;
+    }
+    strike_hud_death(client, &strike_card, killer && killer != victim ? killer : NULL); // the Strike kill card
 
     client->spawn_requested = 0;
     client->net_death_time = client_death_clock(client);
@@ -1069,7 +1114,10 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                     if (hit.crit) skin_counter_count_player(me, held, "headshots", 1);
                 }
             }
-            sound_events_hitmarker();     // gF: hit_0
+            // DO_DAMAGE: `silent || SOUND.play(crit ? "crit_0" : "hit_0", 2.1)` (deob-10.0.7.js:228134)
+            const int silent = g_hit_silent_valid && g_hit_silent.target_uid == hit.target_uid && g_hit_silent.ai == hit.ai;
+            g_hit_silent_valid = 0;
+            if (!silent) sound_events_hitmarker(hit.crit);
             hud_ui_hit(client, hit.kill); // gF -> aV.showHit(isKill)
             const double damage = events_hit_damage(&hit);
             if (strike_ui_active()) { // Krunker Strike: FRVR's damage numbers on the in-game layer (strike_hud.c)
@@ -1388,6 +1436,12 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             else if (subtype == NET_EXT_KN_HIT_DAMAGE && body_length >= sizeof(NetHitDamagePacket)) { // dmgType "Float"
                 memcpy(&g_hit_damage, body, sizeof(g_hit_damage));
                 g_hit_damage_valid = 1;
+            } else if (subtype == NET_EXT_KN_HIT_SILENT && body_length >= sizeof(NetHitSilentPacket)) { // DO_DAMAGE silent
+                memcpy(&g_hit_silent, body, sizeof(g_hit_silent));
+                g_hit_silent_valid = 1;
+            } else if (subtype == NET_EXT_KN_KILL_PACKAGE && body_length >= sizeof(NetKillPackagePacket)) { // killInfo.pkg
+                memcpy(&g_kill_package, body, sizeof(g_kill_package));
+                g_kill_package_valid = 1;
             } else if (subtype == NET_EXT_KN_STRIKE_KILL_FLAG && body_length >= sizeof(NetStrikeKillFlagPacket)) { // Strike kill card
                 memcpy(&g_strike_kill_flag, body, sizeof(g_strike_kill_flag));
                 g_strike_kill_flag_valid = 1;

@@ -80,6 +80,7 @@ void hud_ui_hit(Client*, int kill);
 #include <game_config.h> // game_config_is_custom: the card's accent is #fff in a custom game
 #include <scene_warm.h> // the card waits for the warm frames (scene_warm_active)
 #include "hud_format.h" // String(n) of the HUD's numbers (GL/DOM-free, client/tests/hud_format_test.c)
+#include "chat_filter.h" // v10.0.7 profanity Filter.clean: Chat Filter / streamer mode on the chat and kill-feed names
 #include <candy_heist.h> // Candy Heist: candy_heist_is_mode / candy_heist_candy for the team slot (hud_render_team)
 #include <cJSON.h>
 #include <limits.h>
@@ -90,6 +91,7 @@ void hud_ui_hit(Client*, int kill);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h> // strcasecmp: getClanCol compares lowercased
 #include <ruleset.h>
 #include <hud_v10.h>
 #include <hud_modes.h> // hud_modes_end_table_html: the live #endTable rows (hud_end_leaderboard_html)
@@ -121,7 +123,7 @@ void hud_ui_hit(Client*, int kill);
 #define SCORE_COLOR "#ffea78"      // settings.interface.scoreColor default (kill card +score)
 
 #define FEED_LIMIT 8               // settings.editing.feedLimit default
-#define FEED_MAX 48                // rows kept at most: feedLimit (<= 10) in #killFeed + chatListLength in #chatList
+#define FEED_MAX 64                // rows kept at most: feedLimit (<= 10) in #killFeed + chatListLength in #chatList
 #define FEED_LIFE_MS 4000.0        // gE(): life = 4e3 in #killFeed, chatTimer * 1e3 in #chatList (0 = never)
 #define FEED_DELTA_MAX_MS 33.0     // config.dltMx = round(1000 / 30): the clamped loop delta that ages bR rows
 #define CHAT_LIST_LENGTH 35        // config.chatListLength
@@ -191,6 +193,7 @@ typedef struct {
     float x, y, z, dir;      // world position (drifts up and sideways), drift direction
     double value;            // Math.abs(dmg), after dmgType's ceil
     int crit;
+    int heal;                // dmg < 0: healColor #03fc30 (deob-10.0.7.js:228137, :162286)
     int shown;
 } DamageNum;
 
@@ -452,16 +455,23 @@ static void hud_game_info_html(const char *mode, const char *map, char *out, con
     hb_append(out, size, &len, "</div>");
 }
 
+static int hud_chat_filtered(const char *in, char *out, size_t size);
+
 // io_addChat -> f2018: the inner markup of a #chatMsg_N row. A `name` makes a player line
 // (fixStr(name) + ": " + message), else a `color` makes a server line (type 2), else a
 // plain game line (type 1, .chatMsg default color). chatTextOutline / chatBGOp style the
-// .chatItem like v7's (v12018 / v12017).
+// .chatItem like v7's (v12018 / v12017). Chat Filter / streamer mode clean the message first
+// (deob-10.0.7.js:228050, every kind but the trade request): 0 when the Filter throws (no word
+// character in it), and v10 shows no line then.
 static int g_chat_actions_row = -1; // the row NET_EXT_KN_CHAT_ACTIONS applies to: the last one added, -1 once used
 
-static void hud_chat_row_html(const char *name, const char *msg, const char *color, char *out, const size_t size) {
+static int hud_chat_row_html(const char *name, const char *msg, const char *color, char *out, const size_t size) {
     const ClientRenderSettings *rs = client_render_settings();
     size_t len = 0;
     out[0] = 0;
+    char clean[NET_CHAT_TEXT_SIZE * 2];
+    if (!hud_chat_filtered(msg, clean, sizeof(clean))) return 0;
+    msg = clean;
     hb_append(out, size, &len, "<div class='chatItem%s'", rs->chat_text_outline ? " chatTextOutline" : "");
     if (fabsf(rs->chat_bg_opacity - CHAT_BG_OPACITY_DEFAULT) > 1e-4f)
         hb_append(out, size, &len, " style='background-color: rgba(0, 0, 0, %g)'", (double) rs->chat_bg_opacity);
@@ -486,6 +496,7 @@ static void hud_chat_row_html(const char *name, const char *msg, const char *col
     }
     v10_emoji_append_chat(out, size, &len, msg); // fixStr(msg) with :name: -> the emoji's <img> (v10_notify.c)
     hb_append(out, size, &len, "</span></div><br>");
+    return 1;
 }
 
 // aU.formatNum(n, 2): "" + n below 1000, else n / 1000^p with two decimals + k/m/b.
@@ -527,12 +538,25 @@ void hud_ui_set_leader_stats(const NetLeaderStatsPacket *packet) {
     g_leader_stats_valid = 1;
 }
 
-// The " [clan]" tag of a board row: COLORS.getClanCol(clan, fallback) (v7.1.4: DEV, VIP and CMD
-// keep a colour; the clan war rank colours are gone).
+// v10.0.7 getClanCol(clan, fallback) (deob-10.0.7.js:104139): the staff clans (compared lowercased) are #FBC02D,
+// any other clan the fallback.
+static const char *hud_clan_col(const char *clan, const char *fallback) {
+    static const char *const staff[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl", "nv"};
+    for (size_t k = 0; clan && k < sizeof(staff) / sizeof(staff[0]); k++)
+        if (!strcasecmp(clan, staff[k])) return "#FBC02D";
+    return fallback;
+}
+
+const char *hud_ui_clan_col(const char *clan, const char *fallback) {
+    return hud_clan_col(clan, fallback);
+}
+
+// The " [clan]" tag of a board row, a kill-feed name or the end table: "<span style='color:" +
+// getClanCol(clan, fallback) + "'> [" + clan + "]</span>" (deob-10.0.7.js:227507, :227638, :226761).
 static void hb_append_clan(char *out, const size_t size, size_t *len, const char *clan, const char *fallback) {
     clan = player_names_clan(clan); // Hide player names: no clan tag
     if (!clan || !clan[0]) return;
-    const char *col = !strcmp(clan, "DEV") ? "#40C4FF" : !strcmp(clan, "VIP") ? "#11D445" : !strcmp(clan, "CMD") ? "#993299" : fallback;
+    const char *col = hud_clan_col(clan, fallback);
     hb_append(out, size, len, "<span style='color:%s'> [", col);
     hb_append_escaped(out, size, len, clan);
     hb_append(out, size, len, "]</span>");
@@ -809,15 +833,21 @@ typedef struct {
     int chat_muted, voice_muted; // scenario only (live rows ask hud_social)
 } PlistRow;
 
-static int hud_plist_matches(const char *name) {
-    if (!g_plist_search[0]) return 1;
+static int hud_plist_contains(const char *name, const char *query) {
     char a[PLAYER_NAME_SIZE * 2], q[sizeof(g_plist_search)];
     size_t i;
     for (i = 0; name[i] && i + 1 < sizeof(a); i++) a[i] = (char) tolower((unsigned char) name[i]);
     a[i] = 0;
-    for (i = 0; g_plist_search[i] && i + 1 < sizeof(q); i++) q[i] = (char) tolower((unsigned char) g_plist_search[i]);
+    for (i = 0; query[i] && i + 1 < sizeof(q); i++) q[i] = (char) tolower((unsigned char) query[i]);
     q[i] = 0;
     return strstr(a, q) != NULL;
+}
+
+// windows[22].searchMatches (deob-10.0.7.js:221106-221108): the search, lowercased, inside the player's name or its
+// alias. A KrunkNative player has one name: the row's shown one (Hide player names) and the server's (raw) stand for them.
+static int hud_plist_matches(const PlistRow *row) {
+    if (!g_plist_search[0]) return 1;
+    return hud_plist_contains(row->name, g_plist_search) || hud_plist_contains(row->raw, g_plist_search);
 }
 
 static void hud_plist_clan(StrBuf *sb, const char *clan) {
@@ -1033,7 +1063,7 @@ static char *hud_plist_rows(void) {
         const cJSON *o;
         cJSON_ArrayForEach(o, scenario) {
             hud_plist_row_json(&row, o);
-            if (row.uid != sus && hud_plist_matches(row.name)) hud_plist_row(&sb, client, &row, 1);
+            if (row.uid != sus && hud_plist_matches(&row)) hud_plist_row(&sb, client, &row, 1);
         }
     }
     const int bots_as_ai = client && client->game.mode && client->game.mode->config.bots_as_ai;
@@ -1042,7 +1072,7 @@ static char *hud_plist_rows(void) {
         if (!p || (prod && p == me)) continue; // Game.players.list.filter(ho => !config.isProd || !ho.isYou)
         if (p->uid == sus || (p->is_bot && bots_as_ai)) continue; // the suspect's row is above; botsAsAI: bots are AIs
         hud_plist_row_of(client, p, &row);
-        if (!hud_plist_matches(row.name)) continue;
+        if (!hud_plist_matches(&row)) continue;
         hud_plist_row(&sb, client, &row, 0);
     }
     sb_append(&sb, "</tbody></table>");
@@ -1114,14 +1144,42 @@ static unsigned hud_hash(const char *text) {
     return h;
 }
 
-static void hud_feed_name_span(char *out, const size_t size, size_t *len, const char *name, const int is_you, const int is_ally) {
+static int hud_feed_in_chat(void);
+
+// (tmp.streamMode || tmp.chatFilter) && filter.clean(text) (deob-10.0.7.js:228050, :228087): Settings > Chat
+// "Chat Filter" or streamer mode. 0 when the Filter would throw (no word character: v10 drops the line).
+static int hud_chat_filtered(const char *in, char *out, const size_t size) {
+    const ClientRenderSettings *rs = client_render_settings();
+    if (!rs->stream_mode && !rs->chat_filter) {
+        snprintf(out, size, "%s", in ? in : "");
+        return 1;
+    }
+    if (!in || !in[0]) { // iîiííií(text) ? clean(text) : ""
+        out[0] = 0;
+        return 1;
+    }
+    return chat_filter_clean(in, out, size);
+}
+
+// One kill-feed name (deob-10.0.7.js:227507-227508): "You" in #fff, else the alias (scrambled in streamer mode)
+// in #9eeb56 for the local team, else #eb5656, then " [clan]" in getClanCol(clan, "#fff") with the new scoreboard
+// (leaderType 1). The Filter cleans the whole span (:228087): its markup words are never on the list, so cleaning
+// the name and the clan alone gives the same text.
+static void hud_feed_name_span(char *out, const size_t size, size_t *len, const char *name, const int is_you, const int is_ally,
+                               const char *clan) {
     if (is_you) {
         hb_append(out, size, len, "<span style='color:" FEED_COLOR_YOU "'>You</span>");
         return;
     }
     hb_append(out, size, len, "<span style='color:%s'>", is_ally ? FEED_COLOR_ALLY : FEED_COLOR_ENEMY);
-    char shown[PLAYER_NAME_SIZE];
-    hb_append_fixed(out, size, len, streamer_name(name, shown, sizeof(shown))); // fixStr(scrambleS(alias)) in streamer mode
+    char shown[PLAYER_NAME_SIZE], clean[PLAYER_NAME_SIZE * 2];
+    const char *alias = streamer_name(name, shown, sizeof(shown)); // fixStr(streamMode ? scrambleS(alias) : alias)
+    hb_append_fixed(out, size, len, hud_chat_filtered(alias, clean, sizeof(clean)) ? clean : alias);
+    if (clan && clan[0] && !hud_feed_in_chat()) { // leaderType 1
+        char cc[32];
+        if (!hud_chat_filtered(clan, cc, sizeof(cc))) snprintf(cc, sizeof(cc), "%s", clan);
+        hb_append_clan(out, size, len, cc, "#fff");
+    }
     hb_append(out, size, len, "</span>");
 }
 
@@ -1140,7 +1198,6 @@ static const struct {
     {"icon_30", 9}, {"icon_31", 10}, // v10.0.2 Boulder / Compressor icnPad (v10:101851, 101940)
 };
 #define FEED_MELEE_ICON "icon_0"
-#define FEED_MELEE_PAD 5           // vA653[0]: default knife skin
 
 static int hud_feed_icon_pad(const char *icon) {
     for (size_t i = 0; i < sizeof(FEED_ICON_PAD) / sizeof(FEED_ICON_PAD[0]); i++) {
@@ -1164,48 +1221,55 @@ static void hud_feed_open(char *out, const size_t size, size_t *len, const int c
     hb_append(out, size, len, "><span class='chatMsg'>");
 }
 
-// f2024(killer, info, killerHtml, victimHtml): inner markup of a kill row. `killer` NULL = the victim
-// killed itself (hC = ""): only the weapon and the victim.
-// `streak` >= 0: info.stk (a Nuke kill): the streak's icon instead of the weapon's.
-static void hud_feed_row_html(const int chat, const char *killer, const int killer_is_you, const char *victim,
-                              const int victim_is_you, const char *weapon_icon, const int headshot, const int streak,
-                              const int flags, char *out, const size_t size) {
+// v10.0.7's melee kill-feed margin by melee skin id (iïïiìîï, deob-10.0.7.js:228069): margin-right of the
+// .meleeChatIcon; an id past the table is "undefinedpx" there (an invalid value: no margin)
+static const int FEED_MELEE_PADS[] = {5, -10, 5, -7, 2, 5, 0, 2, 6, 6, 7, 5, 5, 0, -8, 10, 0, -6, 7, -28, -28, 5, 5, -5, 5, 5, 5, 5};
+
+// iìïìîîï(killer, info, killerHtml, victimHtml) (deob-10.0.7.js:228070-228127): inner markup of a kill row. A self
+// kill has no killer name (hC = ""): only the weapon and the victim. The weapon slot is the streak's icon (info.stk,
+// "package/<pkg>" for stk 1 with a pkg), the fists (info.fs), the killer's melee skin icon (a melee weapon; info.pj
+// adds the thrown icon first) or the weapon's; info.wb then info.hs follow whatever the slot holds.
+static void hud_feed_row_html(const int chat, const HudFeedKill *k, char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
     hud_feed_open(out, size, &len, chat);
-    if (killer || killer_is_you) hud_feed_name_span(out, size, &len, killer ? killer : "", killer_is_you, 0);
-    int known = 1;
-    if (streak >= 0) { // info.stk != null: <img class='streakChatIcon' src='/img/streaks/<stk>.png' />
-        hb_append(out, size, &len, "<img class='streakChatIcon' src='img/streaks/%d.png' />", streak);
-    } else if (flags & HUD_FEED_FISTS) { // info.fs: the fists icon instead of the weapon's
+    if (k->killer || k->killer_is_you) hud_feed_name_span(out, size, &len, k->killer ? k->killer : "", k->killer_is_you, k->killer_ally, k->killer_clan);
+    const char *icon = k->weapon_icon;
+    if (k->streak >= 0) { // info.stk != null: <img class='streakChatIcon' src='/img/streaks/<stk>.png' />
+        if (k->streak == 1 && k->package > 0) // `stk == 1 && pkg` (a pkg 0 is falsy)
+            hb_append(out, size, &len, "<img class='streakChatIcon' src='img/streaks/package/%d.png' />", k->package);
+        else
+            hb_append(out, size, &len, "<img class='streakChatIcon' src='img/streaks/%d.png' />", k->streak);
+    } else if (k->flags & HUD_FEED_FISTS) { // info.fs: the fists icon instead of the weapon's
         hb_append(out, size, &len, "<img class='fistChatIcon' src='textures/weapons/icon_0.png' />");
-    } else if (weapon_icon && !strcmp(weapon_icon, FEED_MELEE_ICON)) {
-        if (flags & HUD_FEED_THROWN) hb_append(out, size, &len, "<img class='thrownChatIcon' src='./img/thrown_0.png'>"); // info.pj
-        hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:%dpx;' class='meleeChatIcon' src='textures/melee/icon_0.png' />",
-                  FEED_MELEE_PAD);
-    } else if (weapon_icon && weapon_icon[0]) {
+    } else if (k->melee) {
+        if (k->flags & HUD_FEED_THROWN) hb_append(out, size, &len, "<img class='thrownChatIcon' src='./img/thrown_0.png'>"); // info.pj
+        const int id = k->melee_skin_id > 0 ? k->melee_skin_id : 0;
+        const int pads = (int) (sizeof(FEED_MELEE_PADS) / sizeof(FEED_MELEE_PADS[0]));
+        if (id < pads) hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:%dpx;' class='meleeChatIcon' ", FEED_MELEE_PADS[id]);
+        else hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:undefinedpx;' class='meleeChatIcon' ");
+        hb_append(out, size, &len, "src='textures/melee/icon_%d.png' />", id);
+    } else if (icon && icon[0]) {
         hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:%dpx;' class='weaponChatIcon' src='textures/weapons/",
-                  hud_feed_icon_pad(weapon_icon));
-        hb_append_escaped(out, size, &len, weapon_icon);
+                  k->weapon_pad != INT_MIN ? k->weapon_pad : hud_feed_icon_pad(icon));
+        hb_append_escaped(out, size, &len, icon);
         hb_append(out, size, &len, ".png' />");
     } else {
-        known = 0;
         hb_append(out, size, &len, " "); // unknown weapon (no weaponConfig icon): keep the names apart
     }
-    // after any icon: info.wb, then info.hs (v10 :221244-221245)
-    if (known && (flags & HUD_FEED_WALLBANG)) hb_append(out, size, &len, "<img class='headShotChatIcon' src='./img/wallbang_0.png'>");
-    if (known && headshot) hb_append(out, size, &len, "<img class='headShotChatIcon' src='img/headshot_0.png'>");
-    hud_feed_name_span(out, size, &len, victim, victim_is_you, 0);
+    // after any icon: info.wb, then info.hs (deob-10.0.7.js:228122-228123)
+    if (k->flags & HUD_FEED_WALLBANG) hb_append(out, size, &len, "<img class='headShotChatIcon' src='./img/wallbang_0.png'>");
+    if (k->headshot) hb_append(out, size, &len, "<img class='headShotChatIcon' src='./img/headshot_0.png'>");
+    hud_feed_name_span(out, size, &len, k->victim ? k->victim : "", k->victim_is_you, k->victim_ally, k->victim_clan);
     hb_append(out, size, &len, "</span></div><br>");
 }
 
-// The suicide row (no killer): gE(null, .., victim + " committed " + fixStr(suicide)).
-static void hud_feed_suicide_html(const int chat, const char *victim, const int victim_is_you, const char *what,
-                                  char *out, const size_t size) {
+// The suicide row (no killer): iìïìîîï(null, null, null, victim + " committed " + fixStr(suicide)) (:227509).
+static void hud_feed_suicide_html(const int chat, const HudFeedKill *k, const char *what, char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
     hud_feed_open(out, size, &len, chat);
-    hud_feed_name_span(out, size, &len, victim, victim_is_you, 0);
+    hud_feed_name_span(out, size, &len, k->victim ? k->victim : "", k->victim_is_you, k->victim_ally, k->victim_clan);
     hb_append(out, size, &len, " committed ");
     hb_append_fixed(out, size, &len, what);
     hb_append(out, size, &len, "</span></div><br>");
@@ -1273,12 +1337,16 @@ static void hud_timer(const Client *client, char *out, const size_t size) {
     hud_timer_text(client->game.config.game_time > 0 ? client->game.config.game_time * 60 : 0, out, size);
 }
 
-// Krunker reloadUIAnim: ammoDisplay background-size = reloadTimer / (reload * reSpd) * 100, rounded.
+// reloadUIAnim (deob-10.0.7.js:174660): ammoHolder background-size = max(reloadTimer / (reload * (reSpd || 1) *
+// attributes.reload * (perk 2 ? 0.5 : 1) * (isKranked ? bonuses.reload : 1) * (mode.reloadMlt ?? 1)) * 100, 0),
+// rounded: the same product players.reload started the timer with (shared/src/player.c player_reload).
 static int hud_reload_percent(const Player *me, const Game *game) {
     if (!me->weapon || me->reload_timer <= 0.0f || me->weapon->reload_time <= 0.0f) return 0;
 
     const float reload_speed = game->config.reload_speed > 0.0f ? game->config.reload_speed : 1.0f;
-    const float progress = me->reload_timer / (me->weapon->reload_time * reload_speed);
+    const float full = me->weapon->reload_time * reload_speed * player_attr_reload(me) * mode_reload_mlt(game, me);
+    if (full <= 0.0f) return 0;
+    const float progress = me->reload_timer / full;
 
     return (int) lroundf(CLAMP(progress, 0.0f, 1.0f) * 100.0f);
 }
@@ -1999,7 +2067,9 @@ void hud_ui_damage_number(Client *client, const float x, const float y, const fl
     num->dir = (float) (((double) rand() / RAND_MAX) * 2.0 * M_PI - M_PI); // randFloat(-PI, PI)
     // dmgType (v10.js:221015): 0 "Default" draws Math.ceil(dmg), 1 "Float" the exact dmg.round(1)
     // (the server's NET_EXT_KN_HIT_DAMAGE; without it the HIT's whole number); dmgVal keeps Math.abs
-    num->value = fabs(client_render_settings()->dmg_type == 0 ? ceil(value) : value);
+    const double shown = client_render_settings()->dmg_type == 0 ? ceil(value) : value;
+    num->value = fabs(shown);
+    num->heal = shown < 0.0; // doDamage: dmgVal(.., dmg, crit, dmg < 0), dmg after dmgType's ceil
     num->crit = crit;
     if (num->el && num->shown) html_dom_set_display(num->el, "none");
     num->shown = 0;
@@ -2065,9 +2135,8 @@ static void hud_nums_step(const Client *client, const double now_ms) {
         if (!num->shown) {
             snprintf(text, sizeof(text), "%gpx", rs->dmg_scale * 30.0);
             html_dom_set_style(el, "font-size", text);
-            // dmgColor is a switch+colour row (val COLORS.damage #DE292F); ClientRenderSettings
-            // keeps only the switch, so on = #DE292F, off = white. Crits use critColor.
-            html_dom_set_style(el, "color", num->crit ? rs->crit_color : rs->dmg_color ? "#DE292F" : "#ffffff");
+            // heal ? healColor : crit ? critColor : dmgColor (deob-10.0.7.js:162286; healColor #03fc30 :161686)
+            html_dom_set_style(el, "color", num->heal ? "#03fc30" : num->crit ? rs->crit_color : rs->dmg_color);
             hud_format_number(num->value, text, sizeof(text)); // String(val): "24", "23.4" (two decimals at most)
             html_dom_set_text(el, text);
             html_dom_set_display(el, "block");
@@ -2158,6 +2227,38 @@ static int hud_feed_find(const HtmlElem row) {
     return -1;
 }
 
+// One more bR entry (iìiïíìí): a #killFeed row (life 4 s) or a #chatList line (life 1000 * chatTimer, 0 = none); the
+// game loop removes it when its life runs out (hud_feed_step).
+static void hud_feed_track(const HtmlElem row, const double life_ms, const int chat) {
+    HudUi *ui = &g_hud_ui;
+    while (ui->feed_count >= FEED_MAX) hud_feed_drop(0, 1);
+    FeedRow *slot = &ui->feed[ui->feed_count++];
+    slot->row = row;
+    slot->life_ms = life_ms;
+    slot->chat = chat;
+}
+
+// window.updateChatTimer(v) (Settings > Chat "Chat Timer", deob-10.0.7.js:214838-214844): every bR entry's life drops
+// by 1000 * v, a row without a timer too (its life goes below 0, so the next pass removes it).
+void hud_ui_update_chat_timer(const double seconds) {
+    for (int i = 0; i < g_hud_ui.feed_count; i++) g_hud_ui.feed[i].life_ms -= 1000.0 * seconds;
+}
+
+// Settings > Chat "Chat BG Opacity" / "Chat Text Outline" set() (deob-10.0.7.js:211792-211822): every .chatItem now
+// on the page takes the new background (written even at the 0.2 default) / the chatTextOutline class.
+void hud_ui_restyle_chat(const int bg, const int outline) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    const ClientRenderSettings *rs = client_render_settings();
+    HtmlElem items[256];
+    const int n = html_dom_query_all(0, ".chatItem", items, (int) (sizeof(items) / sizeof(items[0])));
+    char value[64];
+    snprintf(value, sizeof(value), "rgba(0, 0, 0, %g)", (double) rs->chat_bg_opacity);
+    for (int i = 0; i < n; i++) {
+        if (bg) html_dom_set_style(items[i], "background-color", value);
+        if (outline) html_dom_set_class(items[i], "chatTextOutline", rs->chat_text_outline);
+    }
+}
+
 static void hud_feed_clear(const int remove_nodes) {
     while (g_hud_ui.feed_count > 0) hud_feed_drop(0, remove_nodes);
     g_hud_ui.feed_last_ms = -1.0;
@@ -2203,7 +2304,7 @@ static void hud_feed_step(const double now_ms) {
     if (dt > FEED_DELTA_MAX_MS) dt = FEED_DELTA_MAX_MS;
     for (int i = 0; i < ui->feed_count;) {
         FeedRow *slot = &ui->feed[i];
-        if (slot->life_ms > 0.0 && (slot->life_ms -= dt) <= 0.0) {
+        if (slot->life_ms != 0.0 && (slot->life_ms -= dt) <= 0.0) { // `life && (life -= dt, life <= 0 && remove)`
             hud_feed_drop(i, 1);
             continue;
         }
@@ -2276,24 +2377,44 @@ static void hud_feed_insert(const int chat, const char *html, double age_ms) {
     html_dom_append(list, row);
     if (chat) html_dom_scroll_to_bottom(list);
 
-    FeedRow *slot = &ui->feed[ui->feed_count++];
-    slot->row = row;
-    slot->life_ms = life > 0.0 ? life - age_ms : 0.0;
-    slot->chat = chat;
+    hud_feed_track(row, life > 0.0 ? life - age_ms : 0.0, chat);
 }
 
 static void hud_h2h_count(const char *killer, int killer_is_you, const char *victim, int victim_is_you);
 
-static void hud_killfeed_row(const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
-                             const char *weapon_icon, const int is_headshot, const int streak, const int flags, const double age_ms) {
-    hud_h2h_count(killer, killer_is_you, victim, victim_is_you); // player.killedBy (death screen)
-    if (flags & HUD_FEED_HIDDEN) return;                // "3" hideFeed
+int hud_ui_local_team(const Client *client) {
+    if (client && client->me && client->me->team) return client->me->team;
+    return spectate_active() ? 1 : 0;
+}
+
+void hud_ui_add_killfeed_kill(Client *client, const HudFeedKill *k) {
+    (void) client;
+    if (!k) return;
+    if (k->suicide) {
+        if (!client_render_settings()->show_kills) return; // tmp.showKills
+        const int chat = hud_feed_in_chat();
+        char html[1024];
+        const int count = (int) (sizeof(SUICIDES) / sizeof(SUICIDES[0]));
+        hud_feed_suicide_html(chat, k, SUICIDES[rand() % count], html, sizeof(html)); // iíïïìiî(0, len - 1)
+        hud_feed_insert(chat, html, k->age_ms);
+        return;
+    }
+    hud_h2h_count(k->killer, k->killer_is_you, k->victim, k->victim_is_you); // player.killedBy (death screen)
+    if (k->flags & HUD_FEED_HIDDEN) return;                // "3" hideFeed
     if (!client_render_settings()->show_kills) return; // SETTINGS.tmp.showKills
     const int chat = hud_feed_in_chat();
-    char html[1024];
-    hud_feed_row_html(chat, killer, killer_is_you, victim ? victim : "", victim_is_you, weapon_icon, is_headshot, streak, flags, html,
-                      sizeof(html));
-    hud_feed_insert(chat, html, age_ms);
+    char html[1536];
+    hud_feed_row_html(chat, k, html, sizeof(html));
+    hud_feed_insert(chat, html, k->age_ms);
+}
+
+static void hud_killfeed_row(const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
+                             const char *weapon_icon, const int is_headshot, const int streak, const int flags, const double age_ms) {
+    const HudFeedKill k = {.killer = killer, .killer_is_you = killer_is_you, .victim = victim, .victim_is_you = victim_is_you,
+                           .weapon_icon = weapon_icon, .weapon_pad = INT_MIN,
+                           .melee = weapon_icon && !strcmp(weapon_icon, FEED_MELEE_ICON), .headshot = is_headshot,
+                           .streak = streak, .package = -1, .flags = flags, .age_ms = age_ms};
+    hud_ui_add_killfeed_kill(menu_ui()->client, &k);
 }
 
 void hud_ui_add_killfeed_ex(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
@@ -2309,13 +2430,8 @@ void hud_ui_add_killfeed_flags(Client *client, const char *killer, const int kil
 }
 
 void hud_ui_add_killfeed_suicide(Client *client, const char *victim, const int victim_is_you) {
-    (void) client;
-    if (!client_render_settings()->show_kills) return; // bf.tmp.showKillFeed
-    const int chat = hud_feed_in_chat();
-    char html[512];
-    const int count = (int) (sizeof(SUICIDES) / sizeof(SUICIDES[0]));
-    hud_feed_suicide_html(chat, victim ? victim : "", victim_is_you, SUICIDES[rand() % count], html, sizeof(html)); // aU.randInt(0, len - 1)
-    hud_feed_insert(chat, html, 0.0);
+    const HudFeedKill k = {.victim = victim, .victim_is_you = victim_is_you, .suicide = 1, .streak = -1, .package = -1};
+    hud_ui_add_killfeed_kill(client, &k);
 }
 
 // killStreakMessage (g3, "kst"): gB(null, t("player.killstreak", who, fixStr(streak)), 1), a
@@ -2333,10 +2449,10 @@ void hud_ui_kill_streak(Client *client, const int uid, const int streak) {
     if (player == client->me) {
         hb_append(who, sizeof(who), &wlen, "<span style='color:" FEED_COLOR_YOU "'>You're</span>"); // v10: English in every language
     } else {
-        const Player *me = client->me;
-        const int ally = me && me->team && client->game.mode && client->game.mode->config.teams && me->team == player->team;
+        const int team = hud_ui_local_team(client); // deob-10.0.7.js:227584: the local team green, the rest red
+        const int ally = team && team == player->team;
         char pname[PLAYER_NAME_SIZE];
-        hud_feed_name_span(who, sizeof(who), &wlen, hud_player_name(client, player, pname, sizeof(pname)), 0, ally);
+        hud_feed_name_span(who, sizeof(who), &wlen, hud_player_name(client, player, pname, sizeof(pname)), 0, ally, NULL);
         hb_append(who, sizeof(who), &wlen, " is");
     }
     snprintf(num, sizeof(num), "%d", streak);
@@ -2435,19 +2551,19 @@ static void hud_chat_shown_player_name(const char *field, char *out, const size_
 }
 
 // f2018: appends one #chatMsg_N row (see hud_chat_row_html for the three kinds) on `channel`; the oldest rows go first
-// beyond config.chatListLength. data-kind of a row: "human" (a human player's line: Show Player Messages hides it), "bot"
-// (a bot player's line: always shown), "line" (a system line). hud_ui_clear_player_chat removes "human" rows.
+// beyond config.chatListLength. data-kind of a row: "human" (a human player's line), "bot" (a bot player's line; both
+// hidden while Show Player Messages is off), "line" (a system line). Each row lives 1000 * chatTimer ms (0: no timer).
 // The row is written as it is: `name` and every name in `msg` are already shown (Hide player names, player_names.h), by
 // uid, never rewritten by their text here.
 static void hud_add_chat_row_shown(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
     const HtmlElem list = html_dom_by_id("chatList");
     if (!list || !msg || !msg[0]) return;
 
-    hud_feed_evict(list, CHAT_LIST_LENGTH);
     char id[32], html[1024];
+    if (!hud_chat_row_html(name, msg, color, html, sizeof(html))) return; // the Filter threw: no line
+    hud_feed_evict(list, CHAT_LIST_LENGTH);
     g_chat_actions_row = g_hud_ui.chat_seq;
     snprintf(id, sizeof(id), "chatMsg_%d", g_hud_ui.chat_seq++);
-    hud_chat_row_html(name, msg, color, html, sizeof(html));
 
     const HtmlElem row = html_dom_create("div", id);
     hud_chat_row_channel(row, channel);
@@ -2455,6 +2571,7 @@ static void hud_add_chat_row_shown(const char *name, const char *msg, const char
     html_dom_set_html(row, html);
     html_dom_append(list, row);
     html_dom_scroll_to_bottom(list);
+    hud_feed_track(row, (double) client_render_settings()->chat_timer * 1000.0, 1); // life = 1000 * chatTimer (:227991)
 }
 
 static void hud_add_chat_row(const char *name, const char *msg, const char *color) {
@@ -2495,26 +2612,11 @@ int hud_ui_add_official_name_line(const char *key, const char *const *args, cons
     return 1;
 }
 
-// Settings > Chat "Show Player Messages" (showMessages) off: the human rows already in #chatList go.
-// Bot and system rows stay: the server decides whether a bot line exists at all.
-void hud_ui_clear_player_chat(void) {
-    if (!html_ui_available() || !html_ui_is_ready()) return;
-    const HtmlElem list = html_dom_by_id("chatList");
-    if (!list) return;
-    HtmlElem row = html_dom_first_child(list);
-    while (row) {
-        const HtmlElem next = html_dom_next(row);
-        char kind[8] = "";
-        if (html_dom_get_attr(row, "data-kind", kind, sizeof(kind)) >= 0 && !strcmp(kind, "human")) html_dom_remove(row);
-        row = next;
-    }
-}
-
-// A player's line (a sender name). human: the sender is not a bot (player_accounts_is_bot). A human
-// line is not shown while Show Player Messages is off; a bot line always is.
+// A player's line (a sender name). human: the sender is not a bot (player_accounts_is_bot). No player line, a bot's
+// too, is shown while Show Player Messages is off (addChat kind 0: `(kind || tmp.showMessages)`, deob-10.0.7.js:228050).
 void hud_ui_add_player_chat(const char *name, const char *msg, const int human) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
-    if (human && !client_render_settings()->show_messages) return;
+    if (!client_render_settings()->show_messages) return;
     hud_add_chat_row_shown(name, msg, NULL, hud_chat_line_channel(menu_ui()->client, 1), human ? "human" : "bot");
 }
 
@@ -2526,7 +2628,7 @@ void hud_ui_add_chat_line_on(const char *msg, const char *color, const int chann
 
 void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, const int channel, const int human) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
-    if (human && !client_render_settings()->show_messages) return;
+    if (!client_render_settings()->show_messages) return; // kind 0: Show Player Messages (bots' lines too)
     hud_add_chat_row_shown(name, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1, human ? "human" : "bot");
 }
 
@@ -2641,6 +2743,7 @@ static void hud_add_chat_markup(const char *markup) {
     html_dom_set_html(row, html);
     html_dom_append(list, row);
     html_dom_scroll_to_bottom(list);
+    hud_feed_track(row, (double) rs->chat_timer * 1000.0, 1); // life = 1000 * chatTimer (:227991)
 }
 
 // v10's "Items Found" cards (skinReward's card list, v10.js _72338): each .skinRewCard goes to the top
@@ -2909,8 +3012,10 @@ static void hud_render_ammo(const HtmlHudState *hud) {
     else snprintf(text, sizeof(text), "%s", hud->melee ? "-" : "0");
     dom_text("ammoVal", text);
 
-    // "| " + (ammoLimit != null ? "-" : weapon.ammo || "-")
-    if (hud->ammo_limit || hud->ammo_max <= 0) snprintf(text, sizeof(text), "| -");
+    // updatePlayerAmmo (deob-10.0.7.js:174679-174685): mode.noReloads -> ""; else "| " + (ammoLimit != null ? "-" :
+    // weapon.ammo || "-")
+    if (hud->no_reloads) text[0] = 0;
+    else if (hud->ammo_limit || hud->ammo_max <= 0) snprintf(text, sizeof(text), "| -");
     else snprintf(text, sizeof(text), "| %d", hud->ammo_max);
     dom_text("ammoMax", text);
     dom_display("ammoHolder", "inline-block");
@@ -2921,7 +3026,8 @@ static void hud_render_ammo(const HtmlHudState *hud) {
     else snprintf(text, sizeof(text), "0%%");
     dom_style("ammoHolder", "background-size", text);
 
-    const int need_reload = !hud->melee && hud->ammo_max > 0 && hud->ammo <= 0 && !hud->ammo_limit;
+    // #reloadMsg: a magazine, empty, ammoLimit == null, and the mode reloads at all (!noReloads)
+    const int need_reload = !hud->melee && hud->ammo_max > 0 && hud->ammo <= 0 && !hud->ammo_limit && !hud->no_reloads;
     dom_display("reloadMsg", need_reload ? "block" : "none");
 }
 
@@ -3188,14 +3294,18 @@ static const char *hud_death_weapon_img(const Weapon *w, const char *icon, char 
     return out;
 }
 
-// UTILS.getReadableTime(ms, true, null, true): "<m>m <s>s " (zero parts dropped).
+// iííìïïï(ms, true, null, true) (deob-10.0.7.js:23957): "<y>y <d>d <h>h <m>m <s>s " with the zero parts dropped;
+// under a second it is "" (the stat row shows it empty, not "Unknown").
 static void hud_readable_time(const int ms, char *out, const size_t size) {
-    const int secs = ms / 1000, m = secs / 60 % 60, h = secs / 3600;
+    const long secs = ms > 0 ? ms / 1000 : 0, mins = secs / 60, hours = mins / 60, days_all = hours / 24;
+    const long years = days_all / 365, days = days_all % 365;
     size_t len = 0;
     out[0] = 0;
-    if (h) hb_append(out, size, &len, "%dh ", h);
-    if (m) hb_append(out, size, &len, "%dm ", m);
-    if (secs % 60) hb_append(out, size, &len, "%ds ", secs % 60);
+    if (years) hb_append(out, size, &len, "%ldy ", years);
+    if (days) hb_append(out, size, &len, "%ldd ", days);
+    if (hours % 24) hb_append(out, size, &len, "%ldh ", hours % 24);
+    if (mins % 60) hb_append(out, size, &len, "%ldm ", mins % 60);
+    if (secs % 60) hb_append(out, size, &len, "%lds ", secs % 60);
 }
 
 // f1975: the death screen (#deathUIHolder). With a killer: the VS layout, the killer's card
@@ -3231,7 +3341,7 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
         for (int i = 0; i < 5; i++) {
             hb_append(stats, sizeof(stats), &slen, "<div class=\"death-stats-row\">\n\t\t\t%s : <span style=\"color:rgba(255, 255, 255, 0.7)\">",
                       names[i]);
-            hb_append_escaped(stats, sizeof(stats), &slen, i == 0 && !vals[0][0] ? "Unknown" : vals[i]);
+            hb_append_escaped(stats, sizeof(stats), &slen, vals[i]); // the time survived is sent: "" under a second
             hb_append(stats, sizeof(stats), &slen, "</span>\n\t\t</div>");
         }
     }
@@ -3254,7 +3364,7 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
                                "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: end;\">\n\t\t\t\t\t<div class=\"death-row-left\">"
                                "\n\t\t\t\t\t\t<div class=\"death-row-weapon\">\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:");
     hb_append_escaped(out, size, &len, color);
-    hb_append(out, size, &len, "\">%s[", card->thrown ? "Thrown " : "");
+    hb_append(out, size, &len, "\">["); // v10.0.7: no "Thrown " (its info.pj is read off a boolean, :227490)
     hb_append_escaped(out, size, &len, card->weapon ? card->weapon : "");
     hb_append(out, size, &len, "]</div>\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-img\" style=\"background-image:url(%s)\"></div>\n\t\t\t\t\t\t</div>"
                                "\n\t\t\t\t\t\t<div class=\"death-row-kills\">%d</div>\n\t\t\t\t\t</div>\n\t\t\t\t\t<div class=\"death-row-bottom\">\n\t\t\t\t\t\t",
@@ -3279,12 +3389,7 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
                                "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: center;\">\n\t\t\t\t\t<div class=\"death-row-center\">-</div>"
                                "\n\t\t\t\t\t<div class=\"death-row-center death-row-center-bottom\">VS</div>\n\t\t\t\t</div>"
                                "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: start;\">\n\t\t\t\t\t");
-    if (card->report) { // "[" + UTILS.getKeyName(CONTROLS.binds.playerList.val) + "] to Report"
-        char key[32];
-        hb_append(out, size, &len, "<div class=\"death-report\">\n\t\t\t\t\t\t<span class=\"death-report-text\">[");
-        hb_append_escaped(out, size, &len, ui_controls_key_name(ui_controls_bind(UI_CONTROL_PLAYER_LIST), key, sizeof(key)));
-        hb_append(out, size, &len, "]</span> to Report\n\t\t\t\t\t</div>");
-    }
+    // v10.0.7 puts '' where v10.0.x had "[key] to Report" (deob-10.0.7.js:227493)
     hb_append(out, size, &len, "\n\t\t\t\t\t<div class=\"death-row-right\">"
                                "\n\t\t\t\t\t\t<div class=\"death-row-kills\">%d</div>\n\t\t\t\t\t\t<div class=\"death-row-weapon\">"
                                "\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:rgba(255,255,255,0.7)\">[",
@@ -3298,7 +3403,7 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
                                "\n\t\t\t\t\t\t\t<img class=\"death-row-class-img\" src=\"textures/classes/icon_%d.png\">\n\t\t\t\t\t\t\t<div class=\"death-row-class-level\">lvl %d</div>"
                                "\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"death-row-user\">\n\t\t\t\t\t\t\t<div class=\"death-row-user-text\">",
               my_class < 0 ? 0 : my_class, card->my_level > 1 ? card->my_level : 1);
-    hb_append_escaped(out, size, &len, acc ? player_names_account(acc->premium && acc->alias[0] ? acc->alias : acc->name) : hud_my_name(client));
+    hb_append_escaped(out, size, &len, acc ? player_names_account(acc->premium && !ui_setting_is_false("premiumBadge") && acc->alias[0] ? acc->alias : acc->name) : hud_my_name(client)); // premiumT > 0 && tmp.premiumBadge ? alias : name (deob-10.0.7.js:227493)
     hb_append(out, size, &len, "</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t\t<div class=\"death-stats\">%s</div>\n\t\t\t</div>\n\t\t", stats);
 }
 
@@ -4116,6 +4221,7 @@ static void hud_apply_override(const Client *client, HtmlHudState *next, HudUiEx
     next->ammo = hud_json_int(h, "ammo", next->ammo);
     next->ammo_max = hud_json_int(h, "ammoMax", next->ammo_max);
     next->ammo_limit = hud_json_int(h, "ammoLimit", next->ammo_limit);
+    next->no_reloads = hud_json_int(h, "noReloads", next->no_reloads);
     next->melee = hud_json_int(h, "melee", next->melee);
     next->reload_percent = hud_json_int(h, "reloadPercent", next->reload_percent);
     next->kills = hud_json_int(h, "kills", next->kills);
@@ -4363,10 +4469,13 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
     // changes) are written from the same values, so this pass never undoes a setting.
     const ClientRenderSettings *rs = client_render_settings();
     dom_display("leaderboardHolder", "block"); // v10: always shown (switchLeaderboard, hud_v10.c)
-    dom_display("killCount", rs->show_kill_c ? "inline-block" : "none");       // showKillC
-    dom_display("deathCount", rs->show_deaths ? "inline-block" : "none");      // showDeaths
+    // the spawn's `mode.friendly || !tmp.showKillC ? none` (deob-10.0.7.js:225858-225860): a friendly mode counts no
+    // kills or deaths (the Settings switches still show them when flipped mid-game, :211216 / :211243)
+    const int friendly = client && client->game.mode && client->game.mode->config.friendly;
+    dom_display("killCount", rs->show_kill_c && !friendly ? "inline-block" : "none");       // showKillC
+    dom_display("deathCount", rs->show_deaths && !friendly ? "inline-block" : "none");      // showDeaths
     dom_display("streakCount", rs->show_streak ? "inline-block" : "none");     // showStreak
-    dom_display("kdCount", hud_setting_on("showKD") ? "inline-block" : "none"); // showKD
+    dom_display("kdCount", hud_setting_on("showKD") && !friendly ? "inline-block" : "none"); // showKD
     dom_display("scoreCount", rs->show_score ? "inline-block" : "none");       // showScore
     dom_display("fpsDisplay", menu_ui()->settings.show_fps ? "block" : "none"); // showFPS
     dom_display("scoreZoneCount", "none");
@@ -4959,12 +5068,13 @@ void client_hud_html_tick(Client *client, const float now_f) {
 
     HtmlHudState next = *hud;
     HudUiExtra next_extra = ui->extra;
-    next.health = (int) lroundf(me->health);
+    next.health = (int) ceilf(me->health); // bottomLeftHealth: Math.ceil(health) (deob-10.0.7.js:227925)
     next.max_health = me->max_health;
     next.health_segments = hud_health_segments(client, me);
     next.ammo = hud_ammo(me);
     next.ammo_max = weapon ? (int) weapon->ammo : 0;
-    next.ammo_limit = game->mode && game->mode->config.ammo_limit > 0;
+    next.ammo_limit = game->mode && game->mode->config.has_ammo_limit; // ammoLimit != null: a 0 counts (aon)
+    next.no_reloads = game->mode && game->mode->config.no_reloads;
     next.melee = weapon ? weapon->melee : 0;
     next.reload_percent = hud_reload_percent(me, game);
     next.kills = (int) me->kills;
@@ -5004,7 +5114,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     if (ov) hud_apply_override(client, &next, &next_extra, &ping, &reloading);
 
     const int health_changed = force || next.health != hud->health || next.max_health != hud->max_health || next.health_segments != hud->health_segments;
-    const int ammo_changed = force || next.ammo != hud->ammo || next.ammo_max != hud->ammo_max || next.ammo_limit != hud->ammo_limit ||
+    const int ammo_changed = force || next.ammo != hud->ammo || next.ammo_max != hud->ammo_max || next.ammo_limit != hud->ammo_limit || next.no_reloads != hud->no_reloads ||
                              next.melee != hud->melee || next.reload_percent != hud->reload_percent;
     const int timer_changed = force || strcmp(next.timer_text, hud->timer_text) != 0;
     const int counters_changed = force || next.kills != hud->kills || next.deaths != hud->deaths || next.score != hud->score;

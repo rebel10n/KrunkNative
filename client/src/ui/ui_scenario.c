@@ -82,6 +82,7 @@
 #include <player_names.h> // Hide player names: the scenario's names as the game shows them
 #include <game_config.h> // state.officialClasses: game_config_apply (the official game's class list)
 #include <stdlib.h>
+#include <limits.h>
 #include <string.h>
 #include <strings.h>
 #include <time.h> // tzset: the references' time zone
@@ -1111,7 +1112,6 @@ static void apply_killcard(Client *client) {
         const cJSON *kcard = cJSON_GetObjectItemCaseSensitive(kc, "killerCard"), *mcard = cJSON_GetObjectItemCaseSensitive(kc, "myCard");
         if (cJSON_IsNumber(kcard)) { store_skin_preview(kcard->valueint, killer_card, sizeof(killer_card)); card.killer_card_url = killer_card; }
         if (cJSON_IsNumber(mcard)) { store_skin_preview(mcard->valueint, my_card, sizeof(my_card)); card.my_card_url = my_card; }
-        card.report = (int) obj_num(kc, "report", 0);
         card.weapon_color = obj_str(kc, "weaponColor");
         const cJSON *stats = cJSON_GetObjectItemCaseSensitive(kc, "stats");
         if (cJSON_IsArray(stats) && cJSON_GetArraySize(stats) >= 5) {
@@ -1168,10 +1168,28 @@ static void apply_timed(Client *client, const double capture_ms) {
             const char *icon = obj_str(row, "weaponIcon");
             char kpn[PLAYER_NAME_SIZE], vpn[PLAYER_NAME_SIZE]; // the names as the kill feed shows them (Hide player names)
             const int killer_you = (int) obj_num(row, "killerIsYou", 0), victim_you = (int) obj_num(row, "victimIsYou", 0);
-            hud_ui_add_killfeed_ex(client, player_names_shown(-1, killer_you, obj_str(row, "killer"), kpn, sizeof(kpn)), killer_you,
-                                   player_names_shown(-1, victim_you, obj_str(row, "victim"), vpn, sizeof(vpn)), victim_you,
-                                   icon, (int) obj_num(row, "headshot", 0), (int) obj_num(row, "streak", -1), // stk: a Nuke kill's icon
-                                   obj_num(row, "age_ms", 0.0) - ahead);
+            // killerAlly / victimAlly (the local team's green), killerClan / victimClan, melee + meleeSkin (the melee skin's
+            // icon), wallbang, package (stk 1's img/streaks/package/<pkg>): the v10.0.7 row's other fields
+            const HudFeedKill k = {
+                .killer = obj_str(row, "killer") ? player_names_shown(-1, killer_you, obj_str(row, "killer"), kpn, sizeof(kpn)) : NULL,
+                .killer_is_you = killer_you,
+                .killer_ally = (int) obj_num(row, "killerAlly", 0),
+                .killer_clan = obj_str(row, "killerClan"),
+                .victim = player_names_shown(-1, victim_you, obj_str(row, "victim"), vpn, sizeof(vpn)),
+                .victim_is_you = victim_you,
+                .victim_ally = (int) obj_num(row, "victimAlly", 0),
+                .victim_clan = obj_str(row, "victimClan"),
+                .weapon_icon = icon,
+                .weapon_pad = INT_MIN,
+                .melee = (int) obj_num(row, "melee", icon && !strcmp(icon, "icon_0")),
+                .melee_skin_id = (int) obj_num(row, "meleeSkin", 0),
+                .headshot = (int) obj_num(row, "headshot", 0),
+                .streak = (int) obj_num(row, "streak", -1), // stk: a Nuke kill's icon
+                .package = (int) obj_num(row, "package", -1),
+                .flags = obj_num(row, "wallbang", 0) ? HUD_FEED_WALLBANG : 0,
+                .age_ms = obj_num(row, "age_ms", 0.0) - ahead,
+            };
+            hud_ui_add_killfeed_kill(client, &k);
         }
     }
     const cJSON *hit = st("hit");

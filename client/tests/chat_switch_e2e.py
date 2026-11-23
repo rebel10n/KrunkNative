@@ -4,8 +4,9 @@ ui_controls.c, ui_render_settings.c, client/src/net/game_events.c, ui/windows/se
 
   python3 -I client/tests/chat_switch_e2e.py BUILD_DIR      (run from the repository root)
 
-The switch gates human players only. A bot's line (the server's bot chat: gg, kill comments) and system
-lines (kill feed, notices, errors) are always shown: the server decides whether a bot line exists at all.
+v10.0.7's switch (deob-10.0.7.js:211743, addChat :228050 `(kind || tmp.showMessages)`) gates every player line
+(kind 0), a bot's (the server's bot chat: gg, kill comments) as well as a human's; system lines (kill feed, notices,
+errors) are always shown. Its set() only stores the value: the lines already shown stay.
 
 Headless client_bin runs (offline Kanji, input scripts, a private XDG_CONFIG_HOME kept across the runs).
 The `netchat` input-script command injects a server chat line: 0 a human's line (uid 2, a guest: no
@@ -15,12 +16,12 @@ steps (down ENTER opens it, type, down ENTER sends), started a moment after `pla
   A. the default (nothing stored): the Settings switch is there and on; a human line is shown, a bot line
      and a system line are; plain text typed into the chat box and sent with Enter is shown (echo) and is
      in the server log (the positive control for the log probe); "/clear" still works from the chat box.
-  B. the switch clicked off in the Settings window (from the default): a human line shown before is removed,
-     the bot rows stay; stored "false"; a later human line is not shown. Plain text typed and sent with Enter
+  B. the switch clicked off in the Settings window (from the default): the human and bot lines shown before
+     stay; stored "false"; a later human or bot line is not shown. Plain text typed and sent with Enter
      while off is still sent: it is in the server log, and its echo (an incoming human line) is hidden. The
      switch never gates sending, only what is shown. The same steps as A's send, so the log check is not
      vacuous: A's log line is the positive control.
-  C. the stored "false" survives a restart (no human line shown at once); then the switch is clicked on in
+  C. the stored "false" survives a restart (no human or bot line shown at once); then the switch is clicked on in
      the Settings window: stored "true", a human line is shown, and plain text typed and sent is shown and
      reaches the server again.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
@@ -145,7 +146,7 @@ def main():
     check("A: the chat box still takes /clear (the command path)", n.get("@a-l2", 0) > 0 and n.get("@a-l3") == 0, str(n))
     check("A: nothing stored, or on, in the store", stored() in (None, "true"), f"stored {stored()!r}")
 
-    # B. the switch clicked off in the Settings window, from the default; a human line shown before is removed
+    # B. the switch clicked off in the Settings window, from the default; the lines shown before stay
     n, log = run("off", "0 menu\n300 netchat 0 shown-before-off\n350 netchat 3 bot-shown-before-off\n"
                  f"{open_settings(500, '@b-on')}"
                  f"""2400 clicksel {SWITCH}
@@ -171,10 +172,10 @@ def main():
     check("B: a human line is shown before the switch is turned off", n.get("@b-on", 0) == 1 and "shown-before-off" in log, str(n))
     check("B: the Settings switch starts on (the default)", n.get("@b-on") == 1, str(n))
     check("B: clicking the switch unchecks it and stores false", n.get("@b-off") == 0 and stored() == "false", f"{n} stored {stored()!r}")
-    check("B: turning it off removes the human lines already shown", n.get("@b-cleared") == 0, str(n))
+    check("B: turning it off keeps the human lines already shown", n.get("@b-cleared") == 1, str(n))
     check("B: turning it off keeps the bot lines already shown", n.get("@b-bcleared") == 1, str(n))
-    check("B: a human line after the switch is off is not shown", n.get("@b-after") == 0, str(n))
-    check("B: a bot line after the switch is off is shown", n.get("@b-bafter", 0) == n.get("@b-bcleared", 0) + 1, str(n))
+    check("B: a human line after the switch is off is not shown", n.get("@b-after") == n.get("@b-cleared"), str(n))
+    check("B: a bot line after the switch is off is not shown", n.get("@b-bafter") == n.get("@b-bcleared"), str(n))
     check("B: a system line is still shown", n.get("@b-sys", 0) > 0, str(n))
     check("B: plain text sent while off reaches the server (the server log has it)", "typed-plain-off" in log)
     check("B: its echo, an incoming human line, is hidden while off", n.get("@b-typed") == n.get("@b-after"), str(n))
@@ -191,7 +192,7 @@ def main():
 1400 quit
 """)
     check("C: the stored false survives a restart (no human line shown)", before == "false" and n.get("@c-p1") == n.get("@c-p0"), f"{n} stored {before!r}")
-    check("C: a bot line is shown after the restart", n.get("@c-b1", 0) == n.get("@c-b0", 0) + 1, str(n))
+    check("C: a bot line is not shown after the restart either", n.get("@c-b1") == n.get("@c-b0"), str(n))
 
     # C2. the switch clicked on in the Settings window: a human line shows, and plain text is sent again
     n, log = run("on", "0 menu\n" + open_settings(500, "@c-off") + f"""2400 clicksel {SWITCH}

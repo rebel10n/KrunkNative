@@ -746,7 +746,7 @@ typedef struct {
     double fps_window_start; // last #ingameFPS update (hud_sample_fps, every 100 ms)
     int fps;                 // frames per second of the last completed window
     int health, max_health, health_segments;
-    int ammo, ammo_max, ammo_limit, melee, reload_percent;
+    int ammo, ammo_max, ammo_limit, no_reloads, melee, reload_percent; // ammo_limit: mode.ammoLimit != null
     int kills, deaths, score;
     int class_index, scoped;
     int aim_dot; // #aimDot reticle: fully aimed through a sight attachment (95.js toggleAim)

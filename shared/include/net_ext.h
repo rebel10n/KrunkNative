@@ -206,6 +206,9 @@ typedef enum {
     // 0x8190 v10.0.7 item styles (client/include/skin_style.h, server/src/accounts.c accounts_skin_styles_send)
     NET_EXT_KN_SKIN_STYLES = 0x8190, // S -> C NetSkinStylesPacket, right before a player's SPAWN: the worn copies' styles
     NET_EXT_KN_STYLE_REFRESH = 0x8191, // C -> S no body, re-read authoritative owned cosmetics after items.setStyle
+    // 0x81A0 v10.0.7 hit / kill-feed extras an official lobby sends (client/src/net/krunker_link.c, client-local)
+    NET_EXT_KN_HIT_SILENT = 0x81A0,   // NetHitSilentPacket, right before a NET_PACKET_HIT: DO_DAMAGE `silent` (no hit sound)
+    NET_EXT_KN_KILL_PACKAGE = 0x81A1, // NetKillPackagePacket, right before a NET_PACKET_KILL: killInfo.pkg (stk 1's package)
 } NetExtSubtype;
 
 // NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
@@ -348,6 +351,22 @@ typedef struct {
     int32_t damage_tenths; // the damage x 10 (dmg.round(1) * 10)
     uint8_t ai;            // NetHitPacket.ai
 } NetHitDamagePacket;
+#pragma pack(pop)
+
+// NET_EXT_KN_HIT_SILENT: v10's DO_DAMAGE "4" [sid, dmg, crit, kill, isAI, silent] plays
+// `silent || SOUND.play(crit ? "crit_0" : "hit_0", 2.1)` (deob-10.0.7.js:228134); a silent hit sends this
+// right before its NET_PACKET_HIT (same target_uid / ai), and that HIT plays no sound.
+// NET_EXT_KN_KILL_PACKAGE: killInfo.pkg of the "3" KILL_PLAYER that follows (victim_uid): with stk 1 the
+// feed row's icon is img/streaks/package/<pkg>.png (deob-10.0.7.js:228108).
+#pragma pack(push, 1)
+typedef struct {
+    int32_t target_uid;
+    uint8_t ai;
+} NetHitSilentPacket;
+typedef struct {
+    int32_t victim_uid;
+    int32_t package;
+} NetKillPackagePacket;
 #pragma pack(pop)
 
 // NET_EXT_KN_SWAP_TEAM (C -> S, FRVR's SWAP_TEAM "swpt" [team] from Tap-to-Play's Switch Teams, sent

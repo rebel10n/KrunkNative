@@ -751,6 +751,8 @@ static void emit_death_info(KrunkerLink *l, const NetKillPacket *k, const Krunke
     emit(l, NET_PACKET_DEATH_INFO, &d, sizeof(d));
 }
 
+static void emit_ext(KrunkerLink *l, uint16_t subtype, const void *body, uint16_t length);
+
 // "3" KILL_PLAYER [victimSid, victimDeaths, killerSid, deathStats, killInfo, hideFeed]
 // (game.deob.js:220579; the feed row :221222-221246 reads killInfo {wId (null: the killer's held
 // weapon), stk (+ pkg), fs, pj, wb, hs}; hideFeed: no row, killedBy still counts, :220629)
@@ -790,16 +792,19 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     KrunkerLinkStats *vs = stats(l, k.victim_uid);
     if (vs) vs->deaths = k.victim_deaths;
     if (k.victim_uid == l->my_sid) emit_death_info(l, &k, role(f, b->kill, KRB_KILL_STATS), info);
+    // killInfo.pkg: a package streak's icon (img/streaks/package/<pkg>, `stk == 1 && pkg`, deob-10.0.7.js:228108)
+    const double pkg = krunker_is(info, KRUNKER_MAP) ? num(krunker_get(info, "pkg"), 0) : 0;
+    if (pkg > 0 && pkg < INT32_MAX) {
+        const NetKillPackagePacket package = {.victim_uid = k.victim_uid, .package = (int32_t) pkg};
+        emit_ext(l, NET_EXT_KN_KILL_PACKAGE, &package, sizeof(package));
+    }
     emit(l, NET_PACKET_KILL, &k, sizeof(k));
 }
 
-static void emit_ext(KrunkerLink *l, uint16_t subtype, const void *body, uint16_t length);
-
 // "4" DO_DAMAGE [targetSid, damage, crit, kill, isAI, silent] (game.deob.js:221254): the whole number is
 // Math.ceil(dmg) (settings dmgType 0, :221259); a damage with a fraction goes first as
-// NET_EXT_KN_HIT_DAMAGE, so dmgType 1 "Float" (the setting's val) draws Krunker's exact value. Not
-// carried: silent (no hit sound) and the live build's crit_0 sound (10.0.3; v10.0.2 and our assets have
-// hit_0 only).
+// NET_EXT_KN_HIT_DAMAGE, so dmgType 1 "Float" (the setting's val) draws Krunker's exact value. A silent
+// hit goes first as NET_EXT_KN_HIT_SILENT: no crit_0 / hit_0 sound (deob-10.0.7.js:228134).
 static void on_damage(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerBuild *b = krunker_build();
     NetHitPacket h;
@@ -814,6 +819,10 @@ static void on_damage(KrunkerLink *l, const KrunkerFrame *f) {
     if (h.damage && tenths % 10) {
         const NetHitDamagePacket exact = {.target_uid = h.target_uid, .damage_tenths = tenths, .ai = h.ai};
         emit_ext(l, NET_EXT_KN_HIT_DAMAGE, &exact, sizeof(exact));
+    }
+    if (truthy(role(f, b->damage, KRB_DAMAGE_SILENT))) {
+        const NetHitSilentPacket silent = {.target_uid = h.target_uid, .ai = h.ai};
+        emit_ext(l, NET_EXT_KN_HIT_SILENT, &silent, sizeof(silent));
     }
     emit(l, NET_PACKET_HIT, &h, sizeof(h));
 }

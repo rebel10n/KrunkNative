@@ -685,8 +685,8 @@ static void fx_numbers_tick(Client *client) {
         const HtmlElem el = fx_number(i);
         if (!el) continue;
         char v[64], fill[24], stroke[24], shadow[320], text[24];
-        if (n->mode == STRIKE_DMG_LEGACY) { // the Legacy draw (FRVR's Wwe): critColor, else dmgColor (on #DE292F, off white), #2e2e2e stroke
-            snprintf(fill, sizeof(fill), "%s", n->crit ? rs->crit_color : rs->dmg_color ? "#DE292F" : "#ffffff");
+        if (n->mode == STRIKE_DMG_LEGACY) { // the Legacy draw (FRVR's Wwe): critColor, else the dmgColor colour, #2e2e2e stroke
+            snprintf(fill, sizeof(fill), "%s", n->crit ? rs->crit_color : rs->dmg_color);
             snprintf(stroke, sizeof(stroke), "%s", "#2e2e2e");
         } else {
             strike_damage_color(n, 0, fill, sizeof(fill));

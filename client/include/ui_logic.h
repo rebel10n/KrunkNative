@@ -289,7 +289,6 @@ typedef struct {
     const char *my_card_url;
     const char *pc_stat_name;    // the killer's player card stat: config.playerCardStats[i].name, NULL = none ("3" [2] null)
     const char *pc_stat_value;
-    int report;                  // "[<playerList key>] to Report" (killer level <= 10, signed in, public game)
     const char *flag_code;       // the killer's Country Flag, ISO code ("us"): Strike's kill card flag (img/flags/3x2), NULL none
     int hide_extras;             // another player's level and card stat are hidden (Hide player names, player_names.h)
 } HudKillCard;
@@ -440,7 +439,8 @@ void hud_ui_add_chat_line_on(const char *msg, const char *color, int channel);
 int hud_ui_add_official_name_line(const char *key, const char *const *args, int argc, const char *color, int channel);
 void hud_ui_add_player_chat(const char *name, const char *msg, int human); // a NET_CHAT_PLAYER line: human hidden by Show Player Messages off, a bot's always shown
 void hud_ui_clear_chat(void);                    // empty #chatList, no join lines seeded
-void hud_ui_clear_player_chat(void);             // showMessages off: the human rows of #chatList go; bot and system rows stay
+void hud_ui_restyle_chat(int bg, int outline);   // chatBGOp / chatTextOutline set(): every .chatItem restyled
+void hud_ui_update_chat_timer(double seconds);   // chatTimer set(): window.updateChatTimer(v)
 // hud_ui_add_killfeed with explicit "You" flags and the row's age (into its 4 s life). A NULL
 // killer (not "You") is a self-kill: weapon + victim only. Old Scoreboard puts the row in #chatList.
 // `streak` >= 0: a streak kill (v7 info.stk, the Nuke's): its img/streaks icon replaces the weapon's.
@@ -451,6 +451,32 @@ void hud_ui_add_killfeed_ex(Client*, const char *killer, int killer_is_you, cons
 enum { HUD_FEED_WALLBANG = 1, HUD_FEED_FISTS = 2, HUD_FEED_THROWN = 4, HUD_FEED_HIDDEN = 8 };
 void hud_ui_add_killfeed_flags(Client*, const char *killer, int killer_is_you, const char *victim, int victim_is_you,
                                const char *weapon_icon, int is_headshot, int streak, int flags);
+// One v10.0.7 kill-feed row (iìïìîîï, deob-10.0.7.js:228070-228127, its names :227507-227508): every field the
+// row shows. killer NULL and !killer_is_you: a self kill (weapon + victim). suicide: the "<victim> committed ..."
+// row (no killer was found, :227509). A name is "You" (#fff), else #9eeb56 for the local team's players (ally),
+// else #eb5656, with " [clan]" in getClanCol's colour under the new scoreboard (leaderType 1).
+typedef struct {
+    const char *killer, *killer_clan;
+    int killer_is_you, killer_ally;
+    const char *victim, *victim_clan;
+    int victim_is_you, victim_ally;
+    const char *weapon_icon;  // weaponConfig.icon ("icon_2"); NULL / "" none
+    int weapon_pad;           // weaponConfig.icnPad, INT_MIN: the icon's own (hud_ui.c's table)
+    int melee;                // weaponConfig.melee: the killer's melee skin icon instead
+    int melee_skin_id;        // store.skins[meleeIndex].id || 0 (textures/melee/icon_<id>, its margin)
+    int headshot;
+    int streak;               // info.stk, -1 none
+    int package;              // info.pkg with stk 1 (official servers): img/streaks/package/<pkg>, -1 none
+    int flags;                // HUD_FEED_*
+    int suicide;
+    double age_ms;            // into the row's life
+} HudFeedKill;
+void hud_ui_add_killfeed_kill(Client*, const HudFeedKill*);
+// getClanCol(clan, fallback) (deob-10.0.7.js:104139): the staff clans' gold, else fallback
+const char *hud_ui_clan_col(const char *clan, const char *fallback);
+// The local player's team as v10 keeps it (deob-10.0.7.js:225784-225787, :227301): the team the join gave us,
+// 1 while spectating with none; 0 outside team modes.
+int hud_ui_local_team(const Client*);
 void hud_ui_hit_elapsed(Client*, int kill, double elapsed_ms); // hud_ui_hit `elapsed_ms` ago
 
 // Scenario overrides (NULL clears): the `state.hud` payload replaces the values the HUD

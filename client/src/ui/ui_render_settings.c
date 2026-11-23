@@ -56,7 +56,7 @@ static ClientRenderSettings g_rs = {
     .saturation = 1.0f, .hue = 0.0f, .menu_saturation = 1.0f, .menu_hue = 0.0f, .vignette = 0.0f, .feed_limit = 8,
     // Display
     .show_ui = 1, .old_scoreboard = 0, .old_browser = 0, .disable_rarity_anim = 0, .show_pfp = 1,
-    .dynamic_hp = 1, .show_hit_ind = 1, .hit_color = "#FF3F3F", .show_dmg = 1, .dmg_color = 1,
+    .dynamic_hp = 1, .show_hit_ind = 1, .hit_color = "#FF3F3F", .show_dmg = 1, .dmg_color = "#DE292F",
     .crit_color = "#FFD542", .dmg_scale = 1.0f,
     .show_kills = 1, .show_kill_c = 0, .show_deaths = 0, .show_score = 0, .show_streak = 0,
     .show_ping = 1, .show_net_stat = 0, .show_fps = 0, .fps_rate = 100.0f, .dmg_type = 1, .damage_number_mode = 2, // Legacy: FRVR's default_damage_numbers_mode (1.37.2 config)
@@ -309,13 +309,26 @@ static int g_desktop_w, g_desktop_h; // the monitor's mode before exclusive full
 static void mark_dom(Client *client) { (void) client; g_dom_dirty = 1; }
 static void mark_swap(Client *client) { (void) client; g_swap_dirty = 1; }
 
-// Settings > Chat "Show Player Messages" (showMessages), human players only. Off: the human lines already
-// in #chatList go (hud_ui_clear_player_chat); bot and system lines stay. The gate is hud_ui.c's
-// hud_ui_add_player_chat / hud_ui_add_chat_channel, reading g_rs.show_messages. It never gates sending:
-// a typed line or quick chat is sent either way (ui_controls.c's chat_send, hud_social.c).
-static void apply_show_messages(Client *client) {
+// Settings > Chat "Show Player Messages" (showMessages) has no hook: v10.0.7's set() only stores the value
+// (deob-10.0.7.js:211743-211752) and addChat reads it for each new player line, a bot's too (hud_ui.c's
+// hud_ui_add_player_chat / hud_ui_add_chat_channel); the lines already shown stay. It never gates sending.
+
+// Settings > Chat "Chat BG Opacity" / "Chat Text Outline" / "Chat Timer" set() (deob-10.0.7.js:211792-211850): the
+// .chatItem rows on the page take the new background / outline class; the timer takes 1000 * v off every row's life
+// (window.updateChatTimer).
+static void apply_chat_bg(Client *client) {
     (void) client;
-    if (!g_rs.show_messages) hud_ui_clear_player_chat();
+    hud_ui_restyle_chat(1, 0);
+}
+
+static void apply_chat_outline(Client *client) {
+    (void) client;
+    hud_ui_restyle_chat(0, 1);
+}
+
+static void apply_chat_timer(Client *client) {
+    (void) client;
+    hud_ui_update_chat_timer(g_rs.chat_timer);
 }
 
 // renderDist.set: camera.far = v * 60 (55.js camera: PerspectiveCamera(.., 0.1, 6000)).
@@ -497,7 +510,7 @@ static const RsEntry RS_TABLE[] = {
     RS_B("showDMG", show_dmg, NULL),
     RS_I("dmgType", dmg_type, NULL),                    // hud_ui_damage_number: 0 ceil, 1 the exact value
     RS_I("damageNumberDisplayMode", damage_number_mode, NULL), // Strike's Display tab: strike_hud_damage_number (strike_hud.c)
-    RS_B("dmgColor", dmg_color, NULL),
+    RS_S("dmgColor", dmg_color, NULL),                  // a colour (deob-10.0.7.js:211151-211162)
     RS_S("critColor", crit_color, NULL),
     RS_SHARED_F("dmgScale", dmg_scale, NULL),
     RS_B("showKills", show_kills, mark_dom),            // #killFeed
@@ -528,13 +541,13 @@ static const RsEntry RS_TABLE[] = {
     RS_B("kpdVision", kpd_vision, NULL),
     RS_S("kpdVisionCol", kpd_vision_col, NULL),
     RS_B("chatFilter", chat_filter, NULL),
-    RS_B("showMessages", show_messages, apply_show_messages), // player chat: receive + send gates
+    RS_B("showMessages", show_messages, NULL),          // every new player line (kind 0) while on
     RS_B("showUnboxings", show_unboxings, NULL),
     RS_F("chatOp", chat_opacity, mark_dom),             // #chatList opacity
-    RS_F("chatBGOp", chat_bg_opacity, NULL),
-    RS_B("chatTextOutline", chat_text_outline, NULL),
+    RS_F("chatBGOp", chat_bg_opacity, apply_chat_bg),
+    RS_B("chatTextOutline", chat_text_outline, apply_chat_outline),
     RS_F("chatHeight", chat_height, mark_dom),          // #chatList max-height v * 100 px
-    RS_F("chatTimer", chat_timer, NULL),
+    RS_F("chatTimer", chat_timer, apply_chat_timer),
     RS_I("crosshairSho", crosshair_type, NULL),
     RS_I("crosshairStyle", crosshair_style, NULL),
     RS_U("crosshairImage", crosshair_image, NULL),
