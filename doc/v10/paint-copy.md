@@ -171,6 +171,22 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
   `v10_copy_meta_row` in v10_paint.c). The spin answers the instances (`["spin", ..., usedTicket, instances]` on the
   social socket, `data.instances` on `POST /spins/execute`; deob-10.0.7.js:224680-224697), and the client adds each as
   v10's `addSkin(index, 1, id, m)` and draws its wear line and serial tag on the spin screen.
+- Name tags (migration 0401): `skin_copies.name_tag` (1 to 20 characters, CHECK), kept on the listing
+  (`market_listings.name_tag`) and the offer (`trade_copies.name_tag`) as the wear and serial are. `m.name` is v10.0.7's
+  instance name (the card's `.itemNametag`, deob-10.0.7.js:110688-110693; the HUD's `.weapNametag`, :176440). v10.0.7 has
+  no client route that names a copy, so KrunkNative names one through an operator route (below; a KN addition). The
+  rule for a name is `copy_name_tag_valid` (db_procs.h): trimmed, no control characters and none of `"'<>\` or the
+  backquote. A copy's item style does not travel: the styled items (KrunkCup, 0393) are not tradable, and `copy_take`
+  deletes the copy's `item_styles` row.
+- In a match: the server sends each worn copy's `{skin, wear, serial, name}` to every client in
+  `NET_EXT_KN_SKIN_META` (0x81C1, `accounts_skin_meta_send` in `server/src/accounts.c`, after each SKINS) from the
+  owner's copy of that index (the plain-index rule, as for the paint). A client reads it with `skin_meta_of(uid, skin,
+  &meta)` / `skin_meta_wear(uid, skin)` (`client/include/skin_meta.h`). v10.0.7 sends the instance in the player's add
+  data (`{i, id, m}`, deob-10.0.7.js:24335) and draws the wear map (:173646-173651) and the name tag (:176440).
+- The end table's skin reward: v10.0.7's `endGame` gives a skin with the KR reward (deob-10.0.7.js:195123-195160) and the
+  end table's reward cell draws it as a `.skinReward` thumbnail that opens its sales (:226765-226770). KrunkNative's
+  server sends it before END in `NET_EXT_KN_END_REWARD` (0x81C0, `{uid, kr, skin}`, `accounts_skin_reward`), and the
+  reward cell draws it (`hud_ui_end_reward_cell`).
 
 ### Routes
 
@@ -187,6 +203,13 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
   route): `["ip", skinId, item, paint, colour, shader, uid]` -> `["ipr", {copy_id, item_id, paint_item_id, m, count} | null,
   uid]`, or `["po", null, message]` for a refusal (the native paint picker's apply, `paint_picker.c`). Same work and
   refusals as the HTTP route; the email gate counts it as a market write (`account_security.c`, F_MARKET).
+- `GET /items/{id}/instances?sort=mint|wear` (`v10_market.c`, `h_item_instances`; v10.0.7's `getInstances`,
+  deob-10.0.7.js:27078-27082): the item's copies, owned and listed, as `[{nm, wear, serial}]` (`nm` the owner's
+  username), by serial or by wear (copies without a wear left out), at most 100. The item view's `stackable` is false and
+  `wearable` true for a wearable item, which shows the item page's Mints and Wear tabs (:109727-109733).
+- `POST /mm/admin/items/{copy}/nametag` `{name}` (operator only: `mm_internal_authorized`, the internal secret): sets the
+  copy's name tag, or clears it with `name: null` / `""`. Replies `{copy_id, name}`; 400 `NAMETAG_INVALID`, 404
+  `ITEMS_INVALID_ID`, 401 without the secret (`P_COPY_NAMETAG` / `run_copy_nametag`, db_economy.c).
 - `GET /market/inventory` (`v10_market.c`, `reply_inventory`): stacks as `{i, cnt, sid, st: 1}` (cnt = the unpainted
   units, sid = the store index), then one `{i, sid, m, st: 0}` row per painted copy (no `cnt`), with `m` = `{paint}` or
   `{paintShader}`.
@@ -323,6 +346,14 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
 
 ## Tests
 
+- `services/brain/tests/v10_api_market_test.py` (`copy_meta_scenario`): a named, worn copy of 7582 on the market
+  inventory, the owned list and the listing (and back on unlist), the instances route by mint and by wear, the view's
+  `stackable` / `wearable`, and the name tag route (set, clear, refusals, no secret).
+- `server/tests/kill_pools_server_e2e.py` (checks 5 and 6): the end reward before END on every peer, and the worn copy's
+  `NET_EXT_KN_SKIN_META` on the other peer and on its owner.
+- `client/tests/market_copies_e2e.py`: the copy card's name tag and wear line (inventory and browse), the listing row's
+  spans, the copy overlay of the item page, and the Mints / Wear tabs.
+- `client/tests/player_rank_flag_e2e.py` (`endreward`): the end table's `.skinReward` cell.
 - `services/brain/tests/v10_api_market_test.py` (`paint_trade_scenario`): a painted copy listed by its copy id (the
   listing keeps the paint; the stack lists only its unpainted units, and a further stack listing is refused), the
   listing's `m` on `/market/sales`, the buy (the buyer's copy with the paint), an unlist (the copy back with its paint), a

@@ -41,9 +41,11 @@
 // the detail's stats, owners and listings (kio_view_done), /market/items/<i>/sales-statistics and /items/<i>/sales for its charts (kio_sales_stats_done), and
 // the writes market/purchase|list|unlist|quick-sell, market/black-market/purchase and trades/* (kio_act_send); the
 // row shapes are kio_market.h's and kio_trade.h's.
-// Quick Sell's Junk is the Junk wallet's (doc/v10/junk.md: "qsi" mode 1, the inventory rows' qj). What
-// does not exist on Box Office: item instances (wear, mints, serials, name tags: an item is a stack or a painted
-// copy; kn_brain's view says stackable, so the item page has no Mints / Wear tab there) and the 3D showcase. The estimates of
+// Quick Sell's Junk is the Junk wallet's (doc/v10/junk.md: "qsi" mode 1, the inventory rows' qj). Item instances are
+// kn_brain's copies (skin_copies: paint, wear, serial and name tag, 0352 / 0398 / 0401): their rows carry m (or the raw
+// paint_color / paint_shader / wear / serial / nametag columns, row_meta), the cards draw v10.0.7's itemNametag and
+// itemWear lines, the listing rows their listing-nametag / listing-wear / listing-serial, and a wearable item's view says
+// stackable false, so its page has the Mints / Wear tabs (h_item_instances). Not on Box Office: the 3D showcase. The estimates of
 // /webhooks/general/items/prices are ["r","market","prices"]: this economy's own mean sale prices,
 // then the bundled data/prices.js snapshot (social_estimate_value); with neither, v10's "~ Unknown".
 #include <backend.h>
@@ -165,6 +167,9 @@ static struct {
     // the item page's Mints (0, sort=mint) and Wear (1, sort=wear) lists (items.getInstances, :109739-109768): asked once
     // per page, as v10's component does
     cJSON *dinst[2];
+    // the copy the item page was opened for (openSales' instance {wear, serial, paint, paintShader, nametag, seed},
+    // deob-10.0.7.js:223620-223650; v10_market_open_item), NULL for the item itself
+    cJSON *dinstance;
     int dinst_loading[2], dinst_asked[2];
     char dinst_err[2][160];
     // the reads that got no answer by their deadline (LOST_*: the screen says so, not "Loading" for good)
@@ -489,9 +494,31 @@ static int filter_active(const Filter *f, const char *default_sort, const int we
     return category && strcmp(f->category, "all") != 0;
 }
 
+static cJSON *row_meta(const cJSON *r);
+
+// iîìiiïî's tier names (deob-10.0.7.js:24599-24608, the i18n keys of the tiers :16478-16494)
+static const char *wear_tier_name(const int tier) {
+    static const char *const keys[] = {"wear_flawless", "wear_tested", "wear_trashed", "wear_wrecked"};
+    const int t = tier < 0 ? 0 : tier > 3 ? 3 : tier;
+    return i18n_tr(keys[t], k_wear_names[t]);
+}
+
+// A row's place in the Wear filter (Flawless .. Wrecked 0..3, "No Wear" 4: deob-10.0.7.js:132026-132036): a worn copy's
+// tier (its m.wear), 4 for a stack, an unworn copy or no row. v10.0.7 sends the set as wears= (:26940, :134499).
+static int row_wear_tier(const cJSON *r) {
+    cJSON *m = r ? row_meta(r) : NULL;
+    const cJSON *w = cJSON_GetObjectItemCaseSensitive(m, "wear");
+    const int t = cJSON_IsNumber(w) ? kio_market_wear_tier(w->valuedouble) : -1;
+    cJSON_Delete(m);
+    return t < 0 ? 4 : t;
+}
+
+static int wear_match(const Filter *f, const cJSON *r) { return !set_count(f->wear, 0, 5) || f->wear[row_wear_tier(r)]; }
+
 // the client-side filters of the inventory / sales / stats / catalog headers: the store skin's part (the
-// inventory's rows add the "Painted only" test, inventory_list: a painted copy row is the painted item)
-static int filter_match_skin(const Filter *f, const ViewerSkin *s) {
+// inventory's rows add the "Painted only" test, inventory_list: a painted copy row is the painted item), and the
+// Wear filter of the row (NULL: the item without a row, "No Wear")
+static int filter_match_row(const Filter *f, const ViewerSkin *s, const cJSON *row) {
     if (!s) return 0;
     if (f->search[0] && !ci_contains(s->name, f->search)) return 0;
     if (f->season && (s->seas ? s->seas : 1) != f->season) return 0;
@@ -503,7 +530,7 @@ static int filter_match_skin(const Filter *f, const ViewerSkin *s) {
     } else if (s->type >= 1 && s->type <= 18) {
         if (set_count(f->typ, 1, 19) && !f->typ[s->type]) return 0;
     }
-    if (set_count(f->wear, 0, 5) && !f->wear[4]) return 0; // every item here is "No Wear"
+    if (!wear_match(f, row)) return 0;
     if (strcmp(f->category, "all") != 0) {
         const int index = (int) (s - g_viewer_skins);
         if (!strcmp(f->category, "blackM")) return econ_black_market_find(index) != NULL;
@@ -512,6 +539,8 @@ static int filter_match_skin(const Filter *f, const ViewerSkin *s) {
     }
     return 1;
 }
+static int filter_match_skin(const Filter *f, const ViewerSkin *s) { return filter_match_row(f, s, NULL); }
+
 // the same for the views without owned rows (sales, stats, catalog, Browse): nothing there is painted
 static int filter_match(const Filter *f, const ViewerSkin *s) {
     return !f->only_painted && filter_match_skin(f, s);
@@ -653,11 +682,38 @@ static void filter_header(StrBuf *sb, const Filter *f, const FilterView *v) {
 
 // ------------------------------------------------------------------ cards
 
-// _36396: the generic item card (svelte-r5taai)
-static void item_card_styled(StrBuf *sb, const ViewerSkin *s, const char *size, const int top_center, const char *onclick, const int owned_count, const int style) {
+// The card's v10.0.7 copy lines (svelte-r5taai, deob-10.0.7.js:110688-110693, drawn :110757-110790): the name tag
+// ("name", .itemNametag) goes above the name; below it .itemWear: the wear's tier, its float "(0.1234)" (.wearFloat) and
+// the serial "#n" (.itemSerial), or the serial alone for a copy with no wear.
+static void card_nametag(StrBuf *sb, const cJSON *meta) {
+    const char *tag = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(meta, "name"));
+    if (!tag || !tag[0]) return;
+    sb_append(sb, "<div class=\"itemNametag svelte-r5taai\">\"");
+    sb_append_esc(sb, tag);
+    sb_append(sb, "\"</div>");
+}
+
+static void card_wear(StrBuf *sb, const cJSON *meta) {
+    const cJSON *w = cJSON_GetObjectItemCaseSensitive(meta, "wear"), *serial = cJSON_GetObjectItemCaseSensitive(meta, "serial");
+    const int has_serial = cJSON_IsNumber(serial);
+    if (cJSON_IsNumber(w)) {
+        sb_appendf(sb, "<div class=\"itemWear svelte-r5taai\">%s <span class=\"wearFloat svelte-r5taai\">(%.4f)</span>", wear_tier_name(kio_market_wear_tier(w->valuedouble)),
+                   w->valuedouble);
+        if (has_serial) sb_appendf(sb, "<span class=\"itemSerial svelte-r5taai\">#%.0f</span>", serial->valuedouble);
+        sb_append(sb, "</div>");
+    } else if (has_serial) {
+        sb_appendf(sb, "<div class=\"itemWear svelte-r5taai\"><span class=\"itemSerial svelte-r5taai\">#%.0f</span></div>", serial->valuedouble);
+    }
+}
+
+// _36396: the generic item card (svelte-r5taai); meta is the unit's metadata (a copy's m: its style, name tag, wear and
+// serial), NULL for the item itself
+static void item_card_styled(StrBuf *sb, const ViewerSkin *s, const char *size, const int top_center, const char *onclick, const int owned_count, const cJSON *meta) {
     const int index = (int) (s - g_viewer_skins);
     char url[512];
     thumb(url, sizeof(url), s);
+    const cJSON *style_v = cJSON_GetObjectItemCaseSensitive(meta, "style");
+    const int style = cJSON_IsNumber(style_v) ? style_v->valueint : -1; // metadata.style, -1 = null
     // metadata.style != null && styles && 0 <= style < styles.length: getStylePreview(item, style) (deob-10.0.7.js:110719)
     if (style >= 0 && style < s->styles) {
         char path[256];
@@ -679,10 +735,13 @@ static void item_card_styled(StrBuf *sb, const ViewerSkin *s, const char *size, 
     }
     sb_append(sb, " ");
     if (s->name && !strcmp(s->name, "Snowball Machine")) sb_append(sb, "<img class=\"snowy-bg svelte-r5taai\" alt=\"snowy background\" src=\"./img/snowy_bg.webp\">");
-    sb_appendf(sb, " <div class=\"itemInfo svelte-r5taai%s\"> <div class=\"itemName svelte-r5taai%s\" style=\"color: %s\">", top_center ? " top-center" : "",
-               rarity_dark(s) ? " dark" : "", col);
+    sb_appendf(sb, " <div class=\"itemInfo svelte-r5taai%s\">", top_center ? " top-center" : "");
+    card_nametag(sb, meta);
+    sb_appendf(sb, " <div class=\"itemName svelte-r5taai%s\" style=\"color: %s\">", rarity_dark(s) ? " dark" : "", col);
     sb_append_esc(sb, s->name && s->name[0] ? s->name : "Unnamed Item");
-    sb_append(sb, "</div>  <div class=\"itemType svelte-r5taai\">");
+    sb_append(sb, "</div> ");
+    card_wear(sb, meta);
+    sb_append(sb, " <div class=\"itemType svelte-r5taai\">");
     sb_append_esc(sb, type_label(s));
     sb_append(sb, "</div> ");
     if (owned_count > 0 && !top_center) sb_appendf(sb, "<div class=\"itemDesc svelte-r5taai\">%d owned</div>", owned_count);
@@ -691,7 +750,7 @@ static void item_card_styled(StrBuf *sb, const ViewerSkin *s, const char *size, 
 }
 
 static void item_card(StrBuf *sb, const ViewerSkin *s, const char *size, const int top_center, const char *onclick, const int owned_count) {
-    item_card_styled(sb, s, size, top_center, onclick, owned_count, -1);
+    item_card_styled(sb, s, size, top_center, onclick, owned_count, NULL);
 }
 
 typedef struct {
@@ -704,7 +763,8 @@ typedef struct {
     int list;                 // inventory: List
     int locked;               // inventory: Not sellable
     int sid;                  // inventory: the unit List acts on (a painted copy's id, else the store index)
-    int style;                // owned row's metadata.style for the thumbnail, -1 = none (deob-10.0.7.js:110719)
+    const cJSON *meta;        // the unit's metadata: inventoryItem.m ?? listing.m ?? saleItem.m (deob-10.0.7.js:131335-131350),
+                              // its style (the thumbnail, :110719), name tag, wear and serial (:110757-110790); NULL none
 } CardOpts;
 
 // _45592: the market card (svelte-hk8nq9): the item card + its overlay
@@ -714,7 +774,7 @@ static void market_card(StrBuf *sb, const int index, const CardOpts *o) {
     char onclick[48], n[32];
     snprintf(onclick, sizeof(onclick), "v10mk.item(%d)", index);
     sb_append(sb, "<div class=\"market-card-shell svelte-hk8nq9\">");
-    item_card_styled(sb, s, "100%", 1, onclick, 0, o->style);
+    item_card_styled(sb, s, "100%", 1, onclick, 0, o->meta);
     sb_append(sb, "<div class=\"overlay-container svelte-hk8nq9\">");
     if (o->count > 0) {
         if (o->on_sale) sb_appendf(sb, "<div class=\"count-badge svelte-hk8nq9\">%d on sale</div>", o->count);
@@ -768,11 +828,6 @@ static void set_json(cJSON **slot, const cJSON *v) {
     *slot = cJSON_IsArray(v) ? cJSON_Duplicate(v, 1) : cJSON_CreateArray();
 }
 
-static int filter_none_left(const Filter *f) {
-    // a set the user emptied keeps v10's meaning ("send nothing" = all); only Wear can rule out every
-    // item here (all items are "No Wear"); "Painted only" keeps the inventory's painted copies
-    return set_count(f->wear, 0, 5) && !f->wear[4];
-}
 
 // ---- krunker.io's listings (the official account: v10's market.getListings, gapi GET /market/listings, v10:26857)
 // The official rows carry marketid, skinindex, price and seller_name; they become KN's listing rows (m, i, f, p) and go
@@ -802,6 +857,9 @@ static void kio_browse_done(void *user, const int status, const cJSON *data, con
         cJSON_AddNumberToObject(r, "m", jnum(l, "marketid"));
         cJSON_AddNumberToObject(r, "f", jnum(l, "price"));
         cJSON_AddStringToObject(r, "p", jstr(l, "seller_name"));
+        // the listing's metadata m (the card's listing.m, deob-10.0.7.js:131335): KN's row keeps m for the market id
+        const cJSON *lm = cJSON_GetObjectItemCaseSensitive(l, "m");
+        if (cJSON_IsObject(lm) || (cJSON_IsString(lm) && lm->valuestring[0])) cJSON_AddItemToObject(r, "meta", cJSON_Duplicate(lm, 1));
         cJSON_AddItemToArray(rows, r);
     }
     const int n = rows_count(rows);
@@ -837,11 +895,6 @@ static void browse_load(void) {
     if (!logged_in()) return;
     char t[64];
     trim_lower(t, sizeof(t), M.f.search);
-    if (!t[0] && filter_none_left(&M.f)) {
-        set_json(&M.listings, NULL);
-        M.bloading = 0;
-        return;
-    }
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // krunker.io's listings (kio_browse_load)
         kio_browse_load(t);
         return;
@@ -879,6 +932,14 @@ static int cmp_listing_time(const void *pa, const void *pb) {
 static void browse_loaded(const cJSON *rows) {
     M.bloading = M.bsearching = 0;
     set_json(&M.listings, rows);
+    // the Wear filter (v10.0.7 asks with wears=, deob-10.0.7.js:26940, :134499): a listing's tier is its copy's wear
+    if (set_count(M.f.wear, 0, 5) != 5 && set_count(M.f.wear, 0, 5)) {
+        cJSON *kept = cJSON_CreateArray();
+        const cJSON *l;
+        cJSON_ArrayForEach(l, M.listings) if (wear_match(&M.f, l)) cJSON_AddItemToArray(kept, cJSON_Duplicate(l, 1));
+        cJSON_Delete(M.listings);
+        M.listings = kept;
+    }
     char t[64];
     trim_lower(t, sizeof(t), M.f.search);
     if (!t[0] && !strcmp(M.bsort, "latest")) { // "Latest Listings": newest first
@@ -1045,11 +1106,13 @@ static int row_is_copy(const cJSON *r) {
 static int row_sid(const cJSON *r) {
     return row_is_copy(r) ? jint(r, "sid", 0) : jint(r, "i", -1);
 }
-// The row's paint metadata as v10 normalises it (deob:128883-128894: an object kept, a string parsed), or
-// built from the brain's raw paint columns (the trade inventories' copy rows: paint_color / paint_shader).
-// NULL when the row is unpainted; the caller frees it.
+// The row's metadata as v10 normalises it (deob:128883-128894: an object kept, a string parsed): its m, else meta
+// (krunker.io's listing rows keep m for the market id: kio_browse_done, kio_market_view_listings), else built from the
+// brain's raw copy columns (the listing and trade rows: paint_color / paint_shader, wear, serial, nametag; 0401).
+// NULL when the row is a plain unit; the caller frees it.
 static cJSON *row_meta(const cJSON *r) {
     const cJSON *m = r ? cJSON_GetObjectItemCaseSensitive(r, "m") : NULL;
+    if (!cJSON_IsObject(m) && !(cJSON_IsString(m) && m->valuestring[0])) m = r ? cJSON_GetObjectItemCaseSensitive(r, "meta") : NULL;
     if (cJSON_IsObject(m)) return cJSON_Duplicate(m, 1);
     if (cJSON_IsString(m) && m->valuestring[0]) {
         cJSON *parsed = cJSON_Parse(m->valuestring);
@@ -1067,7 +1130,35 @@ static cJSON *row_meta(const cJSON *r) {
         o = cJSON_CreateObject();
         cJSON_AddNumberToObject(o, "paintShader", shader->valueint);
     }
+    const cJSON *wear = r ? cJSON_GetObjectItemCaseSensitive(r, "wear") : NULL;
+    const cJSON *serial = r ? cJSON_GetObjectItemCaseSensitive(r, "serial") : NULL;
+    const cJSON *tag = r ? cJSON_GetObjectItemCaseSensitive(r, "nametag") : NULL;
+    const int has_serial = cJSON_IsNumber(serial) && serial->valuedouble > 0, has_tag = cJSON_IsString(tag) && tag->valuestring[0];
+    if (cJSON_IsNumber(wear) || has_serial || has_tag) {
+        if (!o) o = cJSON_CreateObject();
+        if (cJSON_IsNumber(wear)) cJSON_AddNumberToObject(o, "wear", wear->valuedouble);
+        if (has_serial) cJSON_AddNumberToObject(o, "serial", serial->valuedouble);
+        if (has_tag) cJSON_AddStringToObject(o, "name", tag->valuestring);
+    }
     return o;
+}
+
+// A listing row's copy spans (svelte-kcz1lc, deob-10.0.7.js:130983-130991, drawn :136679-136700) after "<funds> KR ":
+// the name tag "name" (.listing-nametag), the wear "<tier> (0.1234)" (.listing-wear) and the serial "#n" (.listing-serial).
+static void listing_copy_spans(StrBuf *sb, const cJSON *meta) {
+    const char *tag = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(meta, "name"));
+    if (tag && tag[0]) {
+        sb_append(sb, "<span class=\"listing-nametag svelte-kcz1lc\">\"");
+        sb_append_esc(sb, tag);
+        sb_append(sb, "\"</span>");
+    }
+    sb_append(sb, " ");
+    const cJSON *w = cJSON_GetObjectItemCaseSensitive(meta, "wear"), *serial = cJSON_GetObjectItemCaseSensitive(meta, "serial");
+    if (cJSON_IsNumber(w))
+        sb_appendf(sb, "<span class=\"listing-wear svelte-kcz1lc\">%s (%.4f)</span>", wear_tier_name(kio_market_wear_tier(w->valuedouble)), w->valuedouble);
+    sb_append(sb, " ");
+    if (cJSON_IsNumber(serial)) sb_appendf(sb, "<span class=\"listing-serial svelte-kcz1lc\">#%.0f</span>", serial->valuedouble);
+    sb_append(sb, " ");
 }
 
 // The paint badge of a painted unit (Krunker v10.0.3's PaintedBadge, client/src/ui/skin_paint.c), placed as the
@@ -1391,8 +1482,10 @@ static void browse_grid(StrBuf *sb) {
     for (int g = 0; g < groups && g < M.bshown; g++) {
         const cJSON *r = first[g];
         sb_appendf(sb, "<div class=\"item-wrapper svelte-zhgogl%s\">", M.detail == order[g] ? " selected" : "");
-        const CardOpts o = {.listing_id = jint(r, "m", 0), .price = jint(r, "f", 0), .seller = jstr(r, "p"), .count = count[g], .on_sale = 1, .style = -1};
+        cJSON *meta = row_meta(r);
+        const CardOpts o = {.listing_id = jint(r, "m", 0), .price = jint(r, "f", 0), .seller = jstr(r, "p"), .count = count[g], .on_sale = 1, .meta = meta};
         market_card(sb, order[g], &o);
+        cJSON_Delete(meta);
         sb_append(sb, " </div>");
     }
     sb_append(sb, "</div> ");
@@ -1499,7 +1592,7 @@ static TileList inventory_list(void) {
             const ViewerSkin *s = skin(i);
             if (!s || jint(r, "c", 1) <= 0) continue;
             if (M.f.hide_non_trade && jint(r, "nt", 0)) continue;
-            if (!filter_match_skin(&M.f, s)) continue;
+            if (!filter_match_row(&M.f, s, r)) continue;
             if (M.f.only_painted) { // "Painted only": the rows whose metadata paints them (deob:124584)
                 cJSON *m = row_meta(r);
                 const int painted = skin_paint_shows(m);
@@ -1585,9 +1678,7 @@ static void inventory_grid(StrBuf *sb, const TileList *l) {
         else if (selecting && locked)
             sb_append(sb, "<div class=\"bulk-lock svelte-1n21gx\"><i class=\"material-icons svelte-1n21gx\">lock</i></div> ");
         cJSON *meta = row_meta(r);
-        const cJSON *style_v = cJSON_GetObjectItemCaseSensitive(meta, "style");
-        const int style = cJSON_IsNumber(style_v) ? style_v->valueint : -1; // metadata.style, -1 = null
-        const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable, .sid = sid, .style = style};
+        const CardOpts o = {.count = cnt, .list = sellable, .locked = cnt > 0 && !sellable, .sid = sid, .meta = meta};
         market_card(sb, i, &o);
         sb_append(sb, " ");
         paint_badge(sb, meta, 10, 24);
@@ -1684,8 +1775,10 @@ static void sales_grid(StrBuf *sb, int *count_out) {
         if (!filter_match(&M.f, skin(i))) continue;
         n++;
         sb_appendf(sb, "<div class=\"item-wrapper svelte-1l3mtrv%s\">", M.detail == i ? " selected" : "");
-        const CardOpts o = {.sale_id = jint(r, "m", 0), .price = jint(r, "f", 0), .listed_ms = jnum(r, "ms"), .style = -1};
+        cJSON *meta = row_meta(r);
+        const CardOpts o = {.sale_id = jint(r, "m", 0), .price = jint(r, "f", 0), .listed_ms = jnum(r, "ms"), .meta = meta};
         market_card(sb, i, &o);
+        cJSON_Delete(meta);
         sb_append(sb, " </div>");
     }
     free(idx);
@@ -2117,7 +2210,11 @@ static void view_detail(StrBuf *sb) {
                 if (a && !strcmp(jstr(l, "p"), a->name)) continue;
                 char p[32];
                 fmt(p, sizeof(p), jnum(l, "f"));
-                sb_appendf(sb, "<div class=\"listing-item svelte-kcz1lc\"><div class=\"listing-info svelte-kcz1lc\"><div class=\"listing-price svelte-kcz1lc\">%s KR    </div> ", p);
+                sb_appendf(sb, "<div class=\"listing-item svelte-kcz1lc\"><div class=\"listing-info svelte-kcz1lc\"><div class=\"listing-price svelte-kcz1lc\">%s KR ", p);
+                cJSON *lm = row_meta(l);
+                listing_copy_spans(sb, lm);
+                cJSON_Delete(lm);
+                sb_append(sb, "</div> ");
                 if (jstr(l, "p")[0]) {
                     sb_append(sb, "<div class=\"listing-seller svelte-kcz1lc\">Seller:  <button type=\"button\" class=\"seller-link svelte-kcz1lc\"");
                     sb_profile_click(sb, jstr(l, "p"));
@@ -3134,6 +3231,71 @@ static void instances_panel(StrBuf *sb, const int wear) {
     sb_append(sb, "</div>");
 }
 
+// The item page's instance overlay (deob-10.0.7.js:109885-109935, its rows :109506-109512): the page opened for one copy
+// (openSales' instance, :223620-223650) shows its Name Tag ("name"), Mint (#serial), Wear (the tier and "(0.1234)" in
+// the tier's colour) and Paint (the store paint's thumbnail, else a swatch of the colour, and the paint's name: the
+// store paint of that colour, a shader's name or "Shader #n", else the colour, :109650-109672).
+static void instance_overlay(StrBuf *sb) {
+    const cJSON *in = M.dinstance;
+    if (!cJSON_IsObject(in)) return;
+    sb_append(sb, "<div class=\"items-detail-instance-overlay svelte-dmu4q2\">");
+    const char *tag = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(in, "nametag"));
+    if (tag && tag[0]) {
+        sb_append(sb, "<div class=\"items-detail-instance-row svelte-dmu4q2\"><span class=\"items-detail-instance-label svelte-dmu4q2\">Name Tag</span> "
+                      "<span class=\"items-detail-instance-nametag svelte-dmu4q2\">\"");
+        sb_append_esc(sb, tag);
+        sb_append(sb, "\"</span></div>");
+    }
+    sb_append(sb, " ");
+    const cJSON *serial = cJSON_GetObjectItemCaseSensitive(in, "serial");
+    if (cJSON_IsNumber(serial)) {
+        char num[32];
+        fmt(num, sizeof(num), serial->valuedouble);
+        sb_appendf(sb, "<div class=\"items-detail-instance-row svelte-dmu4q2\"><span class=\"items-detail-instance-label svelte-dmu4q2\">Mint</span> "
+                       "<span class=\"items-detail-instance-value svelte-dmu4q2\">#%s</span></div>", num);
+    }
+    sb_append(sb, " ");
+    const cJSON *w = cJSON_GetObjectItemCaseSensitive(in, "wear");
+    if (cJSON_IsNumber(w))
+        sb_appendf(sb, "<div class=\"items-detail-instance-row svelte-dmu4q2\"><span class=\"items-detail-instance-label svelte-dmu4q2\">Wear</span> "
+                       "<span class=\"items-detail-instance-value svelte-dmu4q2\" style=\"color: %s;\">%s (%.4f)</span></div>",
+                   kio_market_wear_color(w->valuedouble), wear_tier_name(kio_market_wear_tier(w->valuedouble)), w->valuedouble);
+    sb_append(sb, " ");
+    const char *colour = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(in, "paint"));
+    const cJSON *shader = cJSON_GetObjectItemCaseSensitive(in, "paintShader");
+    const ViewerSkin *store = NULL;
+    for (int i = 0; colour && colour[0] && !cJSON_IsNumber(shader) && i < g_viewer_skin_count; i++) {
+        const ViewerSkin *p = skin(i);
+        if (p && p->type == 18 && skin_paint_same_color(p->paint_color, colour)) {
+            store = p;
+            break;
+        }
+    }
+    char name[96] = "";
+    if (store && store->name) snprintf(name, sizeof(name), "%s", store->name);
+    else if (cJSON_IsNumber(shader)) {
+        const char *sn = skin_paint_shader_name(shader->valueint);
+        if (sn) snprintf(name, sizeof(name), "%s", sn);
+        else snprintf(name, sizeof(name), "Shader #%d", shader->valueint);
+    } else if (colour) snprintf(name, sizeof(name), "%s", colour);
+    if (name[0]) {
+        sb_append(sb, "<div class=\"items-detail-instance-row svelte-dmu4q2\"><span class=\"items-detail-instance-label svelte-dmu4q2\">Paint</span> "
+                      "<span class=\"items-detail-instance-value svelte-dmu4q2\">");
+        char url[512] = "";
+        if (store) thumb(url, sizeof(url), store);
+        if (url[0]) sb_appendf(sb, "<img class=\"items-detail-paint-thumb svelte-dmu4q2\" alt=\"\" draggable=\"false\" src=\"%s\">", url);
+        else if (colour && colour[0]) {
+            sb_append(sb, "<span class=\"items-detail-paint-swatch svelte-dmu4q2\" style=\"background-color: ");
+            sb_append_esc(sb, colour);
+            sb_append(sb, ";\"></span>");
+        }
+        sb_append(sb, " ");
+        sb_append_esc(sb, name);
+        sb_append(sb, "</span></div>");
+    }
+    sb_append(sb, "</div>");
+}
+
 // the item detail page (_45008), pushed over the exchange
 static void catalog_detail(StrBuf *sb) {
     const ViewerSkin *s = skin(M.cdetail);
@@ -3179,7 +3341,9 @@ static void catalog_detail(StrBuf *sb) {
     if (s->type != 18) sb_appendf(sb, "<span class=\"items-detail-season svelte-dmu4q2\">Season %d</span>", seas);
     sb_append(sb, " ");
     if (bound) sb_append(sb, "<i class=\"material-icons items-detail-lock svelte-dmu4q2\" title=\"Bound to account\">lock</i>");
-    sb_append(sb, "</div></div>   </div> <div class=\"items-detail-tabs-panel svelte-dmu4q2\"><div class=\"items-detail-tabs-bar svelte-dmu4q2\"><div class=\"simple-tabs svelte-1oqd18e simple-tabs-small\" role=\"tablist\">");
+    sb_append(sb, "</div></div> ");
+    instance_overlay(sb);
+    sb_append(sb, "  </div> <div class=\"items-detail-tabs-panel svelte-dmu4q2\"><div class=\"items-detail-tabs-bar svelte-dmu4q2\"><div class=\"simple-tabs svelte-1oqd18e simple-tabs-small\" role=\"tablist\">");
     // tabs: Info, Listings, Sales, Units Sold (tradable items), Owners; Mints when the view says stackable === false, Wear
     // when it is also wearable (deob-10.0.7.js:109725-109735)
     static const char *const labels[CTAB_COUNT] = {"Info", "Listings", "Sales", "Units Sold", "Owners", "Mints", "Wear"};
@@ -3562,6 +3726,8 @@ static void open_cdetail(const int index) { // the item detail page, over the ex
     if (!skin(index)) return;
     M.cdetail = index;
     M.ctab = 0;
+    cJSON_Delete(M.dinstance); // the item itself, unless the opener names a copy (v10_market_open_item)
+    M.dinstance = NULL;
     instances_reset(); // v10's item page asks its Mints / Wear once per mount
     item_data(index);
     bo_view_flags_load();
@@ -4691,6 +4857,17 @@ void v10_market_wallet_item(const int index) {
     render_modal();
 }
 
+// v10.0.7's openSales(index, element) (deob-10.0.7.js:223620-223650): the item page, for the copy whose data-wear-float /
+// data-serial / data-paint / data-paint-shader / data-nametag / data-seed the element carries (instance {wear, serial,
+// paint, paintShader, nametag, seed}: the page's instance overlay), or the item itself (instance NULL).
+void v10_market_open_item(const int index, const cJSON *instance) {
+    if (!skin(index)) return;
+    if (!M.open) g_standalone = 1;
+    open_cdetail(index);
+    if (cJSON_IsObject(instance)) M.dinstance = cJSON_Duplicate(instance, 1);
+    render_modal();
+}
+
 // The wallet closed: its views (the Quick Sell or the item page over it) go with it. The exchange
 // is not open (v10_market_open clears g_standalone when it opens).
 void v10_market_wallet_release(void) {
@@ -5074,6 +5251,17 @@ void v10_market_scenario(const cJSON *state) {
         if (tab == TAB_CATALOG || cJSON_IsTrue(cJSON_GetObjectItem(state, "page"))) {
             open_cdetail(item);
             M.ctab = jint(state, "dtab", 0);
+            const cJSON *inst = cJSON_GetObjectItem(state, "instance"); // openSales' instance (v10_market_open_item)
+            if (cJSON_IsObject(inst)) M.dinstance = cJSON_Duplicate(inst, 1);
+            if (cJSON_IsNumber(cJSON_GetObjectItem(state, "stackable"))) M.dstack = jint(state, "stackable", -1);
+            if (cJSON_IsTrue(cJSON_GetObjectItem(state, "wearable"))) M.dwearable = 1;
+            for (int w = 0; w < 2; w++) {
+                const cJSON *rows = cJSON_GetObjectItem(state, w ? "wear_rows" : "mints");
+                if (!cJSON_IsArray(rows)) continue;
+                cJSON_Delete(M.dinst[w]);
+                M.dinst[w] = cJSON_Duplicate(rows, 1);
+                M.dinst_asked[w] = 1;
+            }
         } else {
             open_detail(item);
             M.dtab = jint(state, "dtab", 0);

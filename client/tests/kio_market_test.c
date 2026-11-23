@@ -79,7 +79,8 @@ int main(void) {
     cJSON_Delete(sales);
 
     // the view's listings -> {m, i, f, p, ms}, the item's only, cheapest first
-    cJSON *lst = cJSON_Parse("[{\"marketid\":9,\"skinindex\":1,\"price\":500,\"seller_name\":\"B\",\"listed_time\":\"2026-11-20T10:00:00Z\"},"
+    cJSON *lst = cJSON_Parse("[{\"marketid\":9,\"skinindex\":1,\"price\":500,\"seller_name\":\"B\",\"listed_time\":\"2026-11-20T10:00:00Z\","
+                             "\"m\":{\"wear\":0.25,\"serial\":12,\"name\":\"Lucky\"}},"
                              "{\"marketid\":8,\"skinindex\":1,\"funds\":200,\"seller_name\":\"A\",\"listed_time\":1700000000000,\"seller_id\":4},"
                              "{\"marketid\":7,\"skinindex\":2,\"price\":1,\"seller_name\":\"C\"}]");
     rows = kio_market_view_listings(lst, 1);
@@ -90,11 +91,22 @@ int main(void) {
               n(r0, "seller_id") == 4, "cheapest first; funds read as the price");
     CHECK(n(r1, "m") == 9 && n(r1, "f") == 500 && n(r1, "ms") == 1795168800000.0 && !cJSON_GetObjectItem(r1, "seller_id"),
           "price and an ISO listed_time");
+    // the listing's metadata m (a copy's wear, serial and name tag) rides as meta: the row's m is the market id
+    const cJSON *meta1 = cJSON_GetObjectItem(r1, "meta");
+    CHECK(cJSON_IsObject(meta1) && n(meta1, "wear") == 0.25 && n(meta1, "serial") == 12 && !strcmp(s(meta1, "name"), "Lucky") &&
+              !cJSON_GetObjectItem(r0, "meta"),
+          "a copy's listing keeps its metadata as meta; a plain one has none");
     cJSON_Delete(rows);
     cJSON_Delete(lst);
     rows = kio_market_view_listings(NULL, 1);
     CHECK(cJSON_IsArray(rows) && cJSON_GetArraySize(rows) == 0, "no listings: none");
     cJSON_Delete(rows);
+
+    // the wear tiers (deob-10.0.7.js:16478-16494, 24599-24608): Flawless < 0.1 <= Tested < 0.3 <= Trashed < 0.6 <= Wrecked
+    CHECK(kio_market_wear_tier(0.0) == 0 && kio_market_wear_tier(0.0999) == 0 && kio_market_wear_tier(0.1) == 1 &&
+              kio_market_wear_tier(0.2999) == 1 && kio_market_wear_tier(0.3) == 2 && kio_market_wear_tier(0.6) == 3 &&
+              kio_market_wear_tier(0.9999) == 3 && kio_market_wear_tier(1.5) == 3 && kio_market_wear_tier(-1) == -1,
+          "wear tiers");
 
     // the Black Market: {item_index} (v10:26934) and {item, kr, funds[, title]} -> "bmr" {item, kr, f[, title]}
     cJSON *b = kio_market_bm_body(1642);

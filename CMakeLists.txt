@@ -1661,6 +1661,11 @@ else ()
             add_test(NAME copy_pick_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/copy_pick_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(copy_pick_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # market_copies_e2e: v10.0.7's item copies in the Market & Trading popup (name tag, wear and serial on the
+            # cards and listing rows, the copy overlay, the Mints / Wear tabs) in the rendered document (client/tests/market_copies_e2e.py)
+            add_test(NAME market_copies_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/market_copies_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(market_copies_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # player_rank_flag_server_e2e: the same two slots from a brain-linked server_bin (ranked_rank, stats.flg, the
             # showBadges.rank / anonMode gates) and a protocol 1.3.1 peer that gets none (server/tests/player_rank_flag_e2e.py)
             add_test(NAME player_rank_flag_server_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/player_rank_flag_e2e.py

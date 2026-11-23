@@ -82,6 +82,14 @@ size_t kio_market_instances_path(char *out, const size_t n, const int item, cons
     return put(out, n, snprintf(out, n, "/items/%d/instances?sort=%s", item, wear ? "wear" : "mint"));
 }
 
+int kio_market_wear_tier(const double wear) {
+    if (wear < 0.0) return -1;
+    static const double max[] = {0.1, 0.3, 0.6};
+    int t = 0;
+    while (t < 3 && !(wear < max[t])) t++;
+    return t;
+}
+
 const char *kio_market_wear_color(const double wear) {
     // iìïîïií (deob-10.0.7.js:16478-16494): flawless < 0.1, tested < 0.3, trashed < 0.6, wrecked < 1, else the last
     static const struct {
@@ -201,6 +209,8 @@ cJSON *kio_market_view_listings(const cJSON *listings, const int item) {
         cJSON_AddStringToObject(o, "p", str(l, "seller_name"));
         cJSON_AddNumberToObject(o, "ms", kio_market_time_ms(cJSON_GetObjectItemCaseSensitive(l, "listed_time")));
         if (cJSON_GetObjectItemCaseSensitive(l, "seller_id")) cJSON_AddNumberToObject(o, "seller_id", num(l, "seller_id", 0));
+        const cJSON *meta = cJSON_GetObjectItemCaseSensitive(l, "m"); // the listing's metadata (deob-10.0.7.js:136664-136672)
+        if (cJSON_IsObject(meta) || (cJSON_IsString(meta) && meta->valuestring[0])) cJSON_AddItemToObject(o, "meta", cJSON_Duplicate(meta, 1));
         v[k++] = o;
     }
     if (v) qsort(v, (size_t) k, sizeof(*v), cmp_price);

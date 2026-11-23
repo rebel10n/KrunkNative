@@ -32,8 +32,9 @@ size_t kio_market_sales_path(char *out, size_t n, int item, int days_or_range);
 // A sales answer ([{d, f, t}]: the day, its KR, its units) as the chart's rows: d cut to "YYYY-MM-DD" (an ISO
 // timestamp keeps its date), f and t numbers. Returns a new array (cJSON_Delete it).
 cJSON *kio_market_sales_rows(const cJSON *data);
-// The view's listings ({marketid, skinindex, price | funds, seller_name, listed_time, seller_id}) as the economy's
-// listing rows {m, i, f, p, ms[, seller_id]} of the item (rows of another item are dropped), cheapest first, as the
+// The view's listings ({marketid, skinindex, price | funds, seller_name, listed_time, seller_id, m}) as the economy's
+// listing rows {m, i, f, p, ms[, seller_id][, meta]} of the item (rows of another item are dropped; meta is the listing's
+// metadata m, the copy's paint / wear / serial / name tag, since the row's m is the market id), cheapest first, as the
 // brain sends them. Returns a new array (cJSON_Delete it).
 cJSON *kio_market_view_listings(const cJSON *listings, int item);
 
@@ -42,6 +43,9 @@ cJSON *kio_market_view_listings(const cJSON *listings, int item);
 size_t kio_market_instances_path(char *out, size_t n, int item, int wear);
 // v10's getWearColor (iìiïííí over the wear tiers iìïîïií, deob-10.0.7.js:16478-16494, :24610-24617): a wear level's colour.
 const char *kio_market_wear_color(double wear);
+// The tier of a wear level (iîìiiïî, deob-10.0.7.js:24599-24608, the tiers :16478-16494): 0 Flawless (< 0.1), 1 Tested
+// (< 0.3), 2 Trashed (< 0.6), 3 Wrecked (the rest); -1 for a negative level (no wear).
+int kio_market_wear_tier(double wear);
 // The account's skins after a quick sell, as v10.0.7's quickSellItem updates them (deob-10.0.7.js:132715-132745), with
 // the answer's count (data.count, 0 when absent) and the skin_id it sent (0 none): when the item has a stack entry (ind,
 // no id) each such entry gets cnt = count and goes at 0, its copies untouched; else, when it has copies (entries with

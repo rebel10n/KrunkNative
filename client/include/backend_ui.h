@@ -165,6 +165,11 @@ void v10_market_account_changed(void);        // the active account changed: the
 void v10_market_owned_changed(void);         // an owned row changed (paint / style picker): the inventory asks again
 void v10_market_wallet_sell(int index, int sid);        // the Wallet and Inventory's Quick Sell view (v10_wallet.c), exchange closed
 void v10_market_wallet_item(int index);       // the Wallet's item page (the Catalog's detail view), exchange closed
+struct cJSON;
+// v10.0.7's openSales(index, element): the item page for one copy (instance {wear, serial, paint, paintShader, nametag,
+// seed} from the element's data-* attributes: the page's instance overlay, deob-10.0.7.js:223620-223650), or for the
+// item itself (instance NULL)
+void v10_market_open_item(int index, const struct cJSON *instance);
 void v10_market_wallet_release(void);         // the Wallet closed: its market views go with it
 int  v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void v10_market_menu_setup(void);           // the v10 page's #menuBtnMarket item + the social listener
