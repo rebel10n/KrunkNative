@@ -873,6 +873,7 @@ void ui_loadout_tab_html(StrBuf *out, int tab);  // a tab's body: 0 class cards,
 int  ui_loadout_tab(void);                       // windows[2].tabIndex
 void ui_loadout_set_tab(int tab);                // windows[2].tabIndex = tab (no re-render)
 int  ui_loadout_saved(const char *key);          // a selected* value by its localStorage key (hairCol, pcStatIndex, ...)
+void ui_loadout_logout(void);                   // logoutAcc: the loadout keys leave storage, the selections reset
 int  ui_loadout_skin_color_count(void);          // config.skinColors
 const char *ui_loadout_skin_color_hex(int i);    // its col.toString(16)
 int  ui_loadout_pc_stat_count(void);             // config.playerCardStats

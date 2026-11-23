@@ -1688,6 +1688,7 @@ int account_ui_logout(void) {
     if (account_backend() == ACCOUNT_BACKEND_KRUNKER) { // the krunker.io account (its tokens only: the krunk.io session stays)
         if (!krunker_account_signed_in()) return 0;
         krunker_account_sign_out();
+        ui_loadout_logout(); // deleteVal of the loadout keys, the selections back to none (deob-10.0.7.js:216910)
         KN_LOG_DEBUG1("[account] signed out of krunker.io\n");
         active_tick();
         menu_show_window(5, 1); // showWindow(5): v10's login modal for the guest now
@@ -1695,6 +1696,7 @@ int account_ui_logout(void) {
     }
     if (!g_logged_in) return 0;
     logout();
+    ui_loadout_logout(); // deleteVal of the loadout keys, the selections back to none (deob-10.0.7.js:216910)
     return 1;
 }
 

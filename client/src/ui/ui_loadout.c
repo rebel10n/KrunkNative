@@ -1378,6 +1378,28 @@ int ui_loadout_pc_stat_count(void) { return PC_STAT_COUNT; }
 const char *ui_loadout_pc_stat_name(const int i) { return i >= 0 && i < PC_STAT_COUNT ? PC_STATS[i] : ""; }
 void ui_loadout_refresh_preview(void) { refresh_class_box(); }
 
+// logoutAcc (deob-10.0.7.js:216910): the account's loadout leaves storage (deleteVal "skins", the cosmetic slots,
+// "titleIndex", "classindex", "secondaryInd", "krunker_last_with_login"), the fifteen cosmetic selections go back
+// to -1 (titleIndex is read from storage, v10_customize.c), the weapon skins to {}, and selectSecondary(2, true)
+// saves the Pistol again without opening window 3. The slots v10 leaves alone (attach, reticle, scope, wrist,
+// pcStat, spray, the streaks) keep their values.
+void ui_loadout_logout(void) {
+    static const char *const keys[] = {"skins", "hatIndex", "headIndex", "playerCardIndex", "titleIndex", "waistIndex",
+                                       "bodyIndex", "backIndex", "meleeIndex", "skinColIndex", "hairCol", "chatCol",
+                                       "dyeIndex", "faceIndex", "shoeIndex", "petIndex", "classindex", "secondaryInd",
+                                       "krunker_last_with_login"};
+    sel_load();
+    for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) html_storage_set(keys[k], NULL);
+    cJSON_Delete(g_skins_cache); // iïiîîîì = {}
+    g_skins_cache = NULL;
+    g_skins_cached = 0;
+    static const int cleared[] = {SEL_HAT, SEL_HEAD, SEL_CARD, SEL_WAIST, SEL_BODY, SEL_BACK, SEL_MELEE, SEL_SKIN_COL,
+                                  SEL_HAIR_COL, SEL_CHAT_COL, SEL_DYE, SEL_FACE, SEL_SHOE, SEL_PET};
+    for (size_t k = 0; k < sizeof(cleared) / sizeof(cleared[0]); k++) g_sel[cleared[k]].value = -1;
+    sel_save(SEL_SECONDARY, 2); // selectSecondary(2, !0): saveVal("secondaryInd", 2), no showWindow(3)
+    refresh_class_box();
+}
+
 // windows[2].gen()
 char *ui_loadout_gen(void) {
     const int class_index = menu_ui()->client->menu_class_index;
