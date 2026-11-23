@@ -93,7 +93,7 @@ typedef struct {
     int hide_names;          // hideNames: 0 everyone, 1 team, 2 enemy, 3 off (nametags)
     float nametag_opacity;   // nametagOpac
     float nametag_scale;     // nametagScale: player tags' ctx.scale *= v (v10.js:159962)
-    int nametag_style;       // nametagStyle 0..3
+    int nametag_style;       // nametagStyle 0..4 (4 "Simple": a team marker, nametags.c)
     int health_num;          // healthNum
     char health_col_team[RS_COLOR_MAX], health_col_enemy[RS_COLOR_MAX]; // healthColT/E
     int kpd_vision;          // kpdVision (K.P.D officers spectating a case: the suspect's sight lines, nametags.c)

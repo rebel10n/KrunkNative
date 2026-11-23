@@ -82,6 +82,10 @@ typedef struct { char value[48]; } StyleCache;
 typedef struct {
     HtmlElem root, bar, chase, hp, num, lvl, lvl_text, row, name, clan, badge[NT_BADGES], voice;
     HtmlElem custom;          // WP-E part 2c: the custom badge image
+    HtmlElem dot_out, dot_in, simple; // nametagStyle 4 "Simple": the team marker and the name under it
+    int dot_team;             // the marker's shape (1 teammate circle, 0 enemy diamond), -1 unset
+    char text_simple[64];
+    StyleCache dot_color, simple_disp, simple_color;
     int custom_index;         // its badge, -1 hidden
     char custom_ml[16];       // its margin-left
     int uid;                 // player sid, -1 = free slot, <= NT_DEMO_UID demo tags
@@ -366,7 +370,11 @@ static int nt_tag_create(Tag *tag, const int index) {
             "<img class='knNtBdg' style='display:none;width:23px;height:23px;vertical-align:top;position:relative;top:-1.5px'>"
         "</div>"
         "<span class='knNtVoice material-icons' style='position:absolute;left:-25px;font-size:55px;line-height:1;"
-            "color:#FFF;display:none'>volume_down</span>");
+            "color:#FFF;display:none'>volume_down</span>"
+        "<div class='knNtDotO' style='position:absolute;background:rgba(0,0,0,0.4);display:none'></div>"
+        "<div class='knNtDotI' style='position:absolute;display:none'></div>"
+        "<div class='knNtSName' style='position:absolute;left:-212.5px;width:425px;text-align:center;font-family:gamefont;"
+            "font-size:20px;line-height:1.375;white-space:nowrap;color:white;display:none'></div>");
     tag->bar = nt_child(tag->root, "knNtBar");
     tag->chase = nt_child(tag->root, "knNtChase");
     tag->hp = nt_child(tag->root, "knNtHp");
@@ -382,6 +390,10 @@ static int nt_tag_create(Tag *tag, const int index) {
     tag->custom = nt_child(tag->root, "knNtBdg");
     tag->custom_index = -1;
     tag->voice = nt_child(tag->root, "knNtVoice");
+    tag->dot_out = nt_child(tag->root, "knNtDotO");
+    tag->dot_in = nt_child(tag->root, "knNtDotI");
+    tag->simple = nt_child(tag->root, "knNtSName");
+    tag->dot_team = -1;
     html_dom_append(g_nt.layer, tag->root);
     tag->shown = 0;
     tag->style = -1;
@@ -422,6 +434,48 @@ static void nt_tag_geometry(Tag *tag, const int style, const int has_level) {
     nt_px(v, sizeof(v), (has_level && style != 1 ? 5.0 : 0.0) - 65.0);
     html_dom_set_style(tag->row, "left", v);
     html_dom_set_display(tag->row, style < 3 ? "block" : "none");
+    // style 4: the marker instead of the bar, the name (fillText at y -21, centred) instead of the row
+    html_dom_set_display(tag->dot_out, style == 4 ? "block" : "none");
+    html_dom_set_display(tag->dot_in, style == 4 ? "block" : "none");
+    nt_px(v, sizeof(v), -21.0 - NT_GAMEFONT_ASCENT * 20.0);
+    html_dom_set_style(tag->simple, "top", v);
+    if (style != 4) {
+        html_dom_set_display(tag->simple, "none");
+        tag->simple_disp.value[0] = 0;
+    }
+}
+
+// nametagStyle 4 "Simple" (deob-10.0.7.js:162366-162390): a teammate (same team, fakeNames, noPvp) gets a
+// circle of radius 16 / 1.5 inside a rgba(0,0,0,0.4) ring 2 / 1.5 wide, an enemy a 16 px square turned
+// 45 degrees inside a 2 px one, filled healthColT / healthColE (kpdVisionCol with KPD Vision); the name
+// (white, the K.P.D colours) is drawn centred 21 px up only for a teammate or while spectating.
+static void nt_tag_simple(Tag *tag, const TagInfo *info, const int teammate, const char *color, const char *name_color,
+                          const int spectating) {
+    if (tag->dot_team != teammate) {
+        tag->dot_team = teammate;
+        char v[32];
+        const double e = teammate ? 16.0 / 1.5 : 16.0, w = teammate ? 2.0 / 1.5 : 2.0;
+        const double outer = teammate ? 2.0 * (e + 2.0 * w) : e + 2.0 * w, inner = teammate ? 2.0 * e : e;
+        const HtmlElem els[2] = {tag->dot_out, tag->dot_in};
+        const double sizes[2] = {outer, inner};
+        for (int i = 0; i < 2; i++) {
+            nt_px(v, sizeof(v), -sizes[i] / 2.0);
+            html_dom_set_style(els[i], "left", v);
+            html_dom_set_style(els[i], "top", v);
+            nt_px(v, sizeof(v), sizes[i]);
+            html_dom_set_style(els[i], "width", v);
+            html_dom_set_style(els[i], "height", v);
+            html_dom_set_style(els[i], "border-radius", teammate ? "50%" : "0");
+            html_dom_set_style(els[i], "transform", teammate ? "none" : "rotate(45deg)");
+        }
+    }
+    nt_style(tag->dot_in, "background-color", color, &tag->dot_color);
+    const int named = spectating || teammate;
+    nt_style(tag->simple, "display", named ? "block" : "none", &tag->simple_disp);
+    if (named) {
+        nt_text(tag->simple, info->name, tag->text_simple, sizeof(tag->text_simple));
+        nt_style(tag->simple, "color", name_color ? name_color : "white", &tag->simple_color);
+    }
 }
 
 // The name row: name, clan (+5 px), then the partner / premium / featured badges with
@@ -505,7 +559,7 @@ static void nt_tag_hide(Tag *tag) {
 static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, const double fx, const double fy,
                           const float scale, const int teammate, const char *bar_color, const char *name_color) {
     const ClientRenderSettings *rs = client_render_settings();
-    const int style = rs->nametag_style < 0 || rs->nametag_style > 3 ? 0 : rs->nametag_style;
+    const int style = rs->nametag_style < 0 || rs->nametag_style > 4 ? 0 : rs->nametag_style;
     const float opacity = rs->nametag_opacity;
     char v[64];
 
@@ -531,9 +585,17 @@ static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, c
         for (int b = 0; b < NT_BADGES; b++) html_dom_set_style(tag->badge[b], "opacity", v);
         html_dom_set_style(tag->custom, "opacity", v);
         html_dom_set_style(tag->voice, "opacity", v);
+        html_dom_set_style(tag->dot_out, "opacity", v);
+        html_dom_set_style(tag->dot_in, "opacity", v);
+        html_dom_set_style(tag->simple, "opacity", v);
         tag->clan_style.value[0] = 0; // clan alpha is relative to it
     }
 
+    if (style == 4) {
+        if (bar_color) snprintf(v, sizeof(v), "%s", bar_color);
+        else nt_jitter_color(teammate ? rs->health_col_team : rs->health_col_enemy, v, sizeof(v));
+        nt_tag_simple(tag, info, teammate, v, name_color, spectate_active());
+    }
     if (style == 0 || style == 3) {
         const float max_health = player->max_health > 0 ? (float) player->max_health : 100.0f;
         const float ratio = player->health / max_health;
