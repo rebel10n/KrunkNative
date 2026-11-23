@@ -551,11 +551,6 @@ static void convs_clear(void) {
     S.nconv = S.cap_conv = 0;
 }
 
-static int unread_of(const int64_t id) {
-    const cJSON *f = friend_by_id(id);
-    return f ? (int) jnum(f, "unread") : 0;
-}
-
 static void set_unread(const int64_t id, const int n) {
     cJSON *f = friend_by_id(id);
     if (!f) return;
@@ -563,12 +558,16 @@ static void set_unread(const int64_t id, const int n) {
     cJSON_AddNumberToObject(f, "unread", n);
 }
 
-// unread counts of peers that are not (yet) in the friends list (unread:summary before friends:list)
+// v10.0.7's unread store (deob-10.0.7.js:141336), peer id -> count, kept apart from each friend's own "unread". A row's
+// badge is store[id] ?? friend.unread (:141970), the sidebar total sums the store (:142136-142137) and the sort reads
+// the friend's own field (:141942-141943). unread:summary rewrites the store alone (:141606-141617), a friends:list page
+// sets its counts above 0 (:141494), msg:recv adds one and copies it to the friend (:141522, :141540) and markRead
+// deletes it (:141773). A peer outside the list keeps its name here too (a summary's name).
 static struct {
     int64_t id;
     int n;
     char name[32];
-} g_unread_extra[32];
+} g_unread_extra[128];
 
 // the names v10.0.7 knows DM senders by (deob-10.0.7.js:141346 iíïiiîi): every friend a friends:list page names
 // (:141454-141463, new in 10.0.7), a msg:recv's name (:141523) and an unread:summary's (:141615); cleared with the bus
@@ -606,7 +605,7 @@ static int extra_slot(const int64_t id) {
     return -1;
 }
 
-// a peer outside the list keeps its unread count (and name) in a slot; with every slot taken the count is dropped
+// store[id] = n (and the peer's name when given); with every slot taken the count is dropped
 static void extra_count(const int64_t id, const char *name, const int n) {
     int slot = extra_slot(id);
     for (size_t i = 0; slot < 0 && i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++)
@@ -617,13 +616,18 @@ static void extra_count(const int64_t id, const char *name, const int n) {
     if (name && name[0] && name != g_unread_extra[slot].name) snprintf(g_unread_extra[slot].name, sizeof(g_unread_extra[slot].name), "%s", name);
 }
 
+// the sidebar's total: for (id in unread) total += unread[id] (deob-10.0.7.js:142136-142137)
 int v10_social_unread_total(void) {
     int total = 0;
-    const cJSON *f;
-    cJSON_ArrayForEach(f, S.friends) total += (int) jnum(f, "unread");
     for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++)
-        if (g_unread_extra[i].id && !friend_by_id(g_unread_extra[i].id)) total += g_unread_extra[i].n;
+        if (g_unread_extra[i].id) total += g_unread_extra[i].n;
     return total;
+}
+
+// a row's badge: unread[friend.id] ?? friend.unread ?? 0 (deob-10.0.7.js:141970)
+static int unread_badge(const cJSON *f) {
+    const int slot = extra_slot((int64_t) jnum(f, "id"));
+    return slot >= 0 ? g_unread_extra[slot].n : (int) jnum(f, "unread");
 }
 
 const cJSON *v10_social_friends(void) { return S.friends; }
@@ -762,17 +766,9 @@ static void eb_load_more(void) {
     if (!eb_send_type("friends:list", "offset", S.friends_next)) S.friends_loading = 0;
 }
 
-// a friend that joined the list: an unread:summary that came first keeps its count, and the conversation is seeded
-// with the last message
+// a friend that joined the list: the conversation is seeded with the last message
 static void friend_joined(cJSON *f) {
     const int64_t id = (int64_t) jnum(f, "id");
-    for (size_t i = 0; i < sizeof(g_unread_extra) / sizeof(g_unread_extra[0]); i++) {
-        if (g_unread_extra[i].id == id && g_unread_extra[i].n > (int) jnum(f, "unread")) {
-            cJSON_DeleteItemFromObject(f, "unread");
-            cJSON_AddNumberToObject(f, "unread", g_unread_extra[i].n);
-        }
-        if (g_unread_extra[i].id == id) g_unread_extra[i].id = 0;
-    }
     if (jnum(f, "lastId") > 0 && jstr(f, "lastText")[0]) {
         Conv *c = conv_get(id, 1);
         if (c && c->n == 0) {
@@ -803,6 +799,9 @@ static void eb_on_friends(const cJSON *o) {
     S.friends_next = offset + cJSON_GetArraySize(list); // the next page follows the whole page
     const cJSON *f;
     cJSON_ArrayForEach(f, list) dm_name_set((int64_t) jnum(f, "id"), jstr(f, "name")); // deob-10.0.7.js:141454-141463
+    cJSON_ArrayForEach(f, list) { // the page's counts above 0 overwrite the store (:141494)
+        if (jnum(f, "unread") > 0) extra_count((int64_t) jnum(f, "id"), NULL, (int) jnum(f, "unread"));
+    }
 }
 
 // ------------------------------------------------------------------ notifications
@@ -835,12 +834,9 @@ static void eb_on_recv(const cJSON *o) {
     dm_name_set(from, sent_name); // deob-10.0.7.js:141523
     const char *mapped = dm_name_get(from);
     const char *known = sent_name[0] ? sent_name : mapped[0] ? mapped : extra >= 0 ? g_unread_extra[extra].name : "";
-    const int unread = (friend_by_id(from) ? unread_of(from) : extra >= 0 ? g_unread_extra[extra].n : 0) + 1;
-    if (social_dm_received(S.friends, from, known, unread, id, jstr(o, "text"), m->ts)) {
-        if (extra >= 0) g_unread_extra[extra].id = 0;
-    } else {
-        extra_count(from, known, unread);
-    }
+    const int unread = (extra >= 0 ? g_unread_extra[extra].n : 0) + 1; // unread[from] = (unread[from] ?? 0) + 1 (:141522)
+    extra_count(from, known, unread);
+    social_dm_received(S.friends, from, known, unread, id, jstr(o, "text"), m->ts); // friend.unread = unread[from] (:141540)
     char line[MSG_TEXT + 96];
     const char *name = friend_name(from)[0] ? friend_name(from) : known;
     char shown[PLAYER_NAME_SIZE];
@@ -892,12 +888,8 @@ static void eb_on_echo(const cJSON *o) {
     cJSON_AddBoolToObject(f, "lastFromMe", 1);
 }
 
+// the store alone is rewritten: the friends keep their own counts (deob-10.0.7.js:141606-141617)
 static void eb_on_unread_summary(const cJSON *o) {
-    cJSON *f;
-    cJSON_ArrayForEach(f, S.friends) {
-        cJSON_DeleteItemFromObject(f, "unread");
-        cJSON_AddNumberToObject(f, "unread", 0);
-    }
     memset(g_unread_extra, 0, sizeof(g_unread_extra));
     const cJSON *e;
     size_t slot = 0;
@@ -905,8 +897,7 @@ static void eb_on_unread_summary(const cJSON *o) {
         const int64_t id = e->string ? strtoll(e->string, NULL, 10) : 0;
         const int n = (int) jnum(e, "count");
         if (id <= 0 || n <= 0) continue;
-        if (friend_by_id(id)) set_unread(id, n);
-        else if (slot < sizeof(g_unread_extra) / sizeof(g_unread_extra[0])) {
+        if (slot < sizeof(g_unread_extra) / sizeof(g_unread_extra[0])) {
             g_unread_extra[slot].id = id;
             g_unread_extra[slot].n = n;
             snprintf(g_unread_extra[slot].name, sizeof(g_unread_extra[slot].name), "%s", jstr(e, "name"));
@@ -1024,8 +1015,10 @@ static void conv_len_check(void) {
     }
     const Conv *c = conv_get(S.selected, 0);
     const int n = c ? c->n : 0;
-    if (peer == S.selected && len >= 0 && n != len) {
+    if (peer == S.selected && len >= 0 && n != len) { // markRead: delete unread[id], friend.unread = 0 (:141772-141777)
         set_unread(S.selected, 0);
+        const int slot = extra_slot(S.selected);
+        if (slot >= 0) g_unread_extra[slot].id = 0;
         eb_send_type("msg:read", "peer", (double) S.selected);
     }
     peer = S.selected;
@@ -1239,6 +1232,81 @@ static void conv_load_earlier(void) {
     if (!eb_send(o)) c->loading = 0;
 }
 
+// One UTF-8 character: its code point, *len its bytes (a stray byte is itself)
+static uint32_t utf8_cp(const char *p, size_t *len) {
+    const unsigned char *u = (const unsigned char *) p;
+    if (u[0] >= 0xF0 && (u[1] & 0xC0) == 0x80 && (u[2] & 0xC0) == 0x80 && (u[3] & 0xC0) == 0x80) {
+        *len = 4;
+        return (uint32_t) (u[0] & 7) << 18 | (uint32_t) (u[1] & 63) << 12 | (uint32_t) (u[2] & 63) << 6 | (u[3] & 63);
+    }
+    if (u[0] >= 0xE0 && (u[1] & 0xC0) == 0x80 && (u[2] & 0xC0) == 0x80) {
+        *len = 3;
+        return (uint32_t) (u[0] & 15) << 12 | (uint32_t) (u[1] & 63) << 6 | (u[2] & 63);
+    }
+    if (u[0] >= 0xC0 && (u[1] & 0xC0) == 0x80) {
+        *len = 2;
+        return (uint32_t) (u[0] & 31) << 6 | (u[1] & 63);
+    }
+    *len = 1;
+    return u[0];
+}
+
+// String.prototype.trim()'s WhiteSpace and LineTerminator code points (NBSP, the Unicode spaces, the BOM)
+static int js_space(const uint32_t c) {
+    return c == ' ' || (c >= 0x09 && c <= 0x0D) || c == 0xA0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200A) || c == 0x2028 ||
+           c == 0x2029 || c == 0x202F || c == 0x205F || c == 0x3000 || c == 0xFEFF;
+}
+
+// text.trim(): the start of the trimmed text, *len its bytes
+static const char *js_trim(const char *s, size_t *len) {
+    size_t n;
+    while (*s && js_space(utf8_cp(s, &n))) s += n;
+    size_t end = 0;
+    for (size_t i = 0; s[i]; i += n)
+        if (!js_space(utf8_cp(s + i, &n))) end = i + n;
+    *len = end;
+    return s;
+}
+
+// toLowerCase() for the scripts names use: Latin-1, Latin Extended-A, Greek and Cyrillic besides ASCII
+static uint32_t js_lower(const uint32_t c) {
+    if ((c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7) || (c >= 0x391 && c <= 0x3AB && c != 0x3A2) ||
+        (c >= 0x410 && c <= 0x42F))
+        return c + 32;
+    if (c >= 0x400 && c <= 0x40F) return c + 80;
+    if (c == 0x178) return 0xFF;
+    if ((c >= 0x100 && c <= 0x137 && c != 0x130) || (c >= 0x14A && c <= 0x177)) return c | 1;
+    if ((c >= 0x139 && c <= 0x148) || (c >= 0x179 && c <= 0x17E)) return c & 1 ? c + 1 : c;
+    return c;
+}
+
+// localeCompare's order for two names (the root collation): case-blind first, with spaces, punctuation, symbols,
+// digits and letters in that order, then a lowercase letter before its capital
+static int js_name_cmp(const char *a, const char *b) {
+    static const char order[] = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz";
+    const char *pa = a, *pb = b;
+    while (*pa && *pb) {
+        size_t na, nb;
+        const uint32_t ca = js_lower(utf8_cp(pa, &na)), cb = js_lower(utf8_cp(pb, &nb));
+        if (ca != cb) {
+            const char *ia = ca && ca < 128 ? strchr(order, (int) ca) : NULL, *ib = cb && cb < 128 ? strchr(order, (int) cb) : NULL;
+            const long ka = ia ? ia - order : 128 + (long) ca, kb = ib ? ib - order : 128 + (long) cb;
+            return ka < kb ? -1 : 1;
+        }
+        pa += na;
+        pb += nb;
+    }
+    if (*pa || *pb) return *pa ? 1 : -1;
+    for (pa = a, pb = b; *pa && *pb;) { // equal but for case: the lowercase one first
+        size_t na, nb;
+        const uint32_t ca = utf8_cp(pa, &na), cb = utf8_cp(pb, &nb);
+        if (ca != cb) return js_lower(ca) == ca ? -1 : 1;
+        pa += na;
+        pb += nb;
+    }
+    return 0;
+}
+
 // a JS string's length of UTF-8 text: v10.0.3's canSend is text.length <= 512 and its counter 512 - length
 // (deob-10.0.3.js:157704-157705, 158229), in UTF-16 units: a 4-byte sequence (an emoji) is 2. The brain counts the
 // same way (social_eb.c utf16_units), so a message the box allows is never refused EB_TEXT_TOO_LONG.
@@ -1255,10 +1323,8 @@ static size_t utf16_len(const char *s) {
 // not take fails its bubble ("Not connected.") and stays in the box (deob-10.0.7.js:142553-142559). 1 = sent.
 static int conv_send(void) {
     char text[sizeof(S.compose)];
-    const char *t = S.compose;
-    while (*t == ' ' || *t == '\n' || *t == '\t' || *t == '\r') t++;
-    size_t len = strlen(t);
-    while (len && (t[len - 1] == ' ' || t[len - 1] == '\n' || t[len - 1] == '\t' || t[len - 1] == '\r')) len--;
+    size_t len;
+    const char *t = js_trim(S.compose, &len); // text.trim()
     const size_t chars = utf16_len(S.compose);
     if (!S.selected || !len || chars > EB_TEXT_MAX || S.eb_status != EB_CONNECTED || S.selected == my_id()) return 0;
     memcpy(text, t, len);
@@ -1556,14 +1622,23 @@ static int friend_cmp(const void *pa, const void *pb) {
     if (ao != bo) return ao ? -1 : 1;
     if (jnum(a, "unread") != jnum(b, "unread")) return jnum(b, "unread") > jnum(a, "unread") ? 1 : -1;
     if (jnum(a, "lastTs") != jnum(b, "lastTs")) return jnum(b, "lastTs") > jnum(a, "lastTs") ? 1 : -1;
-    return strcasecmp(jstr(a, "name"), jstr(b, "name"));
+    return js_name_cmp(jstr(a, "name"), jstr(b, "name")); // a.name.localeCompare(b.name) (deob-10.0.7.js:141940-141943)
 }
 
+// name.toLowerCase().includes(query.toLowerCase()) (deob-10.0.7.js:141939)
 static int ci_contains(const char *hay, const char *needle) {
     if (!needle[0]) return 1;
-    const size_t n = strlen(needle);
-    for (; *hay; hay++)
-        if (!strncasecmp(hay, needle, n)) return 1;
+    size_t step;
+    for (; *hay; hay += step) {
+        utf8_cp(hay, &step);
+        const char *h = hay, *q = needle;
+        size_t nh, nq;
+        while (*h && *q && js_lower(utf8_cp(h, &nh)) == js_lower(utf8_cp(q, &nq))) {
+            h += nh;
+            q += nq;
+        }
+        if (!*q) return 1;
+    }
     return 0;
 }
 
@@ -1593,7 +1668,7 @@ static void sb_friend_list(StrBuf *sb) {
     sb_append(sb, "<div class=\"friend-list svelte-e2g8p2\">");
     const int n = cJSON_GetArraySize(S.friends);
     if (n == 0) {
-        if (S.eb_status == EB_CONNECTING || S.friends_loading || (S.eb_status == EB_CONNECTED && !S.friends))
+        if (S.eb_status == EB_CONNECTING || S.friends_loading) // connecting || friendsLoading (deob-10.0.7.js:141944-141955)
             sb_append(sb, "<div class=\"friend-list-empty svelte-e2g8p2\"><i class=\"material-icons spin svelte-e2g8p2\">hourglass_empty</i> <span class=\"svelte-e2g8p2\">Loading…</span></div>");
         else if (S.eb_status == EB_ERROR)
             sb_append(sb, "<div class=\"friend-list-empty friend-list-error svelte-e2g8p2\"><i class=\"material-icons svelte-e2g8p2\">cloud_off</i> <span class=\"svelte-e2g8p2\">Disconnected</span></div>");
@@ -1604,10 +1679,9 @@ static void sb_friend_list(StrBuf *sb) {
     }
     // query.trim() for the match, "No matches" and Load more (deob-10.0.7.js:141939, 142013, 142019)
     char q[sizeof(S.friend_filter)];
-    const char *qs = S.friend_filter;
-    while (*qs == ' ' || *qs == '\t' || *qs == '\n' || *qs == '\r') qs++;
-    snprintf(q, sizeof(q), "%s", qs);
-    for (size_t ql = strlen(q); ql && (q[ql - 1] == ' ' || q[ql - 1] == '\t' || q[ql - 1] == '\n' || q[ql - 1] == '\r');) q[--ql] = 0;
+    size_t ql;
+    const char *qs = js_trim(S.friend_filter, &ql);
+    snprintf(q, sizeof(q), "%.*s", (int) ql, qs);
     const cJSON **sorted = calloc((size_t) n, sizeof(*sorted));
     int k = 0;
     const cJSON *f;
@@ -1617,7 +1691,7 @@ static void sb_friend_list(StrBuf *sb) {
     for (int i = 0; i < k; i++) {
         f = sorted[i];
         const int64_t id = (int64_t) jnum(f, "id");
-        const int unread = (int) jnum(f, "unread"), online = jtrue(f, "online");
+        const int unread = unread_badge(f), online = jtrue(f, "online");
         char prev[256];
         last_preview(f, prev, sizeof(prev));
         sb_appendf(sb, "<button class=\"friend-item svelte-e2g8p2%s\" aria-label=\"Chat with ", S.selected == id ? " selected" : "");
@@ -1739,9 +1813,9 @@ static void sb_conversation(StrBuf *sb) {
     }
     const size_t chars = utf16_len(S.compose);
     const int left = EB_TEXT_MAX - (int) chars;
-    const char *t = S.compose;
-    while (*t == ' ' || *t == '\n' || *t == '\t') t++;
-    const int can_send = *t && chars <= EB_TEXT_MAX && S.eb_status == EB_CONNECTED;
+    size_t tlen;
+    js_trim(S.compose, &tlen);
+    const int can_send = tlen && chars <= EB_TEXT_MAX && S.eb_status == EB_CONNECTED;
     const int connected = S.eb_status == EB_CONNECTED;
     sb_appendf(sb, "</div> <div class=\"conversation-compose svelte-128yn5i\"><div class=\"conversation-input-row svelte-128yn5i\">"
                    "<textarea class=\"conversation-input svelte-128yn5i\" placeholder=\"Type a message… (Enter to send, : for emoji)\" rows=\"2\" "
@@ -3421,8 +3495,8 @@ static void render(void) {
     sb_append(&sb, "<div class=\"social-root svelte-xp7z8d\"><div class=\"social-sidebar svelte-xp7z8d\">");
     for (int i = 0; i < 3; i++) {
         sb_appendf(&sb, "<div class=\"sidebar-tab svelte-berov0%s\" role=\"tab\" tabindex=\"0\" aria-selected=\"%s\" id=\"v10sTab%d\" onmouseenter=\"playTick(0.1)\" "
-                        "onclick=\"playSelect(0.1);v10s('tab',%d)\"><i class=\"material-icons sidebar-tab-icon svelte-berov0\">%s</i> <span class=\"sidebar-tab-label svelte-berov0\">%s</span> ",
-                   S.tab == i ? " active" : "", S.tab == i ? "true" : "false", i, i, tabs[i][0], tabs[i][1]);
+                        "onclick=\"playSelect(0.1);v10s('tab',%d)\" onkeydown=\"v10sKey('tab',%d)\"><i class=\"material-icons sidebar-tab-icon svelte-berov0\">%s</i> <span class=\"sidebar-tab-label svelte-berov0\">%s</span> ",
+                   S.tab == i ? " active" : "", S.tab == i ? "true" : "false", i, i, i, tabs[i][0], tabs[i][1]);
         if (i == TAB_FRIENDS && unread > 0 && S.tab != i) {
             if (unread > 99) sb_appendf(&sb, "<span class=\"sidebar-tab-badge svelte-berov0\" aria-label=\"%d unread\">99+</span>", unread);
             else sb_appendf(&sb, "<span class=\"sidebar-tab-badge svelte-berov0\" aria-label=\"%d unread\">%d</span>", unread, unread);
@@ -4209,10 +4283,10 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             // the counter / send button follow the text without re-rendering the textarea
             const size_t chars = utf16_len(S.compose);
             const HtmlElem send = html_dom_by_id("v10sSend");
-            const char *t = S.compose;
-            while (*t == ' ' || *t == '\n' || *t == '\t') t++;
+            size_t tlen;
+            js_trim(S.compose, &tlen); // canSend: text.trim().length > 0
             if (send) {
-                if (*t && chars <= EB_TEXT_MAX && S.eb_status == EB_CONNECTED) html_dom_remove_attr(send, "disabled");
+                if (tlen && chars <= EB_TEXT_MAX && S.eb_status == EB_CONNECTED) html_dom_remove_attr(send, "disabled");
                 else html_dom_set_attr(send, "disabled", "");
             }
             const HtmlElem count = html_dom_query(0, ".conversation-char-count");
@@ -4253,6 +4327,13 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "v10sKey")) {
         const char *what = arg_str(args, argc, 0);
         const int enter = ev && html_key_is_enter(ev->key);
+        if (!strcmp(what, "tab")) { // a sidebar tab: Enter or Space clicks it, preventDefault (deob-10.0.7.js:130702-130704)
+            if (!ev || (!enter && ev->key != 32)) return 1;
+            const HtmlArg select = {.kind = HTML_ARG_NUM, .num = 0.1};
+            html_ui_dispatch("playSelect", ev, &select, 1);
+            v10_social_handle("v10s", ev, (HtmlArg[]) {{HTML_ARG_STR, 0, "tab"}, {HTML_ARG_NUM, arg_num(args, argc, 1, 0), NULL}}, 2);
+            return 0;
+        }
         if (!enter) return 1;
         if (!strcmp(what, "socialq")) return v10_social_handle("v10s", ev, (HtmlArg[]) {{HTML_ARG_STR, 0, "socialsearch"}}, 1), 0;
         if (!strcmp(what, "msg") && !(ev->mods & 1)) { // Enter sends, Shift+Enter is a new line

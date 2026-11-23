@@ -15,6 +15,8 @@ The clan window (13) is `client/src/ui/clan_ui.c` (see clans.md). Line numbers `
 | Social tab | feeds global / following / hot / giveaways / clan + News (v10:140540), New post (level 10), player search | `sb_social_tab`, gapi `/social/feed?tab=`, `/social/news`, `/social/post` |
 | post card / detail / compose | `_35330`, `_35483`, `_49624` | `sb_post`, `sb_post_detail`, `sb_compose`; votes optimistic like v10 |
 | Friends tab | `svelte-u33r8v` / `e2g8p2` / `128yn5i` / `jj9ljg`, event bus (v10:139770-140300) | `sb_friends_tab`, `sb_friend_list`, `sb_conversation` |
+| unread counts | 10.0.7 keeps a store apart from each friend's `unread` (deob-10.0.7.js:141336): rows show `unread[id] ?? friend.unread`, the sidebar sums the store, the sort reads the friend's field; `unread:summary` rewrites the store alone, a `friends:list` page sets its counts above 0, `msg:recv` adds one and copies it to the friend, markRead deletes it | `g_unread_extra` is that store for every peer (`unread_badge`, `v10_social_unread_total`) |
+| text rules | `trim()` (Unicode spaces too), `toLowerCase()` filter, `localeCompare` name tie-break, Enter / Space on a sidebar tab (deob-10.0.7.js:130702-130704), Loading only for `connecting \|\| friendsLoading` | `js_trim`, `js_lower` (Latin, Greek, Cyrillic), `js_name_cmp` (root collation order for ASCII, lowercase first), `v10sKey('tab', i)` |
 | Search tab | `svelte-fo44ss`, 300 ms debounce, `/players/search?q&limit=20` | `sb_search_tab` |
 | player profile | `_34510` (v10:109702) | `sb_profile` (Stats, Feed, Sales, Badges, Titles, Creations, Match History, Reports) |
 | clan view | `_34484` (v10:103555), Request to Join | `sb_clan`, gapi `/clans/by-name/<tag>`, `/clans/<id>/apply` |
