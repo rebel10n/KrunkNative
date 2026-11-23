@@ -209,6 +209,7 @@ enum {
     TB_UNDO, TB_REDO, TB_DELETE, TB_DUPLICATE, TB_SETTINGS,
     TB_SCENE_GRAPH, TB_PLACEHOLDER, TB_GROUP_CREATE, TB_GROUP_STOP, TB_GROUP_STOP_ALL, TB_GROUP_COPY, TB_GROUP_CUT, TB_GROUP_PASTE,
     TB_PREFAB_JSON, TB_PREFAB_FILE, TB_PREFAB_EXPORT, TB_PREFAB_TOOLS, TB_CUSTOM,
+    TB_SAVE_ARCHETYPE, TB_ENTITY_PLACE, TB_ENTITY_EDIT, TB_ENTITY_ARCHETYPES,
     TB_ENVIRONMENT, TB_TERRAIN, TB_ZONE, TB_OCEAN, TB_GUI, TB_SCRIPTING,
     TB_TEST, TB_HOST, TB_QUICK_START, TB_TEMPLATES, TB_TOOLS,
     TB_PUBLISH_GAME, TB_PUBLISH_ASSET, TB_PUBLISH_GUIDE,
@@ -258,7 +259,7 @@ static void open_documentation(void) {
 // reuseSelected(i) (E:5954): defaultFromType(i, selected.pos, selected.size), else createObjects[i]
 static void reuse_selected(const int prefab) {
     const EditorObject *sel = g_ed.proj->selected;
-    if (!sel || prefab == ED_PREFAB_CUSTOM_ASSET) {
+    if (!sel || prefab == ED_PREFAB_CUSTOM_ASSET || editor_prefab_has(prefab, EP_ISENTITY)) { // isEntity: createObjects[i] (placeEntity)
         ed_obj_create(prefab);
         return;
     }
@@ -316,6 +317,10 @@ static void toolbar_action(EdCtl *c) {
         case TB_PREFAB_EXPORT: ed_export_group(); break;
         case TB_PREFAB_TOOLS: ed_panel_right_show("prefab"); break;
         case TB_CUSTOM: ed_obj_create(ED_PREFAB_CUSTOM_ASSET); break;
+        case TB_SAVE_ARCHETYPE: ed_entity_save_archetype(); break; // advancedOptions.saveArchetype (editor_entities.c)
+        case TB_ENTITY_PLACE: ed_entity_place(); break;           // advancedOptions.placeEntity
+        case TB_ENTITY_EDIT: ed_entity_popup(); break;            // advancedOptions.editEntity: entityPopup
+        case TB_ENTITY_ARCHETYPES: ed_archetype_browser(); break; // advancedOptions.browseArchetypes
         case TB_ENVIRONMENT: ed_panel_right_show("environment"); break;
         case TB_TERRAIN: ed_panel_right_show("terrain"); break;
         case TB_ZONE: ed_panel_right_show("zone"); break;
@@ -514,6 +519,14 @@ void ed_toolbar_show(void) {
     tb_option(t, "Export", TB_PREFAB_EXPORT);
     tb_option(t, "Tools", TB_PREFAB_TOOLS);
     tb_end(t);
+    tb_rule(t);
+    tb_option(t, "Save as Archetype", TB_SAVE_ARCHETYPE); // index-10.0.7.js:6337-6343
+    tb_end(t);
+    tb_rule(t);
+    tb_menu_begin(t, "Entity");
+    tb_option(t, "Place", TB_ENTITY_PLACE);
+    tb_option(t, "Edit Selected", TB_ENTITY_EDIT);
+    tb_option(t, "Archetypes", TB_ENTITY_ARCHETYPES);
     tb_end(t);
     tb_rule(t);
     tb_option(t, "Custom...", TB_CUSTOM);

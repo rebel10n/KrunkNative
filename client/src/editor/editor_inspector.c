@@ -525,9 +525,17 @@ static void build_bot_node(void) {
     ed_gui_button(B, "Create Next Group", act_bot_next_group);
 }
 
+// the ENTITY panel's Edit Entity / Edit Archetype (index-10.0.7.js:7006-7020; editor_entities.c)
+static void act_entity_edit(EdCtl *c) { (void) c; ed_entity_popup(); }
+static void act_entity_archetype(EdCtl *c) { (void) c; ed_archetype_popup_selected(); }
+
 static void build_header(const EditorPrefab *pf) {
 #define HAS(f) ((pf->flags & (f)) != 0)
 #define IS(n) (!strcmp(pf->name, n))
+    if (HAS(EP_ISENTITY)) {
+        ed_gui_button(B, "Edit Entity", act_entity_edit);
+        ed_gui_button(B, "Edit Archetype", act_entity_archetype);
+    }
     if (HAS(EP_AI)) txt("AI Name", "aiName", "BOT", 0, NULL, 0);
     if (HAS(EP_BOT)) txt("Bot Name", "botName", "Gnomie", 0, NULL, 0);
     if (!HAS(EP_TOOL) || HAS(EP_BOUNCE)) sw("Visible", "visible", 0, NULL);

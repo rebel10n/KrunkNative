@@ -259,6 +259,15 @@ static void replace_objects(EditorObject *e, const char *text, const char *type,
         else if (cJSON_GetObjectItemCaseSensitive(root, "states") || cJSON_GetObjectItemCaseSensitive(root, "id"))
             a = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "map"), "objects");
     }
+    if (cJSON_IsArray(a)) {
+        // v10 (editor-10.0.7.js:17805-17810): entity instances whose archetype this map lacks are dropped
+        const int dropped = ed_entity_drop_dangling(a);
+        if (dropped) {
+            char msg[128];
+            snprintf(msg, sizeof(msg), "%d imported entity instance(s) were dropped \u2014 their archetype does not exist in this map.", dropped);
+            ed_response_popup(NULL, msg, NULL);
+        }
+    }
     if (!cJSON_IsArray(a) || !cJSON_GetArraySize(a)) {
         cJSON_Delete(root);
         return;
@@ -1422,13 +1431,18 @@ void ed_json_input_for(const int file, EditorObject *target) {
 void ed_json_input(const int file) { ed_json_input_for(file, NULL); }
 
 // exportGroup(): the selected group's members, centred, downloaded as prefab_<name>.txt
+static cJSON *g_export_group; // the group being exported, its entity instances left out (v10)
+
 static void export_named(void *user, const char *name) {
     (void) user;
+    cJSON *t = g_export_group;
+    g_export_group = NULL;
     if (!name || !*name) {
+        cJSON_Delete(t);
         editor_message("Please name your Prefab");
         return;
     }
-    cJSON *t = cJSON_Duplicate(g_ed.copy, 1);
+    if (!t) return;
     apply_center(t);
     char *text = cJSON_PrintUnformatted(t);
     cJSON_Delete(t);
@@ -1443,10 +1457,21 @@ static void export_named(void *user, const char *name) {
 void ed_export_group(void) {
     const cJSON *t = ed_copy_group(NULL);
     if (!t) return; // copyGroup() returns undefined: v3.1.1 throws on t.length here
-    if (!cJSON_GetArraySize(t)) {
+    cJSON *kept = cJSON_Duplicate(t, 1);
+    // v10 (editor-10.0.7.js:18179-18185): prefabs cannot carry archetypes, entity instances are left out
+    const int stripped = ed_entity_strip_instances(kept);
+    if (stripped) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%d entity instance(s) were left out of the prefab (prefabs cannot carry archetypes).", stripped);
+        ed_response_popup(NULL, msg, NULL);
+    }
+    if (!cJSON_GetArraySize(kept)) {
+        cJSON_Delete(kept);
         editor_message("There was nothing to save");
         return;
     }
+    cJSON_Delete(g_export_group);
+    g_export_group = kept;
     ed_prompt("Name your Prefab", "", export_named, NULL);
 }
 

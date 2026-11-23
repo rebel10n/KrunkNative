@@ -399,7 +399,56 @@ static void draw_tool_volumes(void) {
         float m[16];
         ed_obj_world_box(o, m);
         push_box_tris(&g_tris, m);
-        flush(&g_tris, GL_TRIANGLES, hex_rgba(0xffffff, p->opacity), 1);
+        // v10 refreshEntityPreview (editor-10.0.7.js:18470-18478): an ENTITY with an archetype is ghosted at 0.15
+        flush(&g_tris, GL_TRIANGLES, hex_rgba(0xffffff, ed_entity_ghost(o) ? 0.15f : p->opacity), 1);
+    }
+    glDepthMask(GL_TRUE);
+}
+
+// v10 refreshEntityPreview (editor-10.0.7.js:18434-18482): an ENTITY shows its archetype's parts as
+// boxes (size s || [2,2,2], centre p + (0, s.y / 2, 0) from the entity's bottom, turned with it, not
+// scaled), coloured c || #9e9e9e, soft zones #3ad1b5 at 0.25, model parts (aid) at 0.35
+static void draw_entity_previews(void) {
+    for (int pass = 0; pass < 2; pass++) { // opaque parts, then the transparent ones
+        glDepthMask(pass ? GL_FALSE : GL_TRUE);
+        for (size_t i = 0; i < g_ed.proj->count; i++) {
+            const EditorObject *o = g_ed.proj->objects[i];
+            if (!ed_entity_ghost(o) || toggled_hidden(o)) continue;
+            const cJSON *ar = ed_archetype_get((int) ed_json_num(o->data, "ar", 0));
+            const vec3 p = ed_obj_vec(o, "p", v3(0, 0, 0));
+            float rm[9];
+            ed_euler_matrix(ed_obj_vec(o, "r", v3(0, 0, 0)), rm);
+            const cJSON *part;
+            cJSON_ArrayForEach(part, cJSON_GetObjectItemCaseSensitive(ar, "objects")) {
+                const int soft = ed_json_truthy(cJSON_GetObjectItemCaseSensitive(part, "soft"));
+                const cJSON *aid = cJSON_GetObjectItemCaseSensitive(part, "aid");
+                const int faint = soft || (aid && !cJSON_IsNull(aid));
+                if (faint != pass) continue;
+                const cJSON *sv = cJSON_GetObjectItemCaseSensitive(part, "s"), *pv = cJSON_GetObjectItemCaseSensitive(part, "p");
+                float s[3] = {2, 2, 2}, pp[3] = {0, 0, 0};
+                for (int k = 0; k < 3; k++) {
+                    if (cJSON_IsArray(sv)) s[k] = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(sv, k));
+                    if (cJSON_IsArray(pv)) pp[k] = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(pv, k));
+                }
+                const vec3 c = vadd(p, rmul(rm, v3(pp[0], pp[1] + s[1] / 2, pp[2])));
+                float m[16] = {0};
+                for (int row = 0; row < 3; row++) {
+                    m[row * 4 + 0] = rm[row * 3 + 0] * s[0];
+                    m[row * 4 + 1] = rm[row * 3 + 1] * s[1];
+                    m[row * 4 + 2] = rm[row * 3 + 2] * s[2];
+                }
+                m[3] = c.x;
+                m[7] = c.y;
+                m[11] = c.z;
+                int hex = 0x9e9e9e;
+                const cJSON *col = cJSON_GetObjectItemCaseSensitive(part, "c");
+                if (soft) hex = 0x3ad1b5;
+                else if (cJSON_IsString(col) && col->valuestring[0]) hex = (int) strtol(col->valuestring + (col->valuestring[0] == '#'), NULL, 16);
+                else if (cJSON_IsNumber(col)) hex = (int) col->valuedouble;
+                push_box_tris(&g_tris, m);
+                flush(&g_tris, GL_TRIANGLES, hex_rgba(hex, soft ? 0.25f : faint ? 0.35f : 1.0f), 1);
+            }
+        }
     }
     glDepthMask(GL_TRUE);
 }
@@ -903,6 +952,7 @@ void ed_render_overlays(void) {
 #ifndef KN_GLES
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
+    draw_entity_previews();
     draw_tool_volumes();
     draw_real_hitboxes();
     draw_object_boxes();

@@ -1786,6 +1786,46 @@ const char *ed_model_script_template(const char *key) {
 
 static double limit_mm(const double v, const double lo, const double hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+void ed_model_num_str(const double v, char *out, const size_t n) { js_num_str(v, out, n); }
+
+// name.replace(/[^\w \-]+/gim, "").substr(0, 24) of the archetype names (editor-10.0.7.js:18226, 18280, 18802)
+void ed_model_archetype_name(const char *in, char *out, const size_t n) {
+    size_t j = 0;
+    for (const char *c = in ? in : ""; *c && j + 1 < n && j < 24; c++) {
+        if (isalnum((unsigned char) *c) || *c == '_' || *c == ' ' || *c == '-') out[j++] = *c;
+    }
+    if (n) out[j] = 0;
+}
+
+cJSON *ed_model_parse_archetypes(const cJSON *list) {
+    // KE.parseArchetypes (editor-10.0.7.js:18216-18235): the objects that have an objects array
+    cJSON *out = cJSON_CreateArray();
+    if (!cJSON_IsArray(list)) return out;
+    int i = 0;
+    const cJSON *a;
+    cJSON_ArrayForEach(a, list) {
+        const int index = i++;
+        if (!cJSON_IsObject(a) || !cJSON_IsArray(G(a, "objects"))) continue;
+        cJSON *r = cJSON_CreateObject();
+        const double id = js_parse_int(G(a, "id"));
+        cJSON_AddNumberToObject(r, "id", isfinite(id) && id != 0 ? id : index + 1); // parseInt(id) || i + 1
+        char nbuf[64], name[32];
+        const cJSON *nm = G(a, "name");
+        const char *s = js_truthy(nm) ? js_str(nm, nbuf, sizeof(nbuf)) : "";
+        ed_model_archetype_name(s ? s : "", name, sizeof(name));
+        cJSON_AddStringToObject(r, "name", name);
+        cJSON_AddItemToObject(r, "objects", cJSON_Duplicate(G(a, "objects"), 1));
+        const double coll = js_parse_int(G(a, "coll"));
+        cJSON_AddNumberToObject(r, "coll", coll == 0 || coll == 1 || coll == 2 ? coll : 1);
+        const double hp = js_parse_int(G(a, "hp"));
+        cJSON_AddNumberToObject(r, "hp", isfinite(hp) ? hp : 0);
+        const cJSON *data = G(a, "data");
+        cJSON_AddItemToObject(r, "data", cJSON_IsObject(data) ? cJSON_Duplicate(data, 1) : cJSON_CreateObject());
+        cJSON_AddItemToArray(out, r);
+    }
+    return out;
+}
+
 cJSON *ed_model_parse_guis(const cJSON *list, const int keep_all) {
     // UTILS.parseGUIs: clamp every field, sanitise the strings; without keep_all (the export)
     // drop the fields the element type ignores and the defaults
@@ -2292,6 +2332,7 @@ cJSON *ed_model_export(const EdMapState *st, const EdModelObj *objs, const size_
         cJSON_AddItemToObject(out, it->string, v);
     }
     cJSON_ArrayForEach(it, st->extra) { // the imported keys v7 keeps in mapConfig (after the defaults)
+        if (!strcmp(it->string, "archetypes")) continue; // KE.archetypes, written after xyz
         if (cJSON_GetObjectItemCaseSensitive(out, it->string) || !map_key_exported(st->map_config, it->string, it)) continue;
         cJSON_AddItemToObject(out, it->string, cJSON_Duplicate(it, 1));
     }
@@ -2299,6 +2340,9 @@ cJSON *ed_model_export(const EdMapState *st, const EdModelObj *objs, const size_
     else cJSON_Delete(colors);
     if (cJSON_GetArraySize(xyz)) cJSON_AddItemToObject(out, "xyz", xyz);
     else cJSON_Delete(xyz);
+    // ...(this.archetypes.length ? {archetypes} : {}) (editor-10.0.7.js:16696-16698)
+    const cJSON *arch = G(st->extra, "archetypes");
+    if (cJSON_GetArraySize(arch)) cJSON_AddItemToObject(out, "archetypes", cJSON_Duplicate(arch, 1));
     cJSON_AddItemToObject(out, "objects", objects);
     cJSON *cfg = export_config(st->server_config);
     if (cfg) cJSON_AddItemToObject(out, "config", cfg);
@@ -2652,7 +2696,9 @@ int ed_model_import(const cJSON *doc, EdMapState *st, cJSON **objects_out, const
         }
     }
     // Object.assign(mapConfig, map) without what importMap consumed
-    static const char *const consumed[] = {"objects", "tris", "camPos", "spawns", "botPaths", "config", "game", "gui", "scripts", "colors", "xyz", NULL};
+    static const char *const consumed[] = {"objects", "tris", "camPos", "spawns", "botPaths", "config", "game", "gui", "scripts", "colors", "xyz", "archetypes", NULL};
+    // if (map.archetypes) this.archetypes = this.parseArchetypes(map.archetypes) (editor-10.0.7.js:17357-17360)
+    if (js_truthy(G(map, "archetypes"))) put(st->extra, "archetypes", ed_model_parse_archetypes(G(map, "archetypes")));
     const cJSON *it;
     cJSON_ArrayForEach(it, map) {
         int skip = 0;

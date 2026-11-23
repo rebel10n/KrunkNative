@@ -546,6 +546,7 @@ int ed_obj_count_class(const EditorObject *o) {
 
 void ed_obj_add(EditorObject *o, const int no_select, const int history) {
     if (!o) return;
+    ed_entity_fix_id(o); // v10 addObject: an ENTITY without an id or with a taken one gets the next (editor-10.0.7.js:16168-16170)
     if (g_ed.proj->count == g_ed.proj->cap) {
         const size_t cap = g_ed.proj->cap ? g_ed.proj->cap * 2 : 256;
         EditorObject **objects = realloc(g_ed.proj->objects, cap * sizeof(EditorObject *));
@@ -685,6 +686,10 @@ void ed_obj_create(const int prefab) {
     if (prefab < 0 || prefab >= EDITOR_PREFAB_COUNT) return;
     if (prefab == ED_PREFAB_CUSTOM_ASSET) {
         ed_net_view_assets(0); // createObjects[CUSTOM_ASSET]: viewAssets() (editor_net.c)
+        return;
+    }
+    if (editor_prefab_has(prefab, EP_ISENTITY)) {
+        ed_entity_place(); // createObjects[ENTITY]: placeEntity() (editor-10.0.7.js:14068-14069)
         return;
     }
     const vec3 p = editor_setting_bool("createObjectNear") ? editor_near_position() : (vec3) {0};
@@ -1039,6 +1044,11 @@ static EditorHistoryEntry new_entry(const int action, const uint32_t uuid, cJSON
 }
 
 static void history_item(EdBuf *b, const EditorHistoryEntry *e, const int redo) {
+    if (e->action == 'A') { // "archetypes": v10's switch has no text for it, the item is drawn empty (editor-10.0.7.js:15513-15524)
+        edb_addf(b, "<div class=\"history-item history-item-%s\">\n\t\t\t<span class=\"history-item-indicator\">●</span> %s</div>",
+                 redo ? "redo" : "undo", redo ? " (redo)\n\t\t" : "\n\t\t");
+        return;
+    }
     if (e->action != 'a' && e->action != 'r' && e->action != 'u') return; // v10 lists add / remove / update
     const EditorObject *o = e->action == 'u' ? ed_obj_find(e->uuid) : NULL;
     const cJSON *data = e->state ? e->state : o ? o->data : NULL;
@@ -1122,6 +1132,28 @@ void ed_history_add_map(void) {
     history_push(&g_ed.proj->undos, &g_ed.proj->undo_count, &g_ed.proj->undo_cap, new_entry('m', 0, map_snapshot()));
 }
 
+// pushArchetypeHistory (editor-10.0.7.js:18213): addToHistory("archetypes", the list before); takes `before`
+void ed_history_add_archetypes(cJSON *before) {
+    if (editor_setting_bool("disableHistory")) {
+        cJSON_Delete(before);
+        return;
+    }
+    EditorProject *p = g_ed.proj;
+    history_push(&p->undos, &p->undo_count, &p->undo_cap, new_entry('A', 0, before));
+    for (size_t i = 0; i < p->redo_count; i++) entry_free(&p->redos[i]);
+    p->redo_count = 0;
+    ed_history_display();
+}
+
+// exitArchetypeStage (editor-10.0.7.js:18714-18716): undos.length = min(length, n); redos.length = 0
+void ed_history_truncate(const size_t undo_len) {
+    EditorProject *p = g_ed.proj;
+    while (p->undo_count > undo_len) entry_free(&p->undos[--p->undo_count]);
+    for (size_t i = 0; i < p->redo_count; i++) entry_free(&p->redos[i]);
+    p->redo_count = 0;
+    ed_history_display();
+}
+
 uint32_t ed_history_batch_begin(const char *label) {
     EditorProject *p = g_ed.proj;
     if (p->batch) return 0; // nested: the outer batch owns the step
@@ -1198,6 +1230,13 @@ static void history_execute_one(const int redo, EditorHistoryEntry e) {
                 map_restore(e.state);
             }
             break;
+        case 'A': // "archetypes" (editor-10.0.7.js:15402-15418): the list swapped, the previews refreshed
+            if (!redo) {
+                EditorHistoryEntry back = {'A', 0, ed_archetypes_snapshot(), e.batch, e.label ? strdup(e.label) : NULL};
+                history_push(&p->redos, &p->redo_count, &p->redo_cap, back);
+            }
+            ed_archetypes_restore(e.state);
+            break;
     }
     entry_free(&e);
     ed_mark_changed();
@@ -1237,6 +1276,7 @@ int ed_history_redo_undoable(void) {
         const EditorObject *o = e.action == 'u' ? ed_obj_find(e.uuid) : NULL;
         if (e.action == 'a' || e.action == 'r') back.state = cJSON_Duplicate(e.state, 1);
         else if (e.action == 'u') back.state = o ? cJSON_Duplicate(o->data, 1) : NULL; // the state being left
+        else if (e.action == 'A') back.state = ed_archetypes_snapshot();
         else back.state = map_snapshot();
         history_execute_one(1, e);
         if (editor_setting_bool("disableHistory")) entry_free(&back);
@@ -1268,8 +1308,8 @@ static void step_label(const EditorHistoryEntry *list, const size_t i, size_t fi
         return;
     }
     const size_t steps = i - first + 1;
-    const char *verb = e->action == 'a' ? "add" : e->action == 'r' ? "remove" : e->action == 'm' ? "map settings" : "edit";
-    if (e->action == 'm') {
+    const char *verb = e->action == 'a' ? "add" : e->action == 'r' ? "remove" : e->action == 'm' ? "map settings" : e->action == 'A' ? "archetypes" : "edit";
+    if (e->action == 'm' || e->action == 'A') {
         snprintf(out, n, "%s", verb);
         return;
     }

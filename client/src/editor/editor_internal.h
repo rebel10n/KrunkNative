@@ -652,3 +652,25 @@ void ed_download(const char *text, const char *name);   // editor_io.c: download
 void ed_download_bytes(const void *data, size_t size, const char *name, const char *mime);
 void ed_file_export_gltf(void); // editor_export.c: File > Export GLTF (exportScene)
 void ed_file_export_mtl(void);  // File > Export MTL (exportScene2)
+
+// ---- editor_entities.c: Krunker v10's entities and archetypes (editor-10.0.7.js:18213-18851): the
+// Object > Group > Save as Archetype and Object > Entity menus, the entity / archetype popups, the
+// archetype browser and stage, the "archetypes" undo kind ('A'), the ENTITY previews
+void ed_history_add_archetypes(cJSON *before);           // editor_objects.c: pushArchetypeHistory (takes before)
+void ed_history_truncate(size_t undo_len);               // editor_objects.c: undos cut to undo_len, redos cleared
+cJSON *ed_archetypes_snapshot(void);                     // a copy of KE.archetypes (owned)
+void ed_archetypes_restore(const cJSON *list);           // KE.archetypes = parseArchetypes(list); previews, counts
+const cJSON *ed_archetype_get(int id);                   // getArchetype; NULL = none
+void ed_entity_fix_id(EditorObject *o);                  // addObject: a unique entityId for an ENTITY
+void ed_entity_place(void);                              // placeEntity
+void ed_entity_save_archetype(void);                     // saveArchetype (Object > Group > Save as Archetype)
+void ed_entity_popup(void);                              // entityPopup (Entity > Edit Selected, Edit Entity)
+void ed_archetype_popup_selected(void);                  // archetypePopup() (Edit Archetype)
+void ed_archetype_browser(void);                         // archetypeBrowser (Entity > Archetypes)
+int ed_entity_stage_member(const EditorObject *o);       // getMapExport leaves it out (stage parts, plate)
+int ed_entity_ghost(const EditorObject *o);              // an ENTITY whose archetype exists (preview drawn)
+int ed_entity_pick_click(double fb_x, double fb_y);      // pickPoint's pending canvas click; 1 = consumed
+int ed_entities_script(const char *arg);                 // KRUNKNATIVE_EDITOR_SCRIPT "entity:..."
+int ed_entity_drop_dangling(cJSON *records);             // replaceObject: removes eid / ar records without an archetype; the count
+int ed_entity_strip_instances(cJSON *records);           // exportGroup: removes records with an eid; the count
+void ed_entities_install(HtmlHandlerEntry *table, size_t *count, size_t max);

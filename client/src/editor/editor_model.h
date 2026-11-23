@@ -128,3 +128,8 @@ char *ed_model_b64_encode(const char *text);       // UTILS.b64e (UTF-8), malloc
 char *ed_model_b64_decode(const char *b64);        // UTF-8; NULL when not base64 (b64Test)
 const char *ed_model_script_template(const char *key); // KrunkScript client / server template
 cJSON *ed_model_parse_guis(const cJSON *list, int keep_all); // UTILS.parseGUIs
+// v10 entity archetypes (the map's top-level "archetypes", kept in EdMapState.extra): KE.parseArchetypes
+// (editor-10.0.7.js:18216-18235): [{id, name, objects, coll, hp, data}], invalid entries dropped
+cJSON *ed_model_parse_archetypes(const cJSON *list);
+void ed_model_archetype_name(const char *in, char *out, size_t n); // [^\w \-] removed, 24 chars at most
+void ed_model_num_str(double v, char *out, size_t n);               // JS String(number)

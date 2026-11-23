@@ -838,7 +838,7 @@ static int h_keydown(void *u, const HtmlEvent *ev, const HtmlArg *a, const int n
 static int h_script(void *u, const HtmlEvent *ev, const HtmlArg *a, int n);
 
 static void install_handlers(void) {
-    static HtmlHandlerEntry table[256];
+    static HtmlHandlerEntry table[384];
     size_t count = 0;
     const HtmlHandlerEntry own[] = {
         {"closeWindow", h_close_window},
@@ -861,6 +861,7 @@ static void install_handlers(void) {
     ed_project_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_script_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_ai_install(table, &count, sizeof(table) / sizeof(table[0])); // the AI panel (editor_ai.c)
+    ed_entities_install(table, &count, sizeof(table) / sizeof(table[0])); // entities / archetypes (editor_entities.c)
     html_ui_set_handlers(table, count, NULL, h_fallback);
     html_ui_set_listener(NULL, "keydown", h_keydown);
     html_ui_set_listener(NULL, "knpointerdown", l_page_pointer);
@@ -1464,6 +1465,7 @@ static void run_script_text(const char *text) {
         }
         else if (ed_triggers_script(cmd, arg) || ed_gameconfig_script(cmd, arg) || ed_customgui_script(cmd, arg)) {} // trig: / cfg: / gui: (logic UI tests)
         else if (ed_tools_script(cmd, arg)) {} // tool: (editor_tools.c, tools_check.py)
+        else if (!strcmp(cmd, "entity") && arg) ed_entities_script(arg); // entity: (editor_entities.c, entities_e2e.py)
         else if (!strcmp(cmd, "teleport")) editor_teleport_popup();
         else if (!strcmp(cmd, "texlist")) editor_texture_list(); // the T-key picker (model variants / textures)
         else if (!strcmp(cmd, "ui") && arg) debug_capture_dispatch(arg); // inline-handler calls: "ui:showWindow(3)"
@@ -1764,6 +1766,8 @@ static int page_mouse_button(Client *client, const int button, const int action,
         }
         return 0;
     }
+    // v10 pickPoint's one-shot capture listener on the canvas (editor_entities.c)
+    if (action == GLFW_PRESS && ed_entity_pick_click(x, y)) return 1;
     ed_gui_color_hide();
     ed_quickgui_hide(); // container mousedown: if (!quickGUI._hidden) quickGUI.hide()
     // a click on the 3D view takes focus away from the panel inputs

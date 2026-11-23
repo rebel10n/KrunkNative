@@ -716,6 +716,60 @@ static void script_checks(void) {
 // Krunker v10 map data the editor keeps (doc/v10/editor-social.md): BOT_PATH_NODE and botPaths,
 // the ENTITY / crate / AI / zone keys, scripts.shared. Expected values derived from the webcracked
 // v10 editor (E10 = ~/.cache/kn-v10/webcrack/editor/renamed.js; v10's JS is never run).
+// v10 entity archetypes: KE.parseArchetypes (editor-10.0.7.js:18216-18235), importMap (17357) and
+// getMapExport (16696: written only when there are some)
+static void archetype_checks(void) {
+    cJSON *in = cJSON_Parse("[{\"id\":\"5\",\"name\":\"Bo$ss!\",\"objects\":[{\"p\":[0,0,0],\"n\":\"lid\"}],\"coll\":\"2\",\"hp\":\"7.9\",\"data\":[1]},"
+                            "{\"objects\":[],\"coll\":5,\"hp\":\"x\",\"data\":{\"k\":1}},{\"id\":3},7,null,"
+                            "{\"id\":0,\"name\":\"a-b c_d.e 0123456789012345678901\",\"objects\":[],\"coll\":0}]");
+    cJSON *a = ed_model_parse_archetypes(in);
+    const cJSON *a0 = cJSON_GetArrayItem(a, 0), *a1 = cJSON_GetArrayItem(a, 1), *a2 = cJSON_GetArrayItem(a, 2);
+    CHECK(cJSON_GetArraySize(a) == 3, "parseArchetypes keeps only the entries with an objects array (%d)", cJSON_GetArraySize(a));
+    CHECK(a0 && num(a0, "id") == 5 && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a0, "name")), "Boss") && num(a0, "coll") == 2 &&
+              num(a0, "hp") == 7 && cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(a0, "data")) &&
+              !cJSON_GetObjectItemCaseSensitive(a0, "data")->child && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(a0, "objects")) == 1,
+          "parseArchetypes: id / hp parseInt, name [^\\w \\-] removed, coll kept, an array data becomes {}");
+    CHECK(a1 && num(a1, "id") == 2 && num(a1, "coll") == 1 && num(a1, "hp") == 0 && num(cJSON_GetObjectItemCaseSensitive(a1, "data"), "k") == 1 &&
+              !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a1, "name")), ""),
+          "parseArchetypes: id defaults to index + 1, an unknown coll to 1, hp to 0, data kept");
+    CHECK(a2 && num(a2, "id") == 6 && num(a2, "coll") == 0 && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a2, "name")), "a-b c_de 012345678901234"),
+          "parseArchetypes: id 0 -> index + 1, coll 0 kept, the name cut to 24");
+    cJSON_Delete(a);
+    cJSON_Delete(in);
+    char clean[32];
+    ed_model_archetype_name("x<y>&\"z' long name over twenty four", clean, sizeof(clean));
+    CHECK(!strcmp(clean, "xyz long name over twent"), "archetype name sanitised (%s)", clean);
+
+    cJSON *doc = cJSON_Parse("{\"name\":\"ar\",\"objects\":[{\"i\":98,\"p\":[0,0,0],\"eid\":1,\"ar\":4}],\"spawns\":[],"
+                             "\"archetypes\":[{\"id\":4,\"name\":\"Crate\",\"objects\":[{\"p\":[0,0,0],\"s\":[2,2,2],\"soft\":1}],\"coll\":\"2\",\"hp\":50}]}");
+    int n = 0;
+    cJSON *out = export_of(doc, NULL, &n);
+    const cJSON *ar = cJSON_GetObjectItemCaseSensitive(out, "archetypes");
+    const cJSON *e0 = cJSON_GetArrayItem(ar, 0);
+    const cJSON *obj0 = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(out, "objects"), 0);
+    CHECK(cJSON_GetArraySize(ar) == 1 && num(e0, "id") == 4 && num(e0, "coll") == 2 && num(e0, "hp") == 50 &&
+              cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(e0, "data")) &&
+              num(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(e0, "objects"), 0), "soft") == 1,
+          "archetypes round trip, normalised on import");
+    CHECK(obj0 && num(obj0, "eid") == 1 && num(obj0, "ar") == 4, "the ENTITY keeps eid / ar through the round trip");
+    char *text = out ? ed_model_print(out) : NULL;
+    const char *k_xyz = text ? strstr(text, "\"xyz\"") : NULL, *k_ar = text ? strstr(text, "\"archetypes\"") : NULL;
+    CHECK(k_ar && (!k_xyz || k_ar > k_xyz), "archetypes written after xyz (getMapExport order)");
+    free(text);
+    cJSON_Delete(out);
+    cJSON_Delete(doc);
+    doc = cJSON_Parse("{\"name\":\"ar\",\"objects\":[],\"spawns\":[],\"archetypes\":[]}");
+    out = export_of(doc, NULL, &n);
+    CHECK(out && !has_key(out, "archetypes"), "no archetypes key when the map has none");
+    cJSON_Delete(out);
+    cJSON_Delete(doc);
+    doc = cJSON_Parse("{\"name\":\"ar\",\"objects\":[],\"spawns\":[],\"archetypes\":[{\"id\":1}]}");
+    out = export_of(doc, NULL, &n);
+    CHECK(out && !has_key(out, "archetypes"), "invalid archetypes are dropped on import");
+    cJSON_Delete(out);
+    cJSON_Delete(doc);
+}
+
 static void v10_checks(void) {
     cJSON *o = obj_of("{\"i\":41,\"p\":[1,2,3]}");
     CHECK(o && num(o, "bng") == 0 && num(o, "bn") == 0 && num(o, "bnn") == 1 && num(o, "bnr") == 0 && num(o, "l") == 1,
@@ -749,6 +803,7 @@ static void v10_checks(void) {
     CHECK(cJSON_IsString(sh) && !strcmp(sh->valuestring, "c2hhcmVk"), "scripts.shared round trip");
     cJSON_Delete(out);
     cJSON_Delete(doc);
+    archetype_checks();
 }
 
 // ---------------------------------------------------------------- v10.0.5 COLLISION_MESH (prefab 99)

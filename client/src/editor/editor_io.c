@@ -90,9 +90,14 @@ cJSON *ed_map_export_flags(const int flags) {
     const EditorProject *p = g_ed.proj;
     EdModelObj *list = calloc(p->count ? p->count : 1, sizeof(EdModelObj));
     if (!list) return NULL;
-    for (size_t i = 0; i < p->count; i++) list[i] = (EdModelObj) {p->objects[i]->data, p->objects[i]->prefab, p->objects[i]->uuid};
+    size_t n = 0;
+    for (size_t i = 0; i < p->count; i++) {
+        // v10 (editor-10.0.7.js:16417-16421): the archetype stage's parts and plate are left out
+        if (ed_entity_stage_member(p->objects[i])) continue;
+        list[n++] = (EdModelObj) {p->objects[i]->data, p->objects[i]->prefab, p->objects[i]->uuid};
+    }
     const EdMapState st = proj_state(p);
-    cJSON *out = ed_model_export(&st, list, p->count, flags);
+    cJSON *out = ed_model_export(&st, list, n, flags);
     free(list);
     return out;
 }
