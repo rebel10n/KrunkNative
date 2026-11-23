@@ -1994,6 +1994,8 @@ def sc_loadout_preview():
       - Grinchmas + Acog + charm + wrist: before, the preview always mounted the Reflex Sight
         (attach_0: its Player never got the attachIndex) while the viewmodel had the Acog;
       - AJ47 (a forceAttach skin) with the Acog picked: v7 mounts the Reflex Sight on both;
+      - Vince Mastery (attachBypass) on the Shotgun takes the Acog, Good Ol' Days (noAttach) on the
+        Assault Rifle none (v10.0.7 generateMeshes, deob-10.0.7.js:173960);
       - the Piss (Object Manager): no model, the procedural hose on the first-person and the
         third-person (preview) model sets alike, in the skin colour.
     Menu and in-game frames are kept next to the logs (WORK) for review."""
@@ -2001,6 +2003,10 @@ def sc_loadout_preview():
         "acog": ({"classindex": "0", "skins": '{"1":2592}', "attachIndex": "1", "charms": "[5577]", "wristIndex": "4249",
                   "secondaryInd": "20"}, "attach=attach_1"),
         "force-attach": ({"classindex": "0", "skins": '{"1":4596}', "attachIndex": "1"}, "attach=attach_0"),
+        # v10.0.7 skin rule (deob-10.0.7.js:173960): Vince Mastery's attachBypass mounts the pick on the Shotgun (no
+        # `attach`), Good Ol' Days' noAttach takes it off the Assault Rifle
+        "bypass": ({"classindex": "4", "skins": '{"5":3041}', "attachIndex": "1"}, "attach=attach_1"),
+        "no-attach": ({"classindex": "0", "skins": '{"1":2437}', "attachIndex": "1"}, "attach=-"),
     }
     for case, (storage, want_attach) in cases.items():
         name = f"loadout-preview-{case}"
