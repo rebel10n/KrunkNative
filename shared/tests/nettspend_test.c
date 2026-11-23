@@ -285,6 +285,16 @@ static void test_level_gate(const cJSON **maps) {
     CHECK(level_bad == 0, "official krunker.io: a class opens at its minRec and not one level below (%d wrong)", level_bad);
     CHECK(dev_bad == 0, "official krunker.io: a dev plays every class (%d refused)", dev_bad);
     CHECK(game_class_level_ok(&official, 0, 0, 0) == (classes[0].min_rec == 0), "official krunker.io: class 0 follows its minRec");
+    // a krunker.io custom lobby (INIT host set: isCustom): v10's req skips the level tail (deob-10.0.7.js:102636)
+    Game official_custom = {0};
+    game_configure(&official_custom, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    official_custom.is_official = 1;
+    game_config_host(&official_custom, NULL, GAME_HOST_CUSTOM);
+    int custom_bad = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (!game_class_level_ok(&official_custom, (int) i, 0, 0)) custom_bad++;
+    }
+    CHECK(game_config_is_custom(&official_custom) && custom_bad == 0, "krunker.io custom lobby: every class open at level 0 (%d refused)", custom_bad);
 }
 
 static void test_class_spawn(Game *custom, Game *pub) {

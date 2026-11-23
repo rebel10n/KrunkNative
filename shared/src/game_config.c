@@ -1688,6 +1688,11 @@ int game_class_allowed(const Game *game, const int class_index) {
 
 int game_class_level_ok(const Game *game, const int class_index, const int level, const int dev) {
     if (!game || !game->is_official || dev) return 1;
+    // v10's class req (iïíïíìî, deob-10.0.7.js:102636) skips its premium / minRec tail in a custom game unless
+    // `isOfficial.restrictSecs`; the client's Game.isOfficial is the INIT's boolean (!!arg, :226207), so on the client
+    // a krunker.io custom lobby (Game.isCustom = !!init.host, :226206; KN: the INIT's "custom", game_config_is_custom)
+    // opens every class whatever the level, as the Change Loadout cards (:218663) and selectClass show it.
+    if (game_config_is_custom(game)) return 1;
     const size_t count = game->class_count ? game->class_count : rules_class_count();
     const ClassConfig *classes = game->classes ? game->classes : rules_classes();
     if (class_index < 0 || (size_t) class_index >= count || !classes[class_index].min_rec) return 1;
