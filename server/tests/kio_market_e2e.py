@@ -46,6 +46,7 @@ style applied from My Inventory, a lock toggle, the select mode (the listed copy
 Multiple, and the Wallet's two locks and a bulk Quick Sell.
 Exit 0 when every check passed, 77 when it cannot run.
 """
+import json
 import os
 import re
 import shutil
@@ -85,8 +86,9 @@ def read_log(path):
 
 
 def grep(text, label):
-    m = re.search(r"\[input_script\] grep t=\d+ %s needle=\S+ n=\d+ hits=(\d+)" % re.escape("@" + label), text)
-    return int(m.group(1)) if m else -1
+    """the most hits of any grep with this label (-1: none ran); a label may look more than once"""
+    hits = re.findall(r"\[input_script\] grep t=\d+ %s needle=\S+ n=\d+ hits=(\d+)" % re.escape("@" + label), text)
+    return max(int(h) for h in hits) if hits else -1
 
 
 def nodes(text, label):
@@ -292,70 +294,81 @@ def script():
           "29600 grep @paint_x2 x2 .swatch-count",
           "29610 call paintApply",
           "29620 waitfor !.paint-container",
+          # as Styled below: the toast comes with the POST's reply, so look every 200 ms for a second
           "29700 grep @wpaint Painted [id=knNotify]",
+          "29900 grep @wpaint Painted [id=knNotify]",
+          "30100 grep @wpaint Painted [id=knNotify]",
+          "30300 grep @wpaint Painted [id=knNotify]",
+          "30500 grep @wpaint Painted [id=knNotify]",
           # the paint was spent: the picker lists one Red Paint now
-          "29800 call v10mk.paint %d 1000001" % kae.PAINT_ITEM,
-          "29810 waitfor .paint-container",
-          "29900 grep @paint_x1 x1 .swatch-count",
-          "29910 call knViewPop 0",
-          "29920 waitfor !.paint-container",
+          "30800 call v10mk.paint %d 1000001" % kae.PAINT_ITEM,
+          "30810 waitfor .paint-container",
+          "30900 grep @paint_x1 x1 .swatch-count",
+          "30910 call knViewPop 0",
+          "30920 waitfor !.paint-container",
           # style the KrunkCup Jerseys copy (1000002, instance 5553): style 3
-          "30000 call v10mk.style %d 1000002" % kae.STYLE_ITEM,
-          "30010 waitfor .style-container",
-          "30100 call stylePick %d" % kae.STYLE_PICK,
-          "30110 call styleApply",
-          "30120 waitfor !.style-container",
-          "30200 grep @wstyle Styled [id=knNotify]",
+          "31000 call v10mk.style %d 1000002" % kae.STYLE_ITEM,
+          "31010 waitfor .style-container",
+          "31100 call stylePick %d" % kae.STYLE_PICK,
+          "31110 call styleApply",
+          "31120 waitfor !.style-container",
+          # the toast comes with the POST's reply, which a loaded box can take more than 90 ms for: look
+          # again every 200 ms for a second (it stays up 2 s, ui_notify.c NOTIFY_DURATION_MS)
+          "31200 grep @wstyle Styled [id=knNotify]",
+          "31400 grep @wstyle Styled [id=knNotify]",
+          "31600 grep @wstyle Styled [id=knNotify]",
+          "31800 grep @wstyle Styled [id=knNotify]",
+          "32000 grep @wstyle Styled [id=knNotify]",
           # lock the K-35 B copy from its toggle
-          "30300 call v10mk.lock %d 1000001" % kae.PAINT_ITEM,
-          "30310 waitfor .notification-item",
-          "30400 grep @wlock Locked .notification-list",
-          "30410 waitfor !.notification-item",
+          "32300 call v10mk.lock %d 1000001" % kae.PAINT_ITEM,
+          "32310 waitfor .notification-item",
+          "32400 grep @wlock Locked .notification-list",
+          "32410 waitfor !.notification-item",
           # select mode: the listed copy (1000003) is not picked, Select all leaves it and the locked copy out
-          "30500 call v10mk.bsel",
-          "30510 waitfor .bulk-check-btn",
-          "30600 call v10mk.bpick %d 1000003" % kae.LISTED_ITEM,
-          "30610 nodes @bpick_listed .item-wrapper.bulk-selected",
-          "30620 nodes @bdim .item-wrapper.bulk-dim",
-          "30630 call v10mk.ball",
-          "30700 grep @ball 5 .bulk-count",
-          "30710 call v10mk.bclr",
+          "32500 call v10mk.bsel",
+          "32510 waitfor .bulk-check-btn",
+          "32600 call v10mk.bpick %d 1000003" % kae.LISTED_ITEM,
+          "32610 nodes @bpick_listed .item-wrapper.bulk-selected",
+          "32620 nodes @bdim .item-wrapper.bulk-dim",
+          "32630 call v10mk.ball",
+          "32700 grep @ball 5 .bulk-count",
+          "32710 call v10mk.bclr",
           # List selected: the stack (3 units) at 5,000 KR each
-          "30720 call v10mk.bpick %d %d" % (kae.INV_STACK, kae.INV_STACK),
-          "30730 call v10mk.blist",
-          "30740 waitfor [id=knV10BulkConfirm]",
-          "30800 call knV10BulkPrice 0 5000",
-          "30810 call knV10BulkConfirm",
-          "30820 waitfor .notification-item",
-          "30900 grep @wblist Listed .notification-list",
-          "30910 waitfor !.notification-item",
-          "30920 call v10mk.bsel",
+          "32720 call v10mk.bpick %d %d" % (kae.INV_STACK, kae.INV_STACK),
+          "32730 call v10mk.blist",
+          "32740 waitfor [id=knV10BulkConfirm]",
+          "32800 call knV10BulkPrice 0 5000",
+          "32810 call knV10BulkConfirm",
+          "32820 waitfor .notification-item",
+          "32900 grep @wblist Listed .notification-list",
+          "32910 waitfor !.notification-item",
+          "32920 call v10mk.bsel",
           # Buy multiple from Listing Details of item 1: its ladder (1,234 and 1,300 KR), two of them
-          "31000 call v10mk.item 1",
-          "31010 waitfor .buy-multiple-container",
-          "31100 call v10mk.bbuy",
-          "31110 waitfor .bm-chip",
-          "31200 call knV10BulkBuyQty 2",
-          "31210 call knV10BulkConfirm",
-          "31220 waitfor .notification-item",
-          "31300 grep @wbuym Bought .notification-list",
-          "31310 waitfor !.notification-item",
-          "31400 call closWind",
+          "33000 call v10mk.item 1",
+          "33010 waitfor .buy-multiple-container",
+          "33100 call v10mk.bbuy",
+          "33110 waitfor .bm-chip",
+          "33200 call knV10BulkBuyQty 2",
+          "33210 call knV10BulkConfirm",
+          "33220 waitfor .notification-item",
+          "33300 grep @wbuym Bought .notification-list",
+          "33310 waitfor !.notification-item",
+          "33400 call closWind",
           # the Wallet: lock the stack (group 0) and an Acid Breath copy (group 6), then a bulk Quick Sell for KR of the
           # Acid Breath copy it picks (group 6, copy 0: instance 5555)
-          "31500 call knV10Wallet",
-          "31510 waitfor .wallet-lock",
-          "31600 call knV10WalletLock 0 -1",
-          "31700 call knV10WalletLock 6 0",
-          "31800 call knV10WalletSelect",
-          "31810 waitfor .wallet-pick",
-          "31900 call knV10WalletPick 6 0",
-          "32000 call knV10WalletBulkSell 0",
-          "32010 waitfor [id=knV10BulkConfirm]",
-          "32100 call knV10BulkConfirm",
-          "32110 waitfor .notification-item",
-          "32200 grep @wbqs Sold [id=knV10WalletNotes]",
-          "32500 quit"]
+          "33500 call knV10Wallet",
+          "33510 waitfor .wallet-lock",
+          "33600 call knV10WalletLock 0 -1",
+          "33700 call knV10WalletLock 6 0",
+          "33800 call knV10WalletSelect",
+          "33810 waitfor .wallet-pick",
+          "33900 call knV10WalletPick 6 0",
+          "34000 call knV10WalletBulkSell 0",
+          "34010 waitfor [id=knV10BulkConfirm]",
+          "34100 call knV10BulkConfirm",
+          "34110 waitfor .notification-item",
+          "34200 grep @wbqs Sold [id=knV10WalletNotes]",
+          "34500 quit"]
     return "\n".join(s) + "\n"
 
 
@@ -563,9 +576,10 @@ def checks(text, stub):
     lk = [r[4] for r in stub.find("POST", "/api/items/locks")]
     check("the lock toggle POSTs /items/locks {skin_id: the row's sid, locked} (deob-10.0.7.js:134993-134995), the Wallet's "
           "{item_id} for a stack and {skin_id} for a copy (:147536-147539)",
-          bearer(stub.find("POST", "/api/items/locks")) and lk == [{"skin_id": kae.PAINT_COPY_KID, "locked": True},
-                                                                  {"item_id": kae.INV_STACK, "locked": True},
-                                                                  {"skin_id": kae.BQS_KIDS[0], "locked": True}], lk)
+          bearer(stub.find("POST", "/api/items/locks")) and lk[:1] == [{"skin_id": kae.PAINT_COPY_KID, "locked": True}]
+          # the Wallet's two toggles are 100 ms apart, each its own request: either may land first
+          and sorted(lk[1:], key=json.dumps) == sorted([{"item_id": kae.INV_STACK, "locked": True},
+                                                        {"skin_id": kae.BQS_KIDS[0], "locked": True}], key=json.dumps), lk)
     check("... and says 'Locked K-35 B', reading the locks again", grep(text, "wlock") > 0 and len(locks) >= 3, (grep(text, "wlock"), len(locks)))
     check("select mode: the listed copy (marketid) is dimmed and not picked, Select all picks the 5 others that can be "
           "(the locked copy left out too: deob-10.0.7.js:135063-135064)",
