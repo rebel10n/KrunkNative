@@ -32,7 +32,9 @@
  *   GET    /mm/admin/oauth/clients   POST /mm/admin/oauth/clients/:id/disable
  */
 #include "oauth.h"
+#include "brain.h" /* brain_utf16_prefix: the gift note is counted in characters */
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1270,14 +1272,24 @@ static cJSON *action_params(const char *kind, const cJSON *in, const char **why)
         const char *to = kn_json_str(in, "to", NULL);
         const double amt = cJSON_GetNumberValue(cJSON_GetObjectItem(in, "amount"));
         const char *msg = kn_json_str(in, "message", "");
+        while (*msg && isspace((unsigned char) *msg)) msg++;
+        size_t nlen = strlen(msg);
+        while (nlen && isspace((unsigned char) msg[nlen - 1])) nlen--;
+        /* the gift box trims, then stops at 500 characters (deob-10.0.7.js:111688, :111703), not 300 bytes */
+        char *note = nlen ? malloc(nlen + 1) : NULL;
+        if (nlen && note) {
+            memcpy(note, msg, nlen);
+            note[nlen] = 0;
+        }
         if (!to || !*to || strlen(to) > 64) *why = "params.to is required.";
         else if (!(amt >= 1 && amt <= (double) g_acct.gift_max) || amt != (double) (int64_t) amt) *why = "params.amount must be a whole KR amount.";
-        else if (strlen(msg) > 300) *why = "params.message is too long.";
+        else if (nlen && (!note || brain_utf16_prefix(note, 500) < nlen)) *why = "params.message is too long.";
         else {
             cJSON_AddStringToObject(o, "to", to);
             cJSON_AddNumberToObject(o, "amount", amt);
-            cJSON_AddStringToObject(o, "message", msg);
+            cJSON_AddStringToObject(o, "message", note ? note : "");
         }
+        free(note);
     } else {
         const char *name = kn_json_str(in, "name", NULL);
         if (!name || !*name || strlen(name) > 64) *why = "params.name is required.";
