@@ -862,6 +862,20 @@ static int movement_collides(const Player *player, const Object *object, const M
            p.y <= box->top + movement_border(player, object) && p.y + movement_pad_h(player) + player->height >= box->bottom;
 }
 
+void player_object_movement_bounds(const Object *object, vec3 *min, vec3 *max) {
+    MovementBox box;
+    movement_box(object, &box);
+    *min = (vec3) {box.x - box.w, box.bottom, box.z - box.l};
+    *max = (vec3) {box.x + box.w, box.top, box.z + box.l};
+}
+
+void player_movement_bounds(const Player *player, vec3 *min, vec3 *max) {
+    const float s = player->scale + movement_pad_w(player);
+    const vec3 p = player->position;
+    *min = (vec3) {p.x - s, p.y, p.z - s};
+    *max = (vec3) {p.x + s, p.y + movement_pad_h(player) + player->height, p.z + s};
+}
+
 // Player.collides / collidesE for code outside the movement loop (interact prompts, sounds,
 // modes): pad > 0 is the padded inclusive test, 0 the solid one.
 int player_collides(Player *player, const Object *object, const float pad) {

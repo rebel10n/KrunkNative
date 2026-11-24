@@ -66,6 +66,7 @@ silent (only the `] line` echo), as in the mod.
 | rot / rotation | `rotation: yaw=… pitch=… xDire=…` | same |
 | ping | overwritten by the server command | same (it is the server `/ping`) |
 | show_navmeshes [off] | v7.1.4: the nav mesh visualizer (below) | same (v7.1.4 command; v3.1.1 has none) |
+| ent_bbox [on\|off] | v7.1.4 (`mod/devConsole.ts:1392`): the entity bounding-box overlay | same (v7.1.4 command; v3.1.1 and v10.0.7 have none): the movement boxes the collision code tests (`player_movement_bounds` / `player_object_movement_bounds`, shared/src/player.c) as 3D lines over the world, depth test and fog off, rebuilt every frame. Green: your own box (third person only; in first person the camera is inside it); yellow: the other live players and bots; magenta: the map objects that stop a player; orange: the walk-through volumes the movement loop still tests (zones, jump pads, triggers). Objects without a collider, inactive or destroyed ones and complex-collision objects are not drawn. No argument toggles; `off` / `0` / `clear` hides. Answers `ent_bbox: on (N player boxes, M object boxes)` / `ent_bbox: off` (client/src/ent_bbox.c, ent_bbox_geom.c; ent_bbox_test, ent_bbox_e2e) |
 | tool_snap [units\|off] | – | Krunker Box Office: the Tool Gun's / Physics Gun's grid step (0.1 to 100 units, or off), the Object Manager's Snap field; no argument prints it. Client-local (stored as `kn_omSnapStep`), so no target selector |
 | thirdperson / firstperson | – (Source engine commands) | Krunker Box Office: the over-the-shoulder camera (doc/v7/decisions.md "Third person"). `thirdperson` asks the server (`/thirdperson on`); it switches when the grant arrives ("Third Person - Enabled") or prints the refusal (public / ranked servers, custom games whose host has `knTPCam` off). `firstperson` goes back at once. Also the Controls bind "Third Person" (unbound by default) |
 
@@ -580,7 +581,7 @@ and adds completion for arguments:
 | give | 1: the Object Manager's weapons (the Tool Gun too) and giveable items, 2: player names |
 | bot_type | nextbot / tfue |
 | bot_mimic, bot_stop | on / off |
-| show_navmeshes | on / off |
+| show_navmeshes, ent_bbox | on / off |
 | bot_difficulty | easy / normal / hard / max |
 | bot, bot_add, bot_place, bot_config | tfue, autoRespawn and common `key=` options |
 
