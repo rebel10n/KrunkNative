@@ -8101,7 +8101,17 @@ H(h_report_user) {
     html_dom_get_value(txt, text, sizeof(text));
     const int reason = atoi(value);
     if (reason < 0 || reason >= (int) (sizeof(k_report_reasons) / sizeof(k_report_reasons[0]))) return 1;
-    if (strlen(text) < 10) {
+    /* the same trim().length as the in-game report (deob-10.0.7.js:111805): an emoji is two */
+    const char *body = text;
+    while (*body && isspace((unsigned char) *body)) body++;
+    size_t blen = strlen(body);
+    while (blen && isspace((unsigned char) body[blen - 1])) blen--;
+    size_t units = 0;
+    for (size_t i = 0; i < blen; i++) {
+        const unsigned char c = (unsigned char) body[i];
+        if ((c & 0xC0) != 0x80) units += c >= 0xF0 ? 2 : 1;
+    }
+    if (units < 10) {
         if (err) {
             html_dom_set_text(err, "More information required.");
             set_display("reportError", "block");
@@ -8112,7 +8122,9 @@ H(h_report_user) {
     cJSON_AddItemToArray(f, cJSON_CreateString("rpt"));
     cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
     cJSON_AddItemToArray(f, cJSON_CreateString(k_report_reasons[reason]));
-    cJSON_AddItemToArray(f, cJSON_CreateString(text));
+    char sent[sizeof text];
+    snprintf(sent, sizeof sent, "%.*s", (int) blen, body);
+    cJSON_AddItemToArray(f, cJSON_CreateString(sent));
     io_wait("Reporting User...");
     hub_send(f);
     return 1;

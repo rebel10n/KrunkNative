@@ -532,6 +532,14 @@ async def scenario(names):
     st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": "short"})
     check(st == 400 and r["error"]["message"] == "Please provide at least 10 characters of detail.",
           "gapi report under 10 characters (deob-10.0.7.js:111769): %s" % r)
+    # trim().length: an emoji is two, so four is 8 and five is 10 (deob-10.0.7.js:111805)
+    grin = "\U0001f600"
+    st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": grin * 4})
+    check(st == 400 and r["error"]["message"] == "Please provide at least 10 characters of detail.",
+          "four emoji is eight characters: %s" % r)
+    st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": grin * 5})
+    check(st == 200 and r["data"] == {}, "five emoji is ten characters")
+    q("DELETE FROM reports WHERE details = ?", grin * 5)
     st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": "z" * 501})
     check(st == 400 and r["error"]["code"] == "PLAYERS_REPORT_INVALID", "gapi report past 500 characters: %s" % r)
     # the mod prompt (deob-10.0.7.js:108338-108340): "Mod: " + name + " - " + reason, and a publish name is 500

@@ -3502,7 +3502,8 @@ static void sb_gift(StrBuf *sb, View *v) {
     else sb_appendf(sb, "<button class=\"gift-send svelte-g5j1wf\" type=\"button\" id=\"v10sGiftSend\" onclick=\"v10s('giftsend')\">Send %lld KR (+%lld fee)</button></div></div>", amt, fee);
 }
 
-// iÎíìiîi: the details' trimmed length (String.prototype.trim: every space, tab and line end)
+// iÎíìiîi (deob-10.0.7.js:111805): trim().length. The byte length copies the text; the count is
+// a JS string's length, one for a letter and two for an emoji.
 static size_t report_trim(const char **start) {
     const char *t = g_report_text;
     while (*t && isspace((unsigned char) *t)) t++;
@@ -3510,6 +3511,17 @@ static size_t report_trim(const char **start) {
     while (len && isspace((unsigned char) t[len - 1])) len--;
     if (start) *start = t;
     return len;
+}
+
+static size_t report_chars(void) {
+    const char *t;
+    const size_t n = report_trim(&t);
+    size_t units = 0;
+    for (size_t i = 0; i < n; i++) {
+        const unsigned char c = (unsigned char) t[i];
+        if ((c & 0xC0) != 0x80) units += c >= 0xF0 ? 2 : 1;
+    }
+    return units;
 }
 
 static void sb_report(StrBuf *sb, View *v) {
@@ -3538,7 +3550,7 @@ static void sb_report(StrBuf *sb, View *v) {
     }
     // disabled while submitting or while the details are under 10 characters (deob-10.0.7.js:111840-111843)
     sb_appendf(sb, "<button class=\"report-send svelte-18p16wl\" type=\"button\" id=\"v10sReportSend\"%s onclick=\"v10s('reportsend')\">%s</button></div></div>",
-               v->loading || report_trim(NULL) < 10 ? " disabled" : "", v->loading ? "Submitting..." : "Submit Report");
+               v->loading || report_chars() < 10 ? " disabled" : "", v->loading ? "Submitting..." : "Submit Report");
 }
 
 // ------------------------------------------------------------------ render: the hub (#genericPop)
@@ -4208,7 +4220,7 @@ static void report_send(View *v) {
     const char *t;
     const size_t len = report_trim(&t);
     v->error[0] = 0;
-    if (len < 10) {
+    if (report_chars() < 10) {
         snprintf(v->error, sizeof(v->error), "Please provide at least 10 characters of detail.");
         render_views();
         return;
@@ -4466,7 +4478,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             snprintf(g_report_text, sizeof(g_report_text), "%s", value);
             const HtmlElem b = html_dom_by_id("v10sReportSend"); // the Submit button follows the trimmed length
             if (b && top_view() && top_view()->type == V_REPORT && !top_view()->loading) {
-                if (report_trim(NULL) >= 10) html_dom_remove_attr(b, "disabled");
+                if (report_chars() >= 10) html_dom_remove_attr(b, "disabled");
                 else html_dom_set_attr(b, "disabled", "");
             }
         }
