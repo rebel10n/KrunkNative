@@ -1579,11 +1579,12 @@ static void rerender_kept(void) {
     clan_rerender();
 }
 
-// the "Saved!" (1, the MOTD) / "Config saved successfully!" (2, the loot config) line goes after 3 s
+// the "Saved!" (1, the MOTD) / "Config saved successfully!" (2, the loot config) line goes after 3 s; v10's timeout
+// (deob-10.0.7.js:96383-96384) clears its own component's flag only, so the other Settings boxes keep what was typed
 static void saved_off(void *user) {
     if ((intptr_t) user == 1) S.motd_saved = 0;
     else S.loot_saved = 0;
-    clan_rerender();
+    rerender_kept();
 }
 
 static void motd_send(const int remove) {
