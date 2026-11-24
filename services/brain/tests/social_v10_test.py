@@ -163,6 +163,15 @@ async def scenario(names):
     check(f and f["friends"] == [] and f["offset"] == 0 and f["hasMore"] is False, "no friends yet: empty friends:list")
     g = await A.recv_until(lambda f: f[0] == "gfrnd")
     check(g == ["gfrnd", []], "the sign-in pushes FRIENDS_LIST_RESPONSE: [\"gfrnd\", []] (got %r)" % (g,))
+    # changeName (deob-10.0.7.js:223610) sends only while premiumT is set
+    had = q("SELECT player_premium FROM players WHERE player_id = ?", a_id)[0][0]
+    q("UPDATE players SET player_premium = 0 WHERE player_id = ?", a_id)
+    await A.send(["nme", "NotPremium"])
+    f = await A.recv_until(lambda fr: fr[0] == "nmeR")
+    alias = q("SELECT player_alias FROM players WHERE player_id = ?", a_id)
+    check(f and f[1] == "Premium required" and (not alias or not alias[0][0]),
+          "a display name needs Premium (deob-10.0.7.js:223610): %r" % (f,))
+    q("UPDATE players SET player_premium = ? WHERE player_id = ?", had or 0, a_id)
     st, r = await A.gapi("POST", "/players/%s/follow" % bn, {"follow": True})
     check(st == 200 and r["data"]["following"] is True, "A follows B (gapi follow)")
     gm = await B.recv_until(lambda f: f[0] == "gmc" and f[1] == 1)

@@ -5,6 +5,7 @@
  * the other drivers (sqlite/0100.., mysql/0100..), returning the same shape.
  */
 #include "db_procs.h"
+#include "acct_internal.h" /* g_acct.free_premium: a display name needs Premium unless everyone has it */
 #include "double_xp.h"
 #include "knsvc/loop.h"
 
@@ -211,8 +212,16 @@ const kn_proc P_SET_PASSWORD = {
     "SELECT jsonb_build_object('token', $3::text) FROM u",
     run_set_password};
 
+/* changeName / clearName (deob-10.0.7.js:223607-223618) send only while premiumT is set. */
+static int alias_premium_ok(Dbx *x, const char *id) {
+    if (g_acct.free_premium) return 1;
+    return dbx_int(x, SQL(.any = "SELECT coalesce(player_premium, 0) FROM players WHERE player_id = $1"),
+                   KN_DB_ARGS(id), 0) > 0;
+}
+
 static kn_db_result *run_set_alias(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
+    if (!alias_premium_ok(&x, P(0))) return dbx_finish(&x, kn_db_result_user_error("Premium required"));
     if (dbx_is_pg(&x))
         return pg_account_call(&x, "kn_set_alias", SQL(.pg = "SELECT kn_set_alias($1, $2)::text"), KN_DB_ARGS(P(0), P(1)));
     kn_db_result *r = dbx_q(&x, SQL(.any = "SELECT player_alias FROM players WHERE player_id = $1 {for_update}"),
@@ -244,6 +253,7 @@ const kn_proc P_SET_ALIAS = {"set_alias", NULL, run_set_alias};
  * statement set for every dialect, PostgreSQL included (kn_set_alias always names a new alias). */
 static kn_db_result *run_clear_alias(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
+    if (!alias_premium_ok(&x, P(0))) return dbx_finish(&x, kn_db_result_user_error("Premium required"));
     kn_db_result *r = dbx_q(&x, SQL(.any = "SELECT player_alias FROM players WHERE player_id = $1 {for_update}"), KN_DB_ARGS(P(0)));
     if (!r) return dbx_finish(&x, NULL);
     if (kn_db_rows(r) < 1) {
