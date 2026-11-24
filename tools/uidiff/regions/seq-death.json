@@ -19,8 +19,7 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 10.0,
-      "note": "\"You Died\" + the stat lines",
-      "pending": "S4: \"Time Survived : 2s\" (v10) shows Unknown natively"
+      "note": "\"You Died\" + the stat lines; the timed console kill is two seconds after spawning, matching Time Survived : 2s in Chromium"
     }
   ],
   "timing": [

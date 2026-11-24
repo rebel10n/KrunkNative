@@ -31,7 +31,10 @@
     },
     "chat": [],
     "console": [
-      "kill"
+      {
+        "at_ms": 2000,
+        "cmd": "kill"
+      }
     ]
   },
   "note": "Self-kill: the \"You Died\" card over the checker (backdrop-filter blur), death-ui-moveup / chat-moveup 1.5 s."
