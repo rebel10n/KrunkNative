@@ -1664,6 +1664,11 @@ else ()
             add_test(NAME wallet_item_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/wallet_item_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(wallet_item_e2e PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # wallet_filter_e2e: the Wallet's inventory filter (deob-10.0.7.js:150777, :169833): search, season, sort, the
+            # five boxes, the sets, Group by wear saved as s_groupInventoryByWear, and Reset keeping that switch
+            add_test(NAME wallet_filter_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/wallet_filter_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(wallet_filter_e2e PROPERTIES TIMEOUT 1200 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # chat_actions_e2e: a chat line's v10 actions ([Join Queue], NET_EXT_KN_CHAT_ACTIONS) in the rendered document
             add_test(NAME chat_actions_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chat_actions_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
