@@ -148,12 +148,16 @@ def scenario(brain_url, game_port, brain_log):
 1600 call openHostWindow 0 0
 1800 call knHostFlow "map" "kanji"
 1900 clickid startServBtn
-5000 text @msg [id=hostGameMsg]
-5500 quit
+2100 waitfor #altcha_checkbox
+2300 clickid altcha_checkbox
+8000 text @msg [id=hostGameMsg]
+9000 quit
 """
-    # 3b. the same as a guest (a fresh config dir): the hosting captcha, then /mm/host-game with &captcha=
-    log = run_client("host-guest", host, brain_url, game_port, cfg="cfg-guest")
-    check("a guest solved the hosting challenge", "[captcha] hosting: solved" in log,
+    # 3b. the same as a guest (a fresh config dir): the Security Challenge card, then /mm/host-game with &captcha=
+    log = run_client("host-guest", host, brain_url, game_port, cfg="cfg-guest", timeout=200)
+    check("a guest sees the hosting Security Challenge", "[captcha] security challenge card shown" in log,
+          "; ".join(re.findall(r"\[captcha\].*", log)) or "no [captcha] line")
+    check("a guest solved the hosting challenge", "[captcha] altcha: solved" in log,
           "; ".join(re.findall(r"\[captcha\].*", log)) or "no [captcha] line")
     check("the brain accepted the guest's hosting captcha (its answer is about servers, not the captcha)",
           re.search(r"hosting from \S+: captcha accepted", read(brain_log)) and not re.search(r"hosting from \S+ refused", read(brain_log)))

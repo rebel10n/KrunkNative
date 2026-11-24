@@ -48,6 +48,7 @@
 #include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
 #include <quick_play_retry.h> // a Quick Play search answered "full" is tried again (quick_play_retry.c)
 #include <kn_captcha.h>      // the hosting captcha (doc/v10/captcha.md)
+#include <altcha_modal.h>    // a guest's hosting challenge is the Security Challenge card
 #include <v10_studios.h>     // My Games: the Studios row (v10_studios.c)
 #include <flavor.h>
 #include <strings.h>
@@ -3869,7 +3870,9 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             char id[32];
             if (args[2].kind == HTML_ARG_NUM) snprintf(id, sizeof(id), "%.0f", args[2].num);
             else snprintf(id, sizeof(id), "%s", args[2].kind == HTML_ARG_STR && args[2].str ? args[2].str : "");
-            mods_ui_favorite(id, args[1].kind == HTML_ARG_THIS ? (HtmlElem) args[1].num : 0);
+            // favoriteM(1, this, id). A call whose `this` is not an element still has the star as the click target.
+            HtmlElem star = argc > 1 && args[1].kind == HTML_ARG_THIS ? (HtmlElem) args[1].num : ev && ev->target ? ev->target : 0;
+            mods_ui_favorite(id, star);
         }
         return 1;
     }
@@ -5010,6 +5013,15 @@ static void host_send(HostCaptcha *hc, const char *payload) {
 
 static void host_captcha_done(void *user, const char *payload) { host_send(user, payload); }
 
+// The fetched hosting challenge (kn_captcha_fetch). v10 shows it (showCaptcha, hideOnSolve) before the guest's
+// custom room (:204803, :119735). No page: solve it here. No challenge: the host request goes without one.
+static void host_challenge_fetched(void *user, const char *json) {
+    HostCaptcha *hc = user;
+    if (json && json[0] && altcha_modal_show(json, 1, host_captcha_done, NULL, hc)) return;
+    if (json && json[0] && kn_captcha_solve("hosting", json, host_captcha_done, hc)) return;
+    host_send(hc, NULL);
+}
+
 // Start Game on Box Office servers (host_flow_ui.c's choice): the brain's /mm/host-game with the request's config (the
 // game is created on a server it finds; "Game Created" then the join). A guest solves the hosting captcha first; an
 // account's request goes at once (createPrivateRoom: account ? send(CUSTOM_SERVER) : captcha("hosting"),
@@ -5056,8 +5068,12 @@ int servers_ui_host_game(const char *config_json) {
     hc->action = seek_claim_start(&g_claims);
     g_started = 1;
     quick_play_retry_cancel();
-    // a guest: the hosting captcha first (rpc("bCpt", "hosting") before "custom"); one that cannot start: at once
-    if (!account && kn_captcha_request("hosting", host_captcha_done, hc)) return 1;
+    // a guest: the Security Challenge card first (showCaptcha before "custom"); one that cannot start: at once
+    if (!account) {
+        if (kn_captcha_fetch("hosting", host_challenge_fetched, hc)) return 1;
+        host_send(hc, NULL);
+        return 1;
+    }
     host_send(hc, NULL); // a failure to send answers through on_host (custom.tryagain), which gives the buttons back
     return 1;
 }
