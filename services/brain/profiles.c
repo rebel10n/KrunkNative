@@ -295,12 +295,19 @@ static void search_done(SocialSession *s, kn_db_result *res, void *extra) {
 }
 
 void sh_search(SocialSession *s, const cJSON *f) {
-    const char *q = fa_str(f, 1);
-    if (!q || !*q || strlen(q) > 64) {
+    const char *raw = fa_str(f, 1);
+    while (raw && *raw && isspace((unsigned char) *raw)) raw++;
+    size_t n = raw ? strlen(raw) : 0;
+    while (n && isspace((unsigned char) raw[n - 1])) n--;
+    char q[256];
+    if (n >= sizeof q) n = sizeof q - 1;
+    if (raw && n) memcpy(q, raw, n);
+    q[n] = 0;
+    if (!q[0] || brain_utf16_prefix(q, 64) < strlen(q)) {
         social_send_n(s, "spR", 1, cJSON_CreateNull());
         return;
     }
-    char pat[160];
+    char pat[520];
     like_escape(q, pat, sizeof pat);
     social_query(s,
                  SQL(.pg = "SELECT player_name, player_premium, player_featured, player_hack, player_clan, clan_rank, player_score, player_id "

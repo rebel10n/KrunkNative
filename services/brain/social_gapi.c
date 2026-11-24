@@ -576,12 +576,20 @@ static void search_done(SocialSession *s, kn_db_result *res, void *extra) {
 }
 
 /* GET /players/search?q&limit -> {results: [{player_id, player_name, player_score, player_premium,
- * player_featured, player_clan, player_hack}]} (exact name first, then by score) */
+ * player_featured, player_clan, player_hack}]} (exact name first, then by score).
+ * The box trims, then searches from 2 characters (deob-10.0.7.js:143031; errors.profiles.searchInvalid). */
 static void players_search(SocialSession *s, const GapiReq *r) {
-    char q[96], pat[200], lim[24];
-    gapi_query(r, "q", q, sizeof q);
-    const size_t len = strlen(q);
-    if (len < 2 || len > 64) {
+    char raw[256], q[256], pat[520], lim[24];
+    gapi_query(r, "q", raw, sizeof raw);
+    const char *s0 = raw;
+    while (*s0 && isspace((unsigned char) *s0)) s0++;
+    size_t n = strlen(s0);
+    while (n && isspace((unsigned char) s0[n - 1])) n--;
+    if (n >= sizeof q) n = sizeof q - 1;
+    memcpy(q, s0, n);
+    q[n] = 0;
+    /* one accented letter is 2 bytes and still one character */
+    if (!q[0] || brain_utf16_prefix(q, 1) == strlen(q) || brain_utf16_prefix(q, 64) < strlen(q)) {
         gapi_error(s, r->rid, 400, "PLAYERS_SEARCH_INVALID", "Enter at least 2 characters to search.");
         return;
     }

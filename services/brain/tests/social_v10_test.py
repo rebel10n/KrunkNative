@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 try:
@@ -354,6 +355,10 @@ async def scenario(names):
     check(st == 200 and any(x["player_name"] == an for x in r["data"]["results"]), "search finds A")
     st, r = await C.gapi("GET", "/players/search?q=x&limit=20")
     check(st == 400 and r["error"]["code"] == "PLAYERS_SEARCH_INVALID", "one character: PLAYERS_SEARCH_INVALID")
+    st, r = await C.gapi("GET", "/players/search?q=%s&limit=20" % urllib.parse.quote("é"))
+    check(st == 400 and r["error"]["code"] == "PLAYERS_SEARCH_INVALID", "one accented letter is still one character: %s" % r)
+    st, r = await C.gapi("GET", "/players/search?q=%s&limit=20" % urllib.parse.quote("  " + an + "  "))
+    check(st == 200 and any(x["player_name"] == an for x in r["data"]["results"]), "a padded name is trimmed before the search")
     st, r = await C.gapi("GET", "/players/nobody_here_zz")
     check(st == 404 and r["error"]["code"] == "PLAYERS_NOT_FOUND", "unknown profile: PLAYERS_NOT_FOUND")
 
