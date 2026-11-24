@@ -2694,14 +2694,17 @@ static int next_cp(const char *s, int len, int off)
     return off;
 }
 
-static int count_cps(const char *s, size_t len)
+/* HTML maxlength is a browser string's length: one for a letter, two for an emoji. */
+static int count_utf16(const char *s, size_t len)
 {
     size_t i = 0;
     int n = 0;
     while (i < len) {
         uint32_t cp;
-        i += (size_t)kn_utf8_decode(s + i, len - i, &cp);
-        n++;
+        int k = kn_utf8_decode(s + i, len - i, &cp);
+        if (k <= 0) break;
+        i += (size_t)k;
+        n += cp > 0xFFFF ? 2 : 1;
     }
     return n;
 }
@@ -3346,14 +3349,17 @@ static int insert_text(Widgets *w, WidgetState *s, const char *ins, size_t ins_l
     KnStrBuf tmp = {0};
     delete_selection(s);
     if (maxlen >= 0) {
-        int have = count_cps(sb_cstr(&s->value), s->value.len);
+        int have = count_utf16(sb_cstr(&s->value), s->value.len);
         int room = maxlen - have;
         size_t i = 0;
         if (room <= 0) return had_sel;
         while (i < ins_len && room > 0) {
             uint32_t cp;
-            i += (size_t)kn_utf8_decode(ins + i, ins_len - i, &cp);
-            room--;
+            int k = kn_utf8_decode(ins + i, ins_len - i, &cp);
+            int units = cp > 0xFFFF ? 2 : 1;
+            if (k <= 0 || units > room) break;
+            i += (size_t)k;
+            room -= units;
         }
         ins_len = i;
     }

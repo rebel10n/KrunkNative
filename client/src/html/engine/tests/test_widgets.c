@@ -431,6 +431,12 @@ static void test_text_editing(void)
         widgets_char(g_w, m, '1'); widgets_char(g_w, m, '2'); widgets_char(g_w, m, '3');
         widgets_char(g_w, m, '4'); widgets_char(g_w, m, '5'); widgets_char(g_w, m, '6');
         CHECK_STR(widgets_get_value(g_w, m), "1234", "maxlength=4 caps typing");
+        widgets_set_value(g_w, m, "");
+        widgets_char(g_w, m, 0x1F600);
+        widgets_char(g_w, m, 0x1F600);
+        widgets_char(g_w, m, 0x1F600);
+        CHECK_STR(widgets_get_value(g_w, m), "\xF0\x9F\x98\x80\xF0\x9F\x98\x80",
+                  "maxlength counts an emoji as two characters");
         host_focus(NULL, 0);
     }
 
