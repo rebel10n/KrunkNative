@@ -3344,13 +3344,13 @@ static void sb_post_detail(StrBuf *sb, View *v) {
         sb_post(sb, post, 0);
         sb_append(sb, " ");
         if (actor()) { // the reply form
-            const char *t = g_reply;
-            while (*t == ' ') t++;
+            char reply[sizeof g_reply];
+            js_trim_copy(g_reply, reply, sizeof reply); /* text.trim(): a line of tabs is not a reply */
             sb_append(sb, "<div class=\"reply-form svelte-h3kymj\"><input class=\"reply-input svelte-h3kymj\" type=\"text\" placeholder=\"Write a reply...\" maxlength=\"500\" id=\"v10sReply\" "
                           "oninput=\"v10sInput('reply',this.value)\" onkeydown=\"v10sKey('reply')\" value=\"");
             sb_append_esc(sb, g_reply);
             sb_appendf(sb, "\"> <button class=\"reply-btn svelte-h3kymj\" type=\"button\"%s id=\"v10sReplyBtn\" onclick=\"v10s('reply')\">%s</button></div> ",
-                       !*t || v->sending ? " disabled" : "", v->sending ? "..." : "Reply");
+                       !reply[0] || v->sending ? " disabled" : "", v->sending ? "..." : "Reply");
         }
         if (v->reply_error[0]) {
             sb_append(sb, "<div class=\"reply-error svelte-h3kymj\">");
@@ -3375,9 +3375,9 @@ static void sb_compose(StrBuf *sb, View *v) {
     /* the label is the number plus the ceil of a tenth (deob compose). "10.4" is 12.4, not 12. */
     char total_s[48];
     js_number_text(total_s, sizeof total_s, js_giveaway_total(g_giveaway_amount));
-    const char *t = g_compose_text;
-    while (*t == ' ' || *t == '\n') t++;
-    const int can = !v->submitting && *t && !(v->giveaway && amt < 10);
+    char trimmed[sizeof g_compose_text];
+    js_trim_copy(g_compose_text, trimmed, sizeof trimmed); /* text.trim() before the button enables */
+    const int can = !v->submitting && trimmed[0] && !(v->giveaway && amt < 10);
     sb_append(sb, "<div class=\"compose-overlay svelte-qxxay9\" role=\"presentation\" onclick=\"v10s('backdrop')\"><div class=\"compose-window svelte-qxxay9\" role=\"dialog\" aria-modal=\"true\" "
                   "aria-label=\"New post\" id=\"v10sComposeWin\" onclick=\"v10s('stop')\"><div class=\"compose-title svelte-qxxay9\">New post</div> <textarea class=\"compose-input svelte-qxxay9\" "
                   "placeholder=\"Say something...\" rows=\"4\" maxlength=\"500\" id=\"v10sComposeText\" oninput=\"v10sInput('compose',this.value)\">");
@@ -4111,13 +4111,13 @@ static void comment_done(const int status, const cJSON *data, const cJSON *error
 }
 
 static void post_reply(View *v) {
-    const char *t = g_reply;
-    while (*t == ' ') t++;
-    if (!*t || v->sending || !actor()) return;
+    char text[sizeof g_reply];
+    js_trim_copy(g_reply, text, sizeof text); /* commentPost sends text.trim() */
+    if (!text[0] || v->sending || !actor()) return;
     v->sending = 1;
     v->reply_error[0] = 0;
     cJSON *body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "text", t);
+    cJSON_AddStringToObject(body, "text", text);
     char path[64];
     snprintf(path, sizeof(path), "/social/post/%lld/comment", (long long) v->id);
     if (!gapi("POST", path, body, comment_done, view_tag(v))) comment_done(0, NULL, NULL, view_tag(v));
@@ -4148,9 +4148,9 @@ static void create_done(const int status, const cJSON *data, const cJSON *error,
     cJSON_AddNumberToObject(p, "flw", a ? a->followers : 0);
     cJSON_AddNumberToObject(p, "tim", 0);
     cJSON_AddNumberToObject(p, "typ", giveaway ? 9 : 0);
-    const char *t = g_compose_text;
-    while (*t == ' ' || *t == '\n') t++;
-    cJSON_AddStringToObject(p, "txt", t);
+    char trimmed[sizeof g_compose_text];
+    js_trim_copy(g_compose_text, trimmed, sizeof trimmed);
+    cJSON_AddStringToObject(p, "txt", trimmed);
     cJSON_AddNumberToObject(p, "vot", 0);
     cJSON_AddNumberToObject(p, "dlk", 0);
     cJSON_AddNumberToObject(p, "cnt", 0);
@@ -4171,15 +4171,15 @@ static void create_done(const int status, const cJSON *data, const cJSON *error,
 }
 
 static void compose_submit(View *v) {
-    const char *t = g_compose_text;
-    while (*t == ' ' || *t == '\n') t++;
+    char text[sizeof g_compose_text];
+    js_trim_copy(g_compose_text, text, sizeof text); /* createPost sends text.trim() */
     const double amt = atof(g_giveaway_amount);
-    if (v->submitting || !*t || (v->giveaway && amt < 10)) return;
+    if (v->submitting || !text[0] || (v->giveaway && amt < 10)) return;
     v->submitting = 1;
     v->compose_error[0] = 0;
     cJSON *body = cJSON_CreateObject();
     cJSON_AddNumberToObject(body, "type", v->giveaway ? 9 : 0);
-    cJSON_AddStringToObject(body, "text", t);
+    cJSON_AddStringToObject(body, "text", text);
     if (v->giveaway) cJSON_AddNumberToObject(body, "funds", amt);
     if (!gapi("POST", "/social/post", body, create_done, view_tag(v))) create_done(0, NULL, NULL, view_tag(v));
     cJSON_Delete(body);
@@ -4468,10 +4468,10 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         } else if (!strcmp(what, "reply")) {
             snprintf(g_reply, sizeof(g_reply), "%s", value);
             const HtmlElem b = html_dom_by_id("v10sReplyBtn");
-            const char *t = g_reply;
-            while (*t == ' ') t++;
+            char reply[sizeof g_reply];
+            js_trim_copy(g_reply, reply, sizeof reply);
             if (b && top_view() && !top_view()->sending) {
-                if (*t) html_dom_remove_attr(b, "disabled");
+                if (reply[0]) html_dom_remove_attr(b, "disabled");
                 else html_dom_set_attr(b, "disabled", "");
             }
         } else if (!strcmp(what, "compose")) {

@@ -303,6 +303,15 @@ static void test_recruit_fields(void) {
     CHECK(!strcmp(shown, "110"), "a giveaway of 1e2 totals 110 (%s)", shown);
     js_number_text(shown, sizeof shown, js_giveaway_total("1000"));
     CHECK(!strcmp(shown, "1100") && js_giveaway_total("15") == 17, "a whole giveaway total is not grouped (%s)", shown);
+    char trimmed[32];
+    js_trim_copy("  hi  ", trimmed, sizeof trimmed);
+    CHECK(!strcmp(trimmed, "hi"), "a post drops the spaces around it (%s)", trimmed);
+    js_trim_copy("\thello\n", trimmed, sizeof trimmed);
+    CHECK(!strcmp(trimmed, "hello"), "a tab is trimmed (%s)", trimmed);
+    js_trim_copy("\t\t", trimmed, sizeof trimmed);
+    CHECK(!trimmed[0], "a line of tabs is not a post");
+    js_trim_copy("\xc2\xa0x\xc2\xa0", trimmed, sizeof trimmed);
+    CHECK(!strcmp(trimmed, "x"), "a no-break space is trimmed (%s)", trimmed);
 }
 
 static void test_inputs_and_merge(void) {
