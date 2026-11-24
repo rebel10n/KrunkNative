@@ -774,14 +774,17 @@ static int dispatch_inline(EventSystem *es, const HtmlElem *chain, int n, const 
         EvHandlerEntry *ent = handler_lookup(es, e, type_atom, text);
         if (ent->count <= 0) continue;
         EvHandlerEntry local = *ent; /* the table may rehash while handlers mutate the DOM */
-        char value[512];             /* handlers may rewrite the value mid-chain: keep a copy */
-        snprintf(value, sizeof(value), "%s", elem_value(es, e));
+        /* handlers may rewrite the value mid-chain: keep a copy, whole. A 500-character box holds up to 2000
+         * bytes; a fixed 512 cut this.value inside a character and sent invalid UTF-8 */
+        const char *now = elem_value(es, e);
+        char *value = strdup(now ? now : "");
         HtmlEvent ev = *proto;
         ev.target = e;
-        ev.value = value;
+        ev.value = value ? value : "";
         ev.checked = elem_checked(es, e);
         int stop = 0;
         if (!run_handler(&local, &ev, &stop)) result = 0;
+        free(value);
         if (stop) break; /* event.stopPropagation(): no ancestor's on<type> runs */
     }
     return result;
