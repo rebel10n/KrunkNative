@@ -578,10 +578,106 @@ static void test_timer_commands(void) {
     CHECK(game.end_timer > 0.0f && game.end_timer < 0.01f, "the refused /endvote changed nothing (%f)", game.end_timer);
 }
 
+// v7.1.4 /xp and /kr: the host's dev_grant callback, as the commands call it
+static int g_grants, g_grant_requester, g_grant_kr, g_grant_amount;
+static int host_dev_grant(void *user, const int requester, const int kr, const int amount) {
+    (void) user;
+    g_grants++;
+    g_grant_requester = requester;
+    g_grant_kr = kr;
+    g_grant_amount = amount;
+    return 1;
+}
+
+static void test_grant_commands(void) {
+    printf("Running /xp and /kr test...\n");
+    cJSON *arena = cJSON_Parse(k_arena);
+    static const cJSON *maps[1];
+    maps[0] = arena;
+    static int modes[1];
+    modes[0] = MODE_ID_FFA;
+    static Game game;
+    g_game = &game;
+    game_configure(&game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game.hooks.send = test_send;
+    game.round_length = 100000.0f;
+    game_init(&game, 0, 0, 1);
+    CHECK(game.ready, "grant test: game ready");
+    if (!game.ready) return;
+
+    add_human(&game, 1, "Joel");
+    add_human(&game, 2, "JoelTwo");
+    add_human(&game, 3, "Sam");
+    // a DEV peer, a guest, the custom lobby's host (premium_host, not a DEV)
+    g_peers[0] = (ChatPeer) {.id = 1, .name = "Joel", .address = "127.0.0.1", .ping_ms = 0, .dev = 1, .account_id = 11};
+    g_peers[1] = (ChatPeer) {.id = 2, .name = "JoelTwo", .address = "203.0.113.2", .ping_ms = 0};
+    g_peers[2] = (ChatPeer) {.id = 3, .name = "Sam", .address = "203.0.113.3", .ping_ms = 0, .premium_host = 1, .account_id = 33};
+    g_host.game = &game;
+    g_host.user = NULL;
+    g_host.peer_count = peer_count;
+    g_host.peer_at = peer_at;
+    g_host.log = host_log;
+    g_host.disconnect = host_disconnect;
+    g_host.perms = 1;
+    g_host.cheats_open = 0;
+    g_host.dev_grant = host_dev_grant;
+    g_grants = 0;
+
+    // the gate: v7 requireHostOrDev. A guest is refused and nothing is asked for.
+    say(2, "/xp 100");
+    CHECK(strstr(g_notify, "Host or developer required") != NULL && g_grants == 0, "a guest's /xp is refused (notify '%s', %d grants)", g_notify,
+          g_grants);
+    say(2, "/kr 100");
+    CHECK(strstr(g_notify, "Host or developer required") != NULL && g_grants == 0, "a guest's /kr is refused (notify '%s')", g_notify);
+    // an open-cheats server opens every command but the host / dev ones: still refused
+    g_host.perms = 0;
+    g_host.cheats_open = 1;
+    say(2, "/kr 100");
+    CHECK(strstr(g_notify, "Host or developer required") != NULL && g_grants == 0, "open cheats: a guest's /kr is still refused (notify '%s')",
+          g_notify);
+    g_host.perms = 1;
+    g_host.cheats_open = 0;
+
+    // a DEV: the host's dev_grant with the sender, the kind and the amount
+    say(1, "/xp 5000");
+    CHECK(g_grants == 1 && g_grant_requester == 1 && g_grant_kr == 0 && g_grant_amount == 5000, "/xp 5000 from the DEV asks the host for 5000 XP (%d %d %d %d)",
+          g_grants, g_grant_requester, g_grant_kr, g_grant_amount);
+    say(1, "/kr 250");
+    CHECK(g_grants == 2 && g_grant_requester == 1 && g_grant_kr == 1 && g_grant_amount == 250, "/kr 250 from the DEV asks the host for 250 KR (%d %d %d)",
+          g_grants, g_grant_kr, g_grant_amount);
+    say(1, "/KR 10000000");
+    CHECK(g_grants == 3 && g_grant_kr == 1 && g_grant_amount == 10000000, "/KR 10000000: any case, the maximum (%d %d)", g_grants, g_grant_amount);
+    // the custom host passes the gate (v7); kn_brain then grants only to a developer account
+    say(3, "/kr 10");
+    CHECK(g_grants == 4 && g_grant_requester == 3 && g_grant_kr == 1 && g_grant_amount == 10 && !strstr(g_notify, "required"),
+          "the custom host's /kr reaches the host (%d %d)", g_grants, g_grant_requester);
+
+    // usage: one whole positive amount up to the maximum, nothing asked for
+    static const char *const bad[] = {"/xp", "/xp 0", "/xp -5", "/xp abc", "/xp 12x", "/xp 10000001", "/xp 99999999999", "/kr 5 6", "/kr 1.5"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        say(1, bad[i]);
+        const int is_kr = bad[i][1] == 'k';
+        CHECK(g_grants == 4 && !strcmp(g_reply, is_kr ? "Usage: /kr <amount> (1 to 10000000)" : "Usage: /xp <amount> (1 to 10000000)"),
+              "'%s' is usage (%s, %d grants)", bad[i], g_reply, g_grants);
+    }
+
+    // the console has no account
+    g_reply[0] = 0;
+    chat_command_handle(&g_host, CHAT_CMD_CONSOLE, "/kr 5");
+    CHECK(g_grants == 4 && !strcmp(g_reply, "The console has no account: run /kr in game."), "the console's /kr (%s)", g_reply);
+    // a server without an account service
+    g_host.dev_grant = NULL;
+    CHECK(!strcmp(say(1, "/xp 5"), "No account service on this server.") && g_grants == 4, "no dev_grant: told (%s)", g_reply);
+    g_host.dev_grant = host_dev_grant;
+    CHECK(chat_command_find("xp") && chat_command_find("xp")->perm == CHAT_PERM_HOST_DEV && chat_command_find("kr") &&
+          chat_command_find("kr")->perm == CHAT_PERM_HOST_DEV, "xp and kr are in the table, host / dev");
+}
+
 int main(void) {
     test_resolver();
     test_commands();
     test_timer_commands();
+    test_grant_commands();
     test_menu_keep();
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

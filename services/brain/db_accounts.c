@@ -811,3 +811,50 @@ const kn_proc P_CLAIM_DAILY = {
     "THEN kn_fail('Must be level ' || $5::text)::text::jsonb "
     "ELSE kn_daily_kr($1, $2, $3, $4, 'daily') END FROM players WHERE player_id = $1",
     run_claim_daily};
+
+/* ------------------------------------------------------------------ developer XP / KR grants */
+
+/* Krunker v7.1.4's /xp and /kr chat commands (server/index.ts:3165-3171 and the ct handler 4272-4290: add XP or
+ * KR to the sender's own account), the game server's op dev_grant (accounts.c): (actor account id, "xp" | "kr",
+ * amount 1..DEV_GRANT_MAX) -> the actor's account object plus {kind, granted}. Only a developer account
+ * (player_developer) may grant, and only to itself: a custom lobby's host, a config op or the server's own
+ * machine passes the game server's chat gate but is refused here unless its account is a developer. XP is
+ * player_score (the level follows); KR is player_funds with its kr_transactions row (source 'admin', ref
+ * 'dev_grant'); no purchase or payment table is touched. moderation_log keeps every grant. */
+static kn_db_result *run_dev_grant(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t actor = PI(0), amount = PI(2);
+    const char *kind = P(1) ? P(1) : "";
+    const int kr = !strcmp(kind, "kr");
+    if (!kr && strcmp(kind, "xp")) {
+        dbx_refuse(&x, "Unknown grant");
+        return dbx_finish(&x, NULL);
+    }
+    if (amount < 1 || amount > DEV_GRANT_MAX) {
+        char msg[64];
+        snprintf(msg, sizeof msg, "Amount must be 1 to %d", DEV_GRANT_MAX);
+        dbx_refuse(&x, msg);
+        return dbx_finish(&x, NULL);
+    }
+    if (actor <= 0 || !dbx_exists(&x, SQL(.any = "SELECT 1 FROM players WHERE player_id = {int:$1} AND player_developer > 0"),
+                                  KN_DB_ARGS(I64S(actor)))) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, kr ? "Only developers can grant KR" : "Only developers can grant XP");
+        return dbx_finish(&x, NULL);
+    }
+    if (kr) {
+        if (db_add_funds(&x, actor, amount, "admin", "dev_grant", NULL) != 0) return dbx_finish(&x, NULL);
+    } else {
+        dbx_exec(&x, SQL(.any = "UPDATE players SET player_score = player_score + {int:$2}, updated_at = {now} WHERE player_id = {int:$1}"),
+                 KN_DB_ARGS(I64S(actor), I64S(amount)));
+    }
+    dbx_exec(&x, SQL(.any = "INSERT INTO moderation_log (actor_id, target_id, action, detail) VALUES ({int:$1}, {int:$1}, $2, $3)"),
+             KN_DB_ARGS(I64S(actor), kr ? "dev_grant_kr" : "dev_grant_xp", I64S(amount)));
+    if (dbx_failed(&x)) return dbx_finish(&x, NULL);
+    cJSON *a = db_account_json(&x, actor);
+    if (a) {
+        cJSON_AddStringToObject(a, "kind", kr ? "kr" : "xp");
+        cJSON_AddNumberToObject(a, "granted", (double) amount);
+    }
+    return dbx_json(&x, "dev_grant", a);
+}
+const kn_proc P_DEV_GRANT = {"dev_grant", NULL, run_dev_grant};

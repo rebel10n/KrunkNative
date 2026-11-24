@@ -97,6 +97,11 @@ typedef struct ChatCommandHost {
     // id or CHAT_CMD_CONSOLE) when the coordinator does. 0 = nothing sent (the host told why).
     int  (*kpd_officer)(void *user, int requester, const char *name, int on);
     int  (*kpd_apps)(void *user, int requester);
+    // Krunker v7.1.4 /xp and /kr (optional; NULL: "No account service on this server"): add `amount` XP (kr 0)
+    // or KR (kr 1) to the account of connection `requester` (never the console's: it has none). The host
+    // answers the requester when the coordinator does; kn_brain grants only to a developer account. 0 = nothing
+    // sent (the host told why).
+    int  (*dev_grant)(void *user, int requester, int kr, int amount);
 
     // per-server state (pnhBannedAddresses, forceCollideState)
     char ip_bans[CHAT_CMD_IP_BANS_MAX][CHAT_CMD_ADDRESS_SIZE];

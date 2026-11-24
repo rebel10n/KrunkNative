@@ -361,6 +361,12 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/ks_storage_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_ks_storage_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # Krunker v7.1.4 /xp and /kr in chat: a player refused, a developer's grants (chat_commands.c, accounts.c, dev_grant)
+        add_test(NAME brain_dev_grant_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/dev_grant_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_dev_grant_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77
+            ENVIRONMENT "KN_TEST_DB_DRIVER=sqlite" LABELS "brain;db;e2e;sqlite")
         # dedicated servers through the coordinator (doc/backend.md 8.7-8.10) and v10 ranked end to end (doc/v10/ranked-impl.md):
         # server_bin + kn_brain on a scratch PostgreSQL database (server/tests/kn_testdb.py; 77 without one)
         add_test(NAME server_dedicated_e2e
@@ -472,6 +478,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/kpd_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_kpd PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # Krunker v7.1.4 /xp and /kr: the game server's dev_grant op, developer accounts only (db_accounts.c run_dev_grant)
+    add_test(NAME brain_dev_grant
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/dev_grant_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_dev_grant PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c, 0107_progression)
     add_test(NAME brain_progress
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
@@ -846,6 +857,9 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_kpd_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/kpd_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_dev_grant_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/dev_grant_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         add_test(NAME brain_progress_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/progress_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
@@ -891,7 +905,7 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_strike_economy_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/strike_economy_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
-        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_turf_${drv} brain_storage_${drv} brain_kpd_${drv} brain_progress_${drv} brain_season_${drv}
+        set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_turf_${drv} brain_storage_${drv} brain_kpd_${drv} brain_dev_grant_${drv} brain_progress_${drv} brain_season_${drv}
             brain_account_security_${drv} brain_economy_${drv} brain_strike_economy_${drv}
             PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT "KN_TEST_DB_DRIVER=${drv};KN_TEST_MIGRATE=$<TARGET_FILE:kn_migrate>" LABELS "knsvc;brain;db;${drv}")

@@ -1022,6 +1022,7 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(target_select_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    add_test(NAME target_select_test COMMAND target_select_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # navgen_test: the Krunker v7.1.4 generated nav mesh (shared/src/navgen.c) against v7's navgen.ts
     add_executable(navgen_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/navgen_test.c)

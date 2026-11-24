@@ -1589,6 +1589,11 @@ static int net_chat_kpd_apps(void *user, const int requester) {
     return accounts_kpd_apps(requester);
 }
 
+static int net_chat_dev_grant(void *user, const int requester, const int kr, const int amount) {
+    (void) user;
+    return accounts_dev_grant(requester, kr, amount);
+}
+
 ChatCommandHost *net_chat_host(void) {
     g_chat_host.game = &g_server->game;
     g_chat_host.perms = g_server->config.perms;
@@ -1610,6 +1615,7 @@ ChatCommandHost *net_chat_host(void) {
     g_chat_host.class_switched = net_chat_class_switched; // KrunkNative `class` (any game; devs only)
     g_chat_host.kpd_officer = net_chat_kpd_officer;   // KrunkNative: /kpd <account> on|off (kn_brain)
     g_chat_host.kpd_apps = net_chat_kpd_apps;         // KrunkNative: /kpd apps
+    g_chat_host.dev_grant = net_chat_dev_grant;       // Krunker v7.1.4 /xp, /kr (kn_brain dev_grant)
     return &g_chat_host;
 }
 

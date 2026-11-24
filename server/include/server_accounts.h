@@ -164,6 +164,10 @@ void accounts_kpd_list(ClientConnection *client, int tab, int off, const char *q
 // account here at once. 0 when nothing could be sent (told already).
 int accounts_kpd_officer(int requester, const char *name, int on);
 int accounts_kpd_apps(int requester);
+// Krunker v7.1.4 /xp and /kr (chat_commands.c, host / dev): op dev_grant adds `amount` XP (kr 0) or KR (kr 1) to
+// the requester's own account; kn_brain grants only to a developer account. The answer goes to the requester's
+// chat. 0 when nothing was sent (told already; the console has no account).
+int accounts_dev_grant(int requester, int kr, int amount);
 void net_resume_ent(ClientConnection*, int spectate);              // replay a deferred ENT
 void net_comp_lobby_sync(ClientConnection*);                        // v7 syncLobbyP(player, id, 0) once the identity is known
 int net_client_is_dev(const ClientConnection*);                    // DEV checks: op, the server's machine, a DEV account

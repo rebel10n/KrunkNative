@@ -887,6 +887,25 @@ static void junk_op_done(kn_db_result *res, void *ud) {
     cJSON_Delete(data);
 }
 
+/* dev_grant (v7.1.4 /xp and /kr): the decorated account (level, levelProg) back to the game server, and
+ * "ua" to the account's own social sockets, so the navbar's KR and level follow at once. */
+static void op_grant_done(kn_db_result *res, void *ud) {
+    OpCtx *o = ud;
+    if (!kn_db_ok(res)) {
+        op_reply(o, acct_db_error(res, o->what), NULL);
+        return;
+    }
+    cJSON *account = acct_db_json(res);
+    if (!account) {
+        op_reply(o, "Account not found.", NULL);
+        return;
+    }
+    acct_decorate(account);
+    social_push_account_update(account);
+    op_reply(o, NULL, account);
+    cJSON_Delete(account);
+}
+
 static void op_empty_done(kn_db_result *res, void *ud) {
     OpCtx *o = ud;
     if (!kn_db_ok(res)) {
@@ -1688,6 +1707,17 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         kn_db_call(g_acct_brain->db, &P_STORAGE_LOAD,
                    KN_DB_ARGS(kn_json_str(args, "name", ""), kn_json_str(args, "map", ""), kn_json_str(args, "from", NULL)),
                    op_json_done, o);
+        return 0;
+    }
+    /* Krunker v7.1.4 /xp and /kr (db_accounts.c run_dev_grant): {actor, kind "xp" | "kr", amount} -> the developer's
+     * own account; the header follows over the social socket ("ua") */
+    if (!strcmp(op, "dev_grant")) {
+        OpCtx *o = op_new(cb, ud, "dev_grant");
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_DEV_GRANT,
+                   KN_DB_ARGS(acct_itoa(ids, kn_json_int(args, "actor", 0)), kn_json_str(args, "kind", ""),
+                              acct_itoa(v1, kn_json_int(args, "amount", 0))),
+                   op_grant_done, o);
         return 0;
     }
     if (!strcmp(op, "map_reward")) {

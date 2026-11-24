@@ -436,6 +436,7 @@ static const ConArg A_KPD[] = {{"account|apps", ARG_STRING, 0}, {"on|off", ARG_S
 static const ConArg A_BANIP[] = {{"name|id|ip", ARG_STRING, 1}};
 static const ConArg A_IP[] = {{"ip", ARG_STRING, 1}};
 static const ConArg A_AMOUNT[] = {{"amount", ARG_NUMBER, 1}};
+static const ConArg A_GRANT[] = {{"amount", ARG_NUMBER, 0}}; // Krunker v7.1.4 xp / kr
 static const ConArg A_GAME[] = {{"text", ARG_STRING, 1}};
 // Krunker v7.1.4 bots (mod/devConsole.ts registrations; shared/src/chat_commands.c runs them)
 static const ConArg A_BOT_ADD[] = {{"count", ARG_NUMBER, 1}, {"tfue|autoRespawn|key=value", ARG_STRING, 1}};
@@ -1717,6 +1718,8 @@ static void register_commands(void) {
     register_server("unbanip", ARGS(A_IP), "unban an IP");
     register_server("ipbans", NO_ARGS, "list banned IPs");
     register_server("score", ARGS(A_AMOUNT), "add score (default +100)");
+    register_server("xp", ARGS(A_GRANT), "add XP to your own account (developer accounts)");
+    register_server("kr", ARGS(A_GRANT), "add KR to your own account (developer accounts)");
     register_server("summon", ARGS(A_NAME), "spawn a Soul Sanctum AI by name (no arg lists summonable names)");
     register_server("game", ARGS(A_GAME), "send a game command");
     register_server("bot", ARGS(A_BOT_ADD), "spawn player-targeting auto-respawn bots (tfue=off for full-strength bots)");
