@@ -984,8 +984,12 @@ static void svg_apply_filter(const SvgCtx *c, const SvgFilter *f, const float *c
         for (int s = 0; s < f->count; s++) {
             const SvgShadow *d = &f->sh[s];
             if (d->inner != pass) continue;
-            /* dx / dy / stdDeviation are in the element's user space (primitiveUnits userSpaceOnUse) */
-            const float ox = (ctm[0] * d->dx + ctm[2] * d->dy) * c->sx, oy = (ctm[1] * d->dx + ctm[3] * d->dy) * c->sy;
+            /* dx / dy / stdDeviation are in the element's user space (primitiveUnits userSpaceOnUse).
+             * A blurless offset (Figma's hard shadow, feOffset with no feGaussianBlur) is a whole
+             * device pixel in Chrome. Leaving the scaled dy fractional only smears the silhouette,
+             * which is the extra black pixel on Strike's return icons. */
+            float ox = (ctm[0] * d->dx + ctm[2] * d->dy) * c->sx, oy = (ctm[1] * d->dx + ctm[3] * d->dy) * c->sy;
+            if (d->sd <= 0.0f) { ox = roundf(ox); oy = roundf(oy); }
             const float ks = sqrtf(fabsf(ctm[0] * ctm[3] - ctm[1] * ctm[2]));
             for (int y = 0; y < c->h; y++)
                 for (int x = 0; x < c->w; x++) { /* the source alpha moved by (ox, oy), bilinear */

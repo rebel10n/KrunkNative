@@ -887,3 +887,11 @@ chrome. The header is then 0.638 % at fuzz 12 (the live menu stays 12.4 %); max 
 scenario's other rows. `menu-right` stays skipped: the sandbox page has no play buttons, so it cannot say
 whether a match hides them.
 
+### Strike return icons (2026-11-24)
+
+The pixels over the max on the slanted buttons are the icon, not the clip-path frame (that edge is inside
+fuzz 8). `btn-arrow-left.svg` / `btn-home.svg` are a Figma hard shadow (`feOffset dy="1"`, no blur). The
+scaled offset was fractional, so the shadow smeared instead of landing on one device pixel. A blurless
+offset now rounds to a whole device pixel. `strike/customize-controls` back is 2.077 -> 1.913 % (max 2,
+fuzz 8). `strike/item-selection` back / home are 2.319 / 2.156 % and stay skipped. No threshold changed.
+
