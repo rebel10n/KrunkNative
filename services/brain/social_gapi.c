@@ -414,8 +414,15 @@ void sh_share_match(SocialSession *s, const cJSON *f) {
     const cJSON *n = fa(f, 1);
     const char *note = cJSON_IsString(n) ? n->valuestring : "";
     while (*note == ' ' || *note == '\n' || *note == '\t') note++;
+    /* #shareTxt has no maxlength (deob-10.0.7.js:227052). post_max_len counts characters, not bytes. */
+    const size_t cap_n = g_acct.post_max_len > 0 ? (size_t) g_acct.post_max_len : 1024;
+    const size_t keep = brain_utf16_prefix(note, cap_n);
+    char kept[4096];
+    const size_t ncopy = keep < sizeof kept ? keep : sizeof kept - 1;
+    memcpy(kept, note, ncopy);
+    kept[ncopy] = 0;
     char me[24], max[24];
-    social_call(s, &P_SHARE_MATCH, KN_DB_ARGS(social_viewer(s, me), note, acct_itoa(max, g_acct.post_max_len > 0 ? g_acct.post_max_len : 1024), "20"),
+    social_call(s, &P_SHARE_MATCH, KN_DB_ARGS(social_viewer(s, me), kept, acct_itoa(max, (int) ncopy > 0 ? (int) ncopy : 1), "20"),
                 share_done, NULL);
 }
 

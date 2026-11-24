@@ -353,6 +353,24 @@ async def scenario(names):
     st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "low level"})
     check(st == 400 and r["error"]["code"] == "SOCIAL_LEVEL_TOO_LOW", "level 1: SOCIAL_LEVEL_TOO_LOW")
     q("UPDATE players SET player_score = 2000000, player_funds = 1000 WHERE player_id IN (?, ?)", a_id, b_id)
+    # #shareTxt has no maxlength (deob-10.0.7.js:227052). The note is kept in characters, leading blanks dropped.
+    q("INSERT INTO match_ends (match_id, mode, ed) VALUES ('share1', 0, '[1]')")
+    q("INSERT INTO match_results (match_id, account_id, score) VALUES ('share1', ?, 1)", a_id)
+    note = "  " + ("é" * 400)
+    await A.send(["smr", note])
+    end = time.time() + 5
+    while time.time() < end and not q("SELECT body FROM feed_posts WHERE author_id = ? AND type = 8", a_id):
+        time.sleep(0.05)
+    body = q("SELECT body FROM feed_posts WHERE author_id = ? AND type = 8", a_id)
+    check(body and body[0][0] == "é" * 400, "a share note of 400 characters is kept (got %d)" % (len(body[0][0]) if body else 0))
+    q("DELETE FROM feed_posts WHERE author_id = ? AND type = 8", a_id)
+    await A.send(["smr", "a" * 1100])
+    end = time.time() + 5
+    while time.time() < end and not q("SELECT body FROM feed_posts WHERE author_id = ? AND type = 8", a_id):
+        time.sleep(0.05)
+    body = q("SELECT body FROM feed_posts WHERE author_id = ? AND type = 8", a_id)
+    check(body and body[0][0] == "a" * 1024, "a share note stops at 1024 characters (got %d)" % (len(body[0][0]) if body else 0))
+    q("DELETE FROM feed_posts WHERE author_id = ? AND type = 8", a_id)
     st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "hello world"})
     check(st == 200 and r["data"]["post_id"] > 0, "level 42: post created")
     pid = r["data"]["post_id"] if st == 200 else 0

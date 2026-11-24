@@ -18,8 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SHARE_NOTE_MAX 280
-
 static void escape_attr(char *out, const size_t n, const char *s) {
     size_t k = 0;
     for (; s && *s && k + 7 < n; s++) {
@@ -60,18 +58,15 @@ static void share_popup(void) {
     html_dom_set_attr(pop, "class", "kn-share-pop");
     html_dom_set_attr(pop, "style", "");
     char html[1024];
-    snprintf(html, sizeof html,
-             "<div style='color:#fff;font-size:20px;margin-bottom:15px'>%s</div>"
-             "<textarea id='shareTxt' rows='5' maxlength='%d' style='width:100%%' placeholder='%s'></textarea>"
-             "<div id='confirmBtn' style='width:calc(100%% - 20px)' onmouseover='playTick(0.1)' onclick='shareMatch()'>%s</div>",
-             I18N("kn.share.title", "Share this match"), SHARE_NOTE_MAX, I18N("kn.share.placeholder", "Add a note to your results (optional)"),
-             I18N("kn.share.send", "Post"));
+    end_share_popup_html(html, sizeof html, I18N("kn.share.title", "Share this match"),
+                         I18N("kn.share.placeholder", "Add a note to your results (optional)"),
+                         I18N("kn.share.send", "Post"));
     html_dom_set_html(pop, html);
     html_dom_set_display(pop, "block");
 }
 
 static void share_send(void) {
-    char note[SHARE_NOTE_MAX + 1] = "";
+    char note[4096] = "";
     const HtmlElem box = html_dom_by_id("shareTxt");
     if (box) html_dom_get_value(box, note, sizeof note);
     cJSON *frame = cJSON_CreateArray();

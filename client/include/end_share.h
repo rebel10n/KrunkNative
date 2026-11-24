@@ -10,5 +10,7 @@
 void end_share_actions_html(char *out, size_t size, int is_you, int other_has_account, int custom_game, const char *name);
 // shareResult / shareMatch / reportPlayer; -1 when the name is not one of them
 int end_share_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);
+// the share popup (#shareTxt has no maxlength, deob-10.0.7.js:227052)
+void end_share_popup_html(char *out, size_t n, const char *title, const char *placeholder, const char *button);
 
 #endif
