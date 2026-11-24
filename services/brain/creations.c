@@ -746,7 +746,8 @@ void sh_upload_map(SocialSession *s, const cJSON *f) {
     }
     if (!desc) desc = "";
     if (!info_s) info_s = strdup("{}");
-    const size_t dl = strlen(data), sl = strlen(desc), il = info_s ? strlen(info_s) : 0, tl = thumb ? strlen(thumb) : 0;
+    /* the description box (editor.deob.js:20568) is maxlength 500; the value is sent as typed */
+    const size_t dl = strlen(data), sl = brain_utf16_prefix(desc, 500), il = info_s ? strlen(info_s) : 0, tl = thumb ? strlen(thumb) : 0;
     PubMap *p = info_s ? calloc(1, sizeof *p + dl + sl + il + tl + 4) : NULL;
     if (!p) {
         free(info_s);
@@ -762,7 +763,8 @@ void sh_upload_map(SocialSession *s, const cJSON *f) {
     kn_youtube_id(video, p->vid, sizeof p->vid);
     memcpy(p->buf, data, dl + 1);
     p->desc_at = dl + 1;
-    memcpy(p->buf + p->desc_at, desc, sl + 1);
+    memcpy(p->buf + p->desc_at, desc, sl);
+    p->buf[p->desc_at + sl] = 0;
     p->info = p->buf + p->desc_at + sl + 1;
     memcpy(p->info, info_s, il + 1);
     if (thumb) {

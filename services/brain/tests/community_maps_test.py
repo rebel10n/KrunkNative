@@ -193,6 +193,15 @@ async def scenario(port):
     check(row.get("map_updatecounter") == 2 and row.get("map_pl") == 0 and row.get("map_votes") == 0,
           "row has updatecounter, plays and votes (%r)" % {k: row.get(k) for k in ("map_updatecounter", "map_pl", "map_votes")})
     check(row.get("map_description") == "second", "republish replaced the description")
+    r = await publish(alice_sock, make_map(name, modes=(0, 1)), desc="D" * 600)
+    check(r[0] == "pubMR" and r[1] == "Map Updated!", "a long description still publishes: %r" % r)
+    capped = [x for x in get(base, "/api/maps?index=2&pos=0")["data"] if x.get("map_name") == name]
+    got = capped[0].get("map_description") if capped else ""
+    check(got == "D" * 500, "a description stops at 500 characters (%d)" % len(got or ""))
+    r = await publish(alice_sock, make_map(name, modes=(0, 1)), desc="E" * 500)
+    kept = [x for x in get(base, "/api/maps?index=2&pos=0")["data"] if x.get("map_name") == name]
+    got = kept[0].get("map_description") if kept else ""
+    check(got == "E" * 500, "a 500-character description is kept (%d)" % len(got or ""))
     catalogue_row = [r for r in get(base, "/api/maps?index=0&pos=0")["data"] if r.get("map_name") == "Burg"]
     check(catalogue_row and catalogue_row[0]["official"] is True and isinstance(catalogue_row[0]["modes"], list)
           and catalogue_row[0]["map_category"] == -1 and catalogue_row[0]["category"] == "",
