@@ -228,7 +228,7 @@ def recruitment(port, accs, clan_a, clan_c):
     """v10's recruitment posts (0208_clan_recruitment): CCC's bank holds 125 KR after the settlement"""
     auth = lambda a: {"Authorization": "Bearer " + a["token"]}
     url = "/api/clans/%d/recruitment" % clan_c
-    post = {"region": "EU", "language": "en", "description": "Daily Turf Wars on Sandstorm", "looking_for": "active players",
+    post = {"region": "EU", "language": "en", "description": "Daily Turf Wars on Sandstorm", "looking_for": "a" * 500,
             "min_level": 0, "min_kd": 1.5}
     code, r = http(port, url)
     check(code == 200 and r["data"] is None, "no post yet: data null (%s %s)" % (code, r))
@@ -240,6 +240,8 @@ def recruitment(port, accs, clan_a, clan_c):
     check(code == 400 and "region" in str(r.get("message", r)), "unknown region refused (%s)" % r)
     code, r = http(port, url, method="POST", headers=auth(accs[6]), body=dict(post, min_kd=50))
     check(code == 400 and "K/D" in str(r.get("message", r)), "min K/D out of range refused (%s)" % r)
+    code, r = http(port, url, method="POST", headers=auth(accs[6]), body=dict(post, looking_for="b" * 501))
+    check(code == 400 and "500" in str(r.get("message", r)), "Looking For past 500 characters refused (%s)" % r)
     code, r = http(port, url, method="POST", headers=auth(accs[6]), body=post)
     check(code == 400 and "clan funds" in str(r.get("message", r)), "125 KR in the bank: not enough for 1,000 (%s)" % r)
     d = asyncio.run(deposit(port, accs[6], 1000))
@@ -247,8 +249,9 @@ def recruitment(port, accs, clan_a, clan_c):
     code, r = http(port, url, method="POST", headers=auth(accs[6]), body=post)
     data = r.get("data") or {} if code == 200 else {}
     check(code == 200 and data.get("charged") is True and data.get("clan_funds") == 125 + 900 - 1000 and data.get("region") == "EU"
-          and data.get("clan_name") == "CCC" and abs(data.get("min_kd", 0) - 1.5) < 1e-6 and data.get("is_active") is True,
-          "the post is created: 1,000 KR from the clan bank (%s %s)" % (code, r))
+          and data.get("clan_name") == "CCC" and data.get("looking_for") == "a" * 500
+          and abs(data.get("min_kd", 0) - 1.5) < 1e-6 and data.get("is_active") is True,
+          "the post is created: 1,000 KR from the clan bank, Looking For kept at 500 (%s %s)" % (code, r))
     code, r = http(port, url, method="PUT", headers=auth(accs[6]), body=dict(post, description="again"))
     check(code == 400 and "moment" in str(r.get("message", r)), "a second update within 30 s is refused (%s)" % r)
     code, r = http(port, url)

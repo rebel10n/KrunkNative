@@ -813,7 +813,7 @@ static kn_db_result *run_recruit_set(kn_dbconn *c, int n, const char *const *p) 
     if (region[0] && !in_list(region, k_rec_regions, sizeof k_rec_regions / sizeof *k_rec_regions)) err = "Unknown region";
     else if (lang[0] && !in_list(lang, k_rec_langs, sizeof k_rec_langs / sizeof *k_rec_langs)) err = "Unknown language";
     else if (strlen(jstr(in, "description")) > 2000) err = "Description is too long (2000 characters max)";
-    else if (strlen(jstr(in, "looking_for")) > 200) err = "\"Looking for\" is too long (200 characters max)";
+    else if (strlen(jstr(in, "looking_for")) > 500) err = "\"Looking for\" is too long (500 characters max)";
     else if (min_level < 0 || min_level > 200) err = "Minimum level must be between 0 and 200";
     else if (min_kd < 0 || min_kd > 20) err = "Minimum K/D must be between 0 and 20";
     char reg[8], lg[8], kd[32];
