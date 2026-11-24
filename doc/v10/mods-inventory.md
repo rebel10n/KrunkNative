@@ -17,15 +17,15 @@ that tree (v7) or into this repository at `ff4a851b` plus this change (KN).
 
 | Set | Items | Have | Missing | Broken on v10 | Notes |
 |---|---|---|---|---|---|
-| Chat / server commands (v7 `registerServer` + the server switch, `server/index.ts:2854-3236`) | 56 | 48 (incl. `bhop`, client-side; and `modes`, `maps` after their fix) | 2 remaining (`xp`, `kr`) | 2 fixed (`modes`, `maps` were DEV-only; v7 has no gate) | 6 added: `endvote`, `time`, `endtime`, `serverinfo`, `status`, `classes` |
-| Console-only commands (v7 `registerLocal`, `mod/devConsole.ts`) | 31 | 26 | 1 remaining (`ent_bbox`) | 0 | 4 added: `resetbinds`, `reset_binds`, `third`, `tpmesh` |
-| Client mods (`mod/mods.ts`, `mod/*.ts`, `main/*`) | 30 | 19 | 1 (`ent_bbox`); 1 moved (F1) | 0 | 9 are browser-page or v7-sandbox workarounds, not applicable |
+| Chat / server commands (v7 `registerServer` + the server switch, `server/index.ts:2854-3236`) | 56 | 50 (incl. `bhop`, client-side; `modes`, `maps` after their fix; `xp`, `kr` since 2219b7d1) | 0 | 2 fixed (`modes`, `maps` were DEV-only; v7 has no gate) | 6 added: `endvote`, `time`, `endtime`, `serverinfo`, `status`, `classes` |
+| Console-only commands (v7 `registerLocal`, `mod/devConsole.ts`) | 31 | 27 (`ent_bbox` since 52cb5ff1) | 0 | 0 | 4 added: `resetbinds`, `reset_binds`, `third`, `tpmesh` |
+| Client mods (`mod/mods.ts`, `mod/*.ts`, `main/*`) | 30 | 20 (`ent_bbox` since 52cb5ff1) | 0; 1 moved (F1) | 0 | 9 are browser-page or v7-sandbox workarounds, not applicable |
 | Bridge: official `ct` chat (`server/bridge/v10_bridge.c`) | 1 path | 0 (fixed) | 0 | 1 fixed (every chat line from the official client was dropped) | fail-before test |
 
 The 56 chat names and the 30 console names overlap (`ping`, `maps`, `status`, `serverinfo` appear in
 both); the console list above counts only the names that exist only in the console.
 
-Remaining gaps are listed at the end with the reason.
+Remaining gaps are listed at the end with the reason; since 2026-11-24 none is left (section 6).
 
 ## 1. Chat and server commands
 
@@ -46,8 +46,8 @@ v7 code applies (`requireHostOrDev`, `requireCheatAccess`, `requireAuth`, or non
 | unlimitedammo | index.ts:3105-3125 | host / dev / premium | chat_commands.c `unlimitedammo` | DEV_CHEAT | chat | have; narrower (dev only) |
 | c / count | index.ts:2936-2942 | none | chat_commands.c `c`, `count` | ANY | chat | have |
 | bhop | devConsole.ts:1941 (registration); the client intercepts `/bhop` (devConsole.ts:5478) | client | ui_console.c:1756 `bhop_command`, 1797 `ui_console_chat_command` (chat_send in ui_controls.c:1217) | client | native only | have (client; the chat `/bhop` never reaches the server in v7 or KN) |
-| xp | index.ts:3165-3171; ct `/xp` 4272-4290 | host / dev | not in table | | chat | **missing**: needs a brain grant route; not ported |
-| kr | index.ts:3165-3171; ct `/kr` 4272-4290 | host / dev | not in table | | chat | **missing**: needs a brain grant route; not ported |
+| xp | index.ts:3165-3171; ct `/xp` 4272-4290 | host / dev | chat_commands.c `cmd_xp` (`cmd_grant`); server/src/accounts.c `accounts_dev_grant`; kn_brain op `dev_grant` (services/brain/db_accounts.c `run_dev_grant`) | HOST_DEV, then kn_brain grants only to a developer account (`player_developer`) | chat | **fixed** (2219b7d1; run: target_select_test, brain_dev_grant on PostgreSQL, brain_dev_grant_sqlite, brain_dev_grant_mysql, brain_dev_grant_e2e 23/23). XP is player_score; the level follows |
+| kr | index.ts:3165-3171; ct `/kr` 4272-4290 | host / dev | chat_commands.c `cmd_kr` (`cmd_grant`), same path as `xp` | HOST_DEV, then developer accounts only | chat | **fixed** (2219b7d1; same tests). KR is player_funds with a kr_transactions row (`admin`, `dev_grant`); moderation_log keeps every grant; no purchase or payment path |
 | kill | index.ts:3146-3155 | cheat + target | chat_commands.c `kill` | CHEAT | chat | have |
 | end | index.ts:2910-2914; ct `/end` 4272 | host / dev | chat_commands.c `end` | DEV | chat | have |
 | endvote | index.ts:2915-2919; ct `/endvote` 4282 | host / dev | chat_commands.c `cmd_endvote` (957) | DEV | chat | **fixed** (was missing) |
@@ -95,9 +95,9 @@ v7 code applies (`requireHostOrDev`, `requireCheatAccess`, `requireAuth`, or non
 | bot_difficulty | same | host / dev | chat_commands.c `bot_difficulty` | HOST_DEV | chat | have |
 
 Counted: the 56 v7 names. The table also has the KN addition `ungod` and a second row for `game`
-(the text form), which are not counted. Have 48 (incl. `bhop`, client-side, and `modes` / `maps`
-after their permission fix), added 6 (`endvote`, `time`, `endtime`, `serverinfo`, `status`,
-`classes`), missing 2 (`xp`, `kr`).
+(the text form), which are not counted. Have 50 (incl. `bhop`, client-side, and `modes` / `maps`
+after their permission fix, and `xp` / `kr` since 2219b7d1), added 6 (`endvote`, `time`, `endtime`,
+`serverinfo`, `status`, `classes`), missing 0.
 
 Chat-path check (`/` commands from the official client): the v10 `ct` frame carries the text,
 and the bridge now forwards it (section 3). With the 10.0.2 shape (`["ct", channel, text]`), the bridge before this change dropped every chat line
@@ -133,12 +133,12 @@ from the official client, so no `/` command reached `chat_commands.c` from there
 | third | devConsole.ts:1887 | ui_console.c:1608 | native | **fixed** (was missing) |
 | tpmesh | devConsole.ts:1893 | ui_console.c:1609 | native | **fixed** (was missing) |
 | show_navmeshes | devConsole.ts:1128 | ui_console.c `show_navmeshes`, nav_overlay.c | native | have |
-| ent_bbox | devConsole.ts:1392 | none | native | **missing** (remaining, see gaps) |
+| ent_bbox | devConsole.ts:1392 | ui_console.c `cmd_ent_bbox`; client/src/ent_bbox.c, ent_bbox_geom.c | native | **fixed** (52cb5ff1; run: ent_bbox_test, ent_bbox_e2e 7/7) |
 | maps | devConsole.ts:1962 (local) and the server switch | console forwards to the server `maps` | chat | have |
 
 Counted: 31 console-only names. The table also lists `ping`, `maps`, `status` and `serverinfo`,
-which section 1 counts. Have 26, fixed 4 (`resetbinds`, `reset_binds`, `third`, `tpmesh`),
-remaining 1 (`ent_bbox`).
+which section 1 counts. Have 27 (`ent_bbox` since 52cb5ff1), fixed 4 (`resetbinds`, `reset_binds`, `third`,
+`tpmesh`), remaining 0.
 
 Console forwarding: `ui_console.c:1736-1747` forwards only names it registers. Unregistered names
 are silent, so the four timer and class names above were also needed as `register_server` entries
@@ -177,7 +177,7 @@ are silent, so the four timer and class names above were also needed as `registe
 | Force offline sandbox | mods.ts:7-37, 410-420 | ui_mods.c (`MODS_KEY_FORCE_OFFLINE`) | native | have (read) |
 | Player list key (window 23) | mods.ts:484-517 | ui_controls.c:198 (`playerList`), 1360 | native | have (read) |
 | Show navmeshes | devConsole.ts:1128 | ui_console.c, nav_overlay.c | native | have (read) |
-| Entity bounding boxes (`ent_bbox`) | devConsole.ts:1392 and its overlay | none | native | **missing** (remaining) |
+| Entity bounding boxes (`ent_bbox`) | devConsole.ts:1392 and its overlay | client/src/ent_bbox.c (LineMaterial GL_LINES, depth test and fog off, rebuilt every frame), ent_bbox_geom.c (the movement code's own boxes: shared/src/player.c `player_movement_bounds` / `player_object_movement_bounds`) | native | have (52cb5ff1; run: ent_bbox_test, ent_bbox_e2e 7/7) |
 | F4 find new game | mods.ts:916-919 | ui_mod_keys.c:64-70 | native | have (read) |
 | F5 reload | mods.ts:920-922 | ui_controls.c (reload bind) | native | have (read) |
 | F6 editor, staging the current map | mods.ts:923-944 (`saveVal("mapToEdit", ...)`) | ui_mod_keys.c `stage_loaded_map`: the loaded map's JSON staged as `mapToEdit` the way v10.0.7's edMp stages one (s2c_ui.c `s2c_ui_stage_map_to_edit`: `col: false` / `l: false` dropped, deob-10.0.7.js:228218), then `editor.html`; the editor's checkEdit reads it first (editor_io.c `ed_map_restore`) | native | have (run: mod_keys_f6_e2e 10/10; the staged JSON is captured through KRUNKNATIVE_MAP_TO_EDIT_DUMP and checked: `col: false` / `l: false` dropped, a true col and l 0 kept) |
@@ -198,7 +198,7 @@ are silent, so the four timer and class names above were also needed as `registe
 | Bot worker (nextbot) | botWorker.ts | bots.c, bot_*.c | n/a | n/a: native bots |
 | Connect state | connectState.ts | ui_console.c `connect` | n/a | n/a: native connect |
 
-Counted: 30 rows. Have 19 (mod packs are partial), missing 1 (`ent_bbox`), moved 1 (F1), n/a 9.
+Counted: 30 rows. Have 20 (mod packs are partial; `ent_bbox` since 52cb5ff1), missing 0, moved 1 (F1), n/a 9.
 
 ## 5. Deviations kept on purpose (not gaps)
 
@@ -216,16 +216,28 @@ Counted: 30 rows. Have 19 (mod packs are partial), missing 1 (`ent_bbox`), moved
 Checked against v10.0.7 (`Krunker_v10.0.7/deob/game.deob.js`). v10.0.7 has no developer console, no chat
 command list, no F6 key and no `ent_bbox`; its only `mapToEdit` writer is the server's EDIT_MAP ("edMp",
 deob-10.0.7.js:228218; the `saveVal("mapToEdit", ...)` at :228227). So none of these rows is a v10.0.7 parity gap:
-the two left are v7.1.4 mod features. Re-checked on 2026-11-23: `ent_bbox` has no match; 'F6' appears only in the
+the two that were left (`xp` / `kr`, `ent_bbox`) are v7.1.4 mod features, both done on 2026-11-24 (2219b7d1,
+52cb5ff1). Re-checked on 2026-11-23 and again on 2026-11-24: `ent_bbox` has no match; 'F6' appears only in the
 key-name table at :23738 (keybind labels), with no handler; the one `giveKR` (:187064) is the map scripts'
 `PAYMENTS.giveKR` (a script pays a player from the map's `krRewards`), not a developer grant, and KN's map
 script API carries it on its own.
 
 | Gap | v10.0.7 | Why not done here | What it needs |
 |---|---|---|---|
-| `xp`, `kr` (chat, dev: add XP / KR to the own account) | not in v10.0.7 (v7.1.4 `server/index.ts` only) | ChatCommandHost has no grant callback; the account economy lives in kn_brain | a brain route for a dev grant, then a host callback like `kpd_officer` |
-| `ent_bbox` (console overlay of movement boxes) | not in v10.0.7 (v7.1.4 `devConsole.ts` only) | client renderer work (a debug overlay like nav_overlay.c, with its own headless test) | a line overlay for player and object boxes; its own e2e |
+| `xp`, `kr` (chat, dev: add XP / KR to the own account) | not in v10.0.7 (v7.1.4 `server/index.ts` only) | **done** (2219b7d1): kn_brain op `dev_grant` (db_accounts.c `run_dev_grant`) and the ChatCommandHost callback `dev_grant` (net.c, accounts.c `accounts_dev_grant`), like `kpd_officer`. v7's `requireHostOrDev` gate stays (CHAT_PERM_HOST_DEV); the brain then grants only to a developer account and only to itself, so an ordinary player and a custom host who is not a developer change nothing. No purchase or payment path. Run: target_select_test (gate, usage, console, no service), brain_dev_grant (PostgreSQL), brain_dev_grant_sqlite, brain_dev_grant_mysql, brain_dev_grant_e2e (the chat path through server_bin, 23/23) | nothing |
+| `ent_bbox` (console overlay of movement boxes) | not in v10.0.7 (v7.1.4 `devConsole.ts` only) | **done** (52cb5ff1): client/src/ent_bbox.c draws the movement boxes (own box in third person only, other players, solid objects, walk-through volumes) as a line overlay like nav_overlay.c. Run: ent_bbox_test (the boxes are the movement code's), ent_bbox_e2e 7/7 (headless sandbox client: on, off, third person) | nothing |
 | F6 stages the current map (`mapToEdit`) | no F6 in v10.0.7 | **done**: F6 already staged the loaded map (mod_keys_f6_e2e 4 and 5); it now stages it through edMp's own staging (`col: false` / `l: false` dropped), so the editor gets the same JSON either way | nothing |
+
+## Changes on 2026-11-24
+
+- `xp`, `kr` (2219b7d1): `shared/src/chat_commands.c` `cmd_grant`, `shared/include/chat_commands.h`
+  (`dev_grant` callback), `server/src/net.c`, `server/src/accounts.c` `accounts_dev_grant`,
+  `services/brain/db_accounts.c` `run_dev_grant` / `services/brain/accounts.c` op `dev_grant`, the console's
+  `register_server` rows; tests `target_select_test` (now CTest-registered), `brain_dev_grant(_sqlite, _mysql)`,
+  `brain_dev_grant_e2e`.
+- `ent_bbox` (52cb5ff1): `client/src/ent_bbox.c`, `client/src/ent_bbox_geom.c`,
+  `shared/src/player.c` `player_movement_bounds` / `player_object_movement_bounds`, the console command;
+  tests `ent_bbox_test`, `ent_bbox_e2e`.
 
 ## Changes in this pass
 
