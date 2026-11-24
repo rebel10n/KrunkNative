@@ -42,7 +42,10 @@ static Ctx *ctx_new(const char *label, int64_t a, int64_t b) {
 
 static const char *me_str(const SocialSession *s, char buf[24]) { return social_viewer(s, buf); }
 
-static int text_ok(const char *t, int max) { return t && *t && (int) strlen(t) <= max; }
+/* a message the box can hold: non-empty, at most max characters (JS length), not max bytes */
+static int text_ok(const char *t, int max) {
+    return t && *t && max > 0 && brain_utf16_prefix(t, (size_t) max) == strlen(t);
+}
 
 /* Error (DB refusal or failure) as an io_po error popup. */
 static void popup_error_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -379,7 +382,7 @@ void sh_chat_send(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
     const char *txt = fa_str(f, 2);
     const int64_t peer = fa_int(f, 1, 0);
-    if (!text_ok(txt, g_acct.chat_max_len > 0 ? g_acct.chat_max_len : 300) || peer <= 0 || peer == s->account_id) {
+    if (!text_ok(txt, g_acct.chat_max_len > 0 ? g_acct.chat_max_len : 512) || peer <= 0 || peer == s->account_id) {
         social_send_n(s, "chf", 2, cJSON_CreateFalse(), cJSON_CreateString("Message not Sent"));
         return;
     }

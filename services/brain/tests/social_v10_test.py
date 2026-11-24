@@ -340,6 +340,14 @@ async def scenario(names):
     q("UPDATE feature_bans SET revoked_at = ? WHERE account_id = ?", "2000-01-01 00:00:00", a_id)
     await A.send(["eb", {"type": "msg:send", "to": b_id, "text": "unbanned hello"}])
     check(await A.eb("msg:sent") is not None, "chat ban revoked: msg:send goes through again")
+    note = "é" * 400
+    await A.send(["ict", b_id, note])
+    f = await A.recv_until(lambda f: f[0] == "chf")
+    row = q("SELECT body FROM chat_messages WHERE sender_id = ? ORDER BY id DESC LIMIT 1", a_id)
+    check(f and f[1] is True and row and row[0][0] == note, "a hub chat of 400 characters is kept (deob-10.0.7.js:142979)")
+    await A.send(["ict", b_id, "a" * 513])
+    f = await A.recv_until(lambda f: f[0] == "chf")
+    check(f and f[1] is False, "a hub chat past 512 characters is refused")
 
     # --- search
     st, r = await C.gapi("GET", "/players/search?q=%s&limit=20" % an[:6])

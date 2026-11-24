@@ -4729,7 +4729,7 @@ static cJSON *g_chat_list; // we: the open thread, newest first (owned)
 static int g_chat_peer;    // ve.id
 static char g_chat_peer_name[64]; // ve.name: startChat's name, the incoming lines' sender
 static int g_chat_pending; // he != null
-static char g_chat_pending_txt[320];
+static char g_chat_pending_txt[4096];
 
 // The signed-in chat sidebar (hub-10.0.7.js:2201-2207): the Friends button, then the friends' bubbles ("chtb", the
 // brain's mutual follows with presence). The friends list is kept for showFriends / removeFriend.
@@ -5690,7 +5690,7 @@ H(h_close_chat) {
 // sendChat(): io.send("ict", ve.id, text)
 H(h_send_chat) {
     UNUSED;
-    char text[320] = "";
+    char text[4096] = ""; /* #chatBoxInput has no maxlength; the message box keeps 512 characters */
     const HtmlElem in = el("chatBoxInput");
     if (in) html_dom_get_value(in, text, sizeof(text));
     if (g_chat_pending || !g_hub.logged_in || !text[0]) return 1;

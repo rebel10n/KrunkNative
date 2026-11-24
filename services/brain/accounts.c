@@ -100,7 +100,7 @@ void acct_config_load(Brain *b) {
     c->clan_max_members = cfg_int(cfg, "clan_max_members", 0);
     c->post_max_len = cfg_int(cfg, "post_max_len", 1024);
     c->comment_max_len = cfg_int(cfg, "comment_max_len", 500);
-    c->chat_max_len = cfg_int(cfg, "chat_max_len", 300);
+    c->chat_max_len = cfg_int(cfg, "chat_max_len", 512); /* the message box maxlength (deob-10.0.7.js:142979) */
     c->page_size = cfg_int(cfg, "page_size", 100);
     if (c->name_min < 1) c->name_min = 1;
     if (c->name_max < c->name_min || c->name_max > 32) c->name_max = c->name_max > 32 ? 32 : c->name_min;
