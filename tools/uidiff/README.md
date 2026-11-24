@@ -834,3 +834,23 @@ network, as `remote_images.c`), and no scenario log of the final run shows the r
 **Left**: `boot-curtain-350` instructions (0.97 %, max 0.5, KN-own reference: nothing new);
 `item-selection` back / home are skipped regions (2.53 / 2.16 %, max 2).
 
+### Boot-curtain instructions use the Chromium frame (2026-11-24)
+
+A full four-shard run of main 0e13cda9 at `UIDIFF_FUZZ_SCALE=1.67` gave **847 passed / 7 failed /
+89 skipped** of 943 regions. Besides this boot region, the six failures were the KN-only Account
+Connections and Editor AI panels, left to the separate scroller work.
+
+`boot-curtain-350` was still a standalone KN-own baseline. Its `boot: true` re-armed an already
+booted page and `after_ms` then captured #instructions' independent `grow` animation at a different
+phase from the curtain: its text ink was at x 536..740 with mean coverage 185, while Chromium's real
+INIT + 350 ms frame has x 534..742 and mean 168. The native `seq-boot-curtain` render at INIT + 350
+ms has Chromium's same bounds (x 534..742, y 284..311) and mean 166; the old baseline was not a
+parity oracle for the text.
+
+The standalone scenario is now that real one-frame INIT sequence, with the checker's scene and the
+existing Chromium `sequences/boot-curtain/350.png` reference. No reference image changed. At normal
+fuzz, its scene is 0.000 % and instructions 0.893 % (text fuzz 12, max 4, as the grow sequence);
+`seq-boot-curtain` is also 10 / 10, with the curtain crossing at 353.7 ms in both reference and render
+(timing delta 0.0 ms). The four-shard run after the migration is **848 / 6 / 89**: this instructions
+region is the only outcome that changed, and no region went from pass to fail.
+

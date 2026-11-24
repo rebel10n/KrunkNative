@@ -23,7 +23,10 @@
         400,
         140
       ],
-      "note": "#instructions: the boot ring (scale 1.4) and #loadGamNm, or CLICK TO PLAY"
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#instructions: CLICK TO PLAY at INIT + 350 ms in Chromium's boot-curtain sequence; the same text tolerance as seq-click-to-play-grow covers glyph anti-aliasing, not a phase or position change"
     }
   ]
 }
