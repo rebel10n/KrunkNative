@@ -36,8 +36,7 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "skip": true,
-      "note": "Time Survived: differs per run"
+      "note": "Time Survived: 4s from the scenario's fixed killcard stats"
     },
     {
       "name": "death-stats",

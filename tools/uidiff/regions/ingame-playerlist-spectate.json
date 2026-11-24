@@ -35,8 +35,7 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "skip": true,
-      "note": "v10's browser sandbox appends its Developer Tools here (isSandbox); not part of a lobby's list"
+      "note": "Below the player rows: the current Chromium sandbox reference is empty here too; guards against an unintended tools row"
     }
   ]
 }

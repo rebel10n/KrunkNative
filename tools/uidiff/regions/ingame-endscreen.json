@@ -11,7 +11,6 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "skip": true,
       "note": "`#1 VICTORY` (vicTitle)"
     },
     {
