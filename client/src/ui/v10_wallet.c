@@ -1,6 +1,6 @@
 // Krunker v10.0.2's Wallet and Inventory modal (_52368, v10:145475-145480; the template _52366, the
-// stylesheet in ui/css/svelte.css, named svelte-l0gwpc in 10.0.2 and svelte-1wcm5z8 since v10.0.7, deob-10.0.7.js:147378-147412,
-// whose bulk-select / lock rules live in ui/css/main.css). The header's Wallet item (v10's _52516, the
+// stylesheet in ui/css/svelte.css, named svelte-l0gwpc in 10.0.2 and svelte-1wcm5z8 since v10.0.7, deob-10.0.7.js:147378-147412;
+// svelte.css carries the v10.0.7 block (:147437) with its lock and bulk-select rules). The header's Wallet item (v10's _52516, the
 // backpack in #signedInHeaderBar, v10_menu.c) pushes it: a 1600 x 860 dialog on the view stack
 // (_5235(...).push()) with
 //   - the popup header (svelte-4fhlo6: the backpack icon, "Inventory", and the Catalog button in
