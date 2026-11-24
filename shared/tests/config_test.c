@@ -270,13 +270,15 @@ static void test_validate(void) {
 }
 
 static void test_inputs_and_merge(void) {
-    printf("input names (v7 bug fixed), server.cfg merge...\n");
+    printf("input names (sanitizeStr, as applyConfig stores it), server.cfg merge...\n");
     GameConfig g = g_default_game_config;
-    cJSON *cfg = cJSON_Parse("{\"nameTeam1\":\"<b>Hi</b>\",\"nameTeam2\":\"A very long team name here\",\"nameTeam3\":\"ok-name|x\"}");
+    cJSON *cfg = cJSON_Parse("{\"nameTeam1\":\"<b>Hi</b>\",\"nameTeam2\":\"A very long team name here\",\"nameTeam3\":\"ok-name|x\",\"nameTeam4\":\"\",\"nameTeam5\":\"Caf\\u00e9 #1\"}");
     game_config_read(&g, cfg, GAME_CONFIG_CLAMP_HOSTED, GAME_HOST_CUSTOM);
-    CHECK(!strcmp(g.team_names[1], "Alpha"), "a name with '/' after sanitizeStr falls back (%s)", g.team_names[1]);
-    CHECK(!strcmp(g.team_names[2], "A very long team"), "cut to 16 characters (%s)", g.team_names[2]);
+    CHECK(!strcmp(g.team_names[1], "bHi/b"), "sanitizeStr keeps the slash (%s)", g.team_names[1]);
+    CHECK(!strcmp(g.team_names[2], "A very long team name here"), "a long name is not cut to 16 (%s)", g.team_names[2]);
     CHECK(!strcmp(g.team_names[3], "ok-name|x") && g.team1_name == g.team_names[1] && !strcmp(g.team2_name, g.team_names[2]), "team names (%s)", g.team_names[3]);
+    CHECK(!strcmp(g.team_names[4], "Delta"), "an empty name is the default (%s)", g.team_names[4]);
+    CHECK(!strcmp(g.team_names[5], "Caf #1"), "non-ASCII is dropped, the rest kept (%s)", g.team_names[5]);
     cJSON_Delete(cfg);
 
     g = g_default_game_config;

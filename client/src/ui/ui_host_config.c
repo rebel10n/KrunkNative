@@ -729,10 +729,12 @@ cJSON *ui_host_config_collect(const int host_type, char *err, const size_t err_s
         snprintf(id, sizeof(id), "customS%s", o->var);
         if (o->kind == GC_BOOL) {
             cJSON_AddBoolToObject(request, o->var, checked(id));
-        } else if (!value_of(id, text, sizeof(text))) {
-            if (o->kind != GC_INPUT) cJSON_AddNumberToObject(request, o->var, o->def); // v7: the def when the row is missing
         } else if (o->kind == GC_INPUT) {
-            cJSON_AddStringToObject(request, o->var, text);
+            /* the server stores sanitizeStr, not a 16-character cut (deob-10.0.7.js applyConfig) */
+            char input[GAME_CONFIG_NAME_MAX + 1];
+            if (value_of(id, input, sizeof(input))) cJSON_AddStringToObject(request, o->var, input);
+        } else if (!value_of(id, text, sizeof(text))) {
+            cJSON_AddNumberToObject(request, o->var, o->def); // v7: the def when the row is missing
         } else if (o->kind == GC_SELECT) {
             const int index = atoi(text);
             cJSON_AddNumberToObject(request, o->var, index >= 0 && index < o->option_count ? index : (int) o->def);

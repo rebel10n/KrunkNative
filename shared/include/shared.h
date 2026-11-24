@@ -1776,6 +1776,9 @@ int player_can_damage(const Player *dealer, const Player *victim); // teams, fri
 #define GAME_CONFIG_V7 1
 #define GAME_CONFIG_HAS_LOG_TIME 1      // log_time / last_checkpoint_time (map-B)
 #define GAME_CONFIG_TEAMS 6             // team 0 + config.teamLimit (5) teams
+/* applyConfig stores sanitizeStr and never writes the 16-character cut back
+   (deob-10.0.7.js, the serverConfig input branch). The host form reads this many. */
+#define GAME_CONFIG_NAME_MAX 127
 #define GAME_CONFIG_CLASS_LIMITS CLASS_COUNT // classLim0..15 (one per v10 class), config.classes
 
 typedef struct {
@@ -1862,7 +1865,7 @@ typedef struct {
     // clan) as a host option of team modes: team 1 = clan A, team 2 = clan B, everyone else
     // spectates. Empty tags: the first two clans to join claim the teams (server/src/accounts.c).
     unsigned char clan_war;
-    char clan_war_tags[2][17];
+    char clan_war_tags[2][GAME_CONFIG_NAME_MAX + 1];
     int spec_slots;                   // specSlots 0..4 (2)
     int team_size;                    // tmSize: select 0..3 = 1v1..4v4 (3)
     unsigned char no_cosmetics;       // noCosm (comp 1)
@@ -1874,7 +1877,7 @@ typedef struct {
     int class_limits[GAME_CONFIG_CLASS_LIMITS]; // classLim0..15 0..20 (comp: 1 for config.rankedClasses)
     // nameTeam1..5 / t1Dmg..t5Dmg by team ([0] unused). team1_name / team2_name point at [1] / [2]
     // and team1_damage / team2_damage equal [1] / [2] (game_config.c and game_configure keep them so).
-    char team_names[GAME_CONFIG_TEAMS][17];
+    char team_names[GAME_CONFIG_TEAMS][GAME_CONFIG_NAME_MAX + 1];
     float team_damage[GAME_CONFIG_TEAMS];
     // config.classes: the classes a player may pick, classes[0] the fallback (setClass). 0 = every
     // class (v7 resetClasses).

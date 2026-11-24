@@ -7,9 +7,9 @@
 // init's tally :3398-3424, endGame's mts :4623-4660, getPossibleMatches / genMatchList :5068-5133).
 //
 // v7 bugs fixed here (decisions.md "v7 bugs"), each one also noted where it applies:
-//   - serverConfig "input" values: v7 assigns sanitizeStr(value) before its character / length
-//     checks, so they never apply. Here an invalid name falls back to the default and a long one
-//     is cut to 16 characters, as the code intends.
+//   - serverConfig "input" values: applyConfig assigns sanitizeStr(value), then runs the character
+//     test and the 16-character cut on a local it never stores (deob-10.0.7.js, still). The stored
+//     name is sanitizeStr. Weapon / class / effect inputs are the path whose checks do apply.
 //   - validateCustomConfig's "Too much data" test measures `obj + ""` ("[object Object]"), so it
 //     never fires. Here it measures the JSON text.
 //   - setupGameConfig writes into the hostTypes' overDat / forceDat objects (shared config.js
@@ -600,7 +600,8 @@ static double gc_load_number(const GameConfig *g, const GameConfigOption *o) {
 static void gc_store_string(GameConfig *g, const GameConfigOption *o, const char *s) {
     if (o->store != GC_STORE_STR) return;
     char *field = (char *) g + o->offset;
-    snprintf(field, 17, "%s", s ? s : "");
+    /* every GC_STORE_STR field is GAME_CONFIG_NAME_MAX + 1 (team names, clan tags) */
+    snprintf(field, GAME_CONFIG_NAME_MAX + 1, "%s", s ? s : "");
 }
 
 static float gc_max_for(const GameConfigOption *o, const int clamp) {
@@ -626,11 +627,13 @@ static void gc_read_option(GameConfig *g, const GameConfigOption *o, const cJSON
             gc_store_number(g, o, item ? gc_truthy(item) : gc_default(o, comp));
             break;
         case GC_INPUT: {
-            // v7 bug fixed: the character / length checks run on the stored value
-            char clean[64] = "";
-            if (cJSON_IsString(item) && item->valuestring && item->valuestring[0]) gc_sanitize(clean, sizeof(clean), item->valuestring);
-            if (!clean[0] || !gc_name_ok(clean, (int) sizeof(clean))) snprintf(clean, sizeof(clean), "%s", o->def_str ? o->def_str : "");
-            clean[16] = 0; // ≤ 16 characters
+            /* deob-10.0.7.js applyConfig: config[varN] = sanitizeStr(value). A non-string or ""
+               is the default first. The charset test and substring(0, 16) then change a local
+               and are never written back, so "Red/Blue" and a long name are kept. */
+            char clean[GAME_CONFIG_NAME_MAX + 1];
+            const int is_str = cJSON_IsString(item) && item->valuestring && item->valuestring[0];
+            const char *src = is_str ? item->valuestring : (o->def_str ? o->def_str : "");
+            gc_sanitize(clean, sizeof(clean), src);
             gc_store_string(g, o, clean);
             break;
         }
