@@ -153,7 +153,8 @@ const char *acct_validate_password(const char *pass) {
         snprintf(msg, sizeof msg, "Password must be \xE2\x89\xA5 %d characters.", g_acct.pass_min);
         return msg;
     }
-    if ((int) strlen(pass) > g_acct.pass_max) return "Password is too long.";
+    /* the same characters as the minimum: one accented letter is one, not two bytes */
+    if (utf8_len(pass) > g_acct.pass_max) return "Password is too long.";
     return NULL;
 }
 
@@ -705,7 +706,7 @@ void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
             auth_fail(c, "Invalid credentials.");
             return;
         }
-        if ((int) strlen(rq->pass) > g_acct.pass_max) {
+        if (utf8_len(rq->pass) > g_acct.pass_max) {
             auth_fail(c, "Invalid login.");
             return;
         }

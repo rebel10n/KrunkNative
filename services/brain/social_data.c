@@ -709,12 +709,18 @@ void sh_alias(SocialSession *s, const cJSON *f) {
     else acct_set_alias(s->account_id, fa_str(f, 1), op_wait_done, w);
 }
 
+static int pw_chars(const char *s) {
+    int n = 0;
+    for (; s && *s; s++) n += ((unsigned char) *s & 0xC0) != 0x80;
+    return n;
+}
+
 /* v10.0.3's Account Security: "You can update your password every 30 minutes" (deob-10.0.3.js:247680) */
 #define PASSWORD_CHANGE_EVERY_MS (30 * 60 * 1000)
 
 typedef struct PasswordReq {
     int has_old;              /* 0: the v10.0.3 shape (the session's proof) */
-    char old_pass[128], new_pass[128];
+    char old_pass[401], new_pass[401]; /* password_max characters, each up to 4 bytes */
 } PasswordReq;
 
 static void password_clock_done(SocialSession *s, kn_db_result *res, void *extra) {
@@ -755,7 +761,10 @@ void sh_password(SocialSession *s, const cJSON *f) {
         social_send_n(s, "upp", 1, cJSON_CreateString("Incorrect current password."));
         return;
     }
-    if (strlen(nw) >= sizeof(((PasswordReq *) 0)->new_pass) || (!v10 && strlen(fa_str(f, 1)) >= sizeof(((PasswordReq *) 0)->old_pass))) {
+    /* counted in characters, as acct_validate_password does, not in bytes */
+    if (pw_chars(nw) > g_acct.pass_max || strlen(nw) >= sizeof(((PasswordReq *) 0)->new_pass) ||
+        (!v10 && fa_str(f, 1) && (pw_chars(fa_str(f, 1)) > g_acct.pass_max ||
+                                  strlen(fa_str(f, 1)) >= sizeof(((PasswordReq *) 0)->old_pass)))) {
         social_send_n(s, "upp", 1, cJSON_CreateString("Password is too long."));
         return;
     }

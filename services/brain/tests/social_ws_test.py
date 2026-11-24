@@ -18,6 +18,7 @@ import json
 import os
 import re
 import socket
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -246,6 +247,7 @@ FAILS = []
 
 
 ROOT = "."  # the repository root (argv[2]): assets/skins.json for the wheel checks
+SQL_EXEC = None  # one statement on the test database, set by main
 
 
 def check(cond, what):
@@ -275,6 +277,11 @@ async def scenario(base, internal_url, secret):
         check(r[1] == "Username may only contain letters, digits, and underscores.", "bad chars rejected")
         r = await a.call("a", "a", 0, [alice, "123", 0], "captcha")
         check(r[1] == "Password must be ≥ 6 characters.", "short password rejected: %r" % r[1])
+        accented = "é" * 60
+        r = await a.call("a", "a", 0, ["pwe" + stamp, accented, 0], "captcha")
+        check(r[1] is None, "a 60-character password is 60 characters, not 120 bytes: %r" % r[1])
+        r = await a.call("a", "a", 0, ["pwx" + stamp, "é" * 101, 0], "captcha")
+        check(r[1] == "Password is too long.", "101 characters is too long: %r" % r[1])
 
         r = await a.call("a", "a", 0, [alice, "hunter22", 0], "captcha")
         check(r[1] is None and isinstance(r[2], int) and r[3] == alice, "register ok: %r" % r[1:4])
@@ -285,6 +292,10 @@ async def scenario(base, internal_url, secret):
 
         r = await a.call("a", "a", 0, [alice.upper(), "hunter22", 0], "captcha")
         check(r[1] == "Username already taken.", "duplicate name (case-insensitive) rejected")
+
+    async with Social(ws_url) as a:
+        r = await a.call("a", "a", 1, ["pwe" + stamp, accented, None], "captcha")
+        check(r[1] is None, "login with a 60-character password: %r" % r[1])
 
     async with Social(ws_url) as a:
         r = await a.call("a", "a", 1, [alice, "wrongpass", None], "captcha")
@@ -347,7 +358,9 @@ async def scenario(base, internal_url, secret):
         r = await b.call("spR", "sp", alice[:4], "c")
         check(r[1] and any(x["player_name"] == alice for x in r[1]), "player search")
 
-        # feed
+        # feed. A hub post needs level 10 (deob-10.0.7.js errors.social.levelTooLow).
+        if SQL_EXEC:
+            SQL_EXEC("UPDATE players SET player_score = 2000000 WHERE player_id IN (%d, %d)" % (int(bob_id), int(alice_id)))
         r = await b.call("psr", "ps", {"txt": "<b>hello</b> krunker"})
         check(r[1] == 1, "post created")
         r = await b.call("0", "r", "feed", None, bob_id, bob, None, 0)
@@ -457,6 +470,10 @@ async def scenario(base, internal_url, secret):
             await b.call("chtb", "chtb")
             r = await b.call("chtl", "ctd", alice_id)
             check(r[1][0]["txt"] == "hey bob", "chat thread")
+
+    # the hub posts needed level 10; the stats commit below expects a fresh account
+    if SQL_EXEC:
+        SQL_EXEC("UPDATE players SET player_score = 0 WHERE player_id IN (%d, %d)" % (int(bob_id), int(alice_id)))
 
     # game server side (internal WS); alice's JSON menu socket sees the live update
     async with Internal(internal_url, secret) as g, Social(ws_url, json_mode=True) as menu:
@@ -874,7 +891,7 @@ def main():
     if len(sys.argv) < 3:
         print(__doc__)
         return 2
-    global ROOT
+    global ROOT, SQL_EXEC
     brain, root = sys.argv[1], os.path.abspath(sys.argv[2])
     ROOT = root
     with open(os.environ.get("KN_TEST_CONFIG", os.path.join(root, "config", "config.json"))) as fp:  # the database credentials
@@ -904,6 +921,22 @@ def main():
             return r.returncode
         dbcfg = json.loads(r.stdout)
         drop_db = lambda: subprocess.run(scratch + ["drop", driver, schema], capture_output=True)
+
+    if driver == "postgres":
+        def _sql(text, _psql=psql, _env=env, _schema=schema):
+            subprocess.run(_psql + ["-c", "SET search_path TO %s; %s" % (_schema, text)],
+                           env=_env, check=True, capture_output=True, text=True)
+        SQL_EXEC = _sql
+    elif dbcfg.get("path"):
+        _path = dbcfg["path"]
+        def _sql(text, path=_path):
+            con = sqlite3.connect(path, timeout=30)
+            try:
+                con.execute(text)
+                con.commit()
+            finally:
+                con.close()
+        SQL_EXEC = _sql
 
     secret = "test-secret-" + str(os.getpid())
     cfg = {
