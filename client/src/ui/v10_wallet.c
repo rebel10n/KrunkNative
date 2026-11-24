@@ -8,34 +8,31 @@
 //   - the currency cards (_52362, the currencies grid): Krunkies (KR, #fbc02d), Junk (JNK, the
 //     plumbing icon, #cc51f8, two decimals) and Ranked Points (RP, emoji_events, #4caf50). Their
 //     taps do nothing in v10 (_52382 is empty)
-//   - the owned skins (_52374: the account's inventory, data slot 10, each row {ind, cnt} is one
-//     tile here): the market card at 128 px (_36396), a tap opens the item page (_35204 in v10),
-//     the Quick Sell button top right (.quick-sell-icon, on hover in v10: always drawn here), the
-//     spin ticket's Redeem top left (.spin-ticket-icon: prizeWheel(0, skin), as v10_daily_spin.c)
-//     and the "×N" stack badge (.is-stack, the stack shadow); 60 tiles per page, then "Load More"
-//     (v10's IntersectionObserver sentinel, _52410 / _52438, is a button on the market's grids too)
-//   - the empty state (_52365)
+//   - the owned skins (the account's inventory): one tile per stack and one per copy (instance id),
+//     the market card at 128 px. A tap opens viewItem. Not in select mode, a tile also has the lock
+//     (.lock-toggle, top right under Quick Sell), then exactly one of Paint (paintTargets and an
+//     instance), Style (styles and an instance, the paint button's else) or Redeem (a type-13 ticket
+//     with spinWheel or spinWheelId and a count), and Quick Sell when the item can be sold or
+//     destroyed and the unit is not locked (deob-10.0.7.js:169669-169765). The "×N" stack badge
+//     (.is-stack) and 60 tiles per page, then "Load More" (v10's IntersectionObserver sentinel is a
+//     button here, as on the market's grids)
+//   - the empty state
 // Escape and a click on the backdrop close it (the view stack's own handlers); the modal leaves the
 // stack when the account changes (v10's $account effect, the Svelte component unmounting).
 //
-// The Quick Sell and the item page are the market's own views (v10_market.c
-// v10_market_wallet_sell / v10_market_wallet_item): pushed over the wallet, with the exchange closed.
+// Quick Sell is the market's own view (v10_market.c v10_market_wallet_sell): a stack sells by its
+// store index, a copy by its instance id. Paint and Style open the same pickers as the market grid.
 //
-// Differences from v10, because KrunkNative's account has less than v10's:
-//   - the owned list is the account's stacks: one tile per {ind, cnt} row (no per-copy instance
-//     ids, no stackable flag, so no grouped stacks, no "in-group" collapse, no paint or style icons:
-//     KrunkNative has no paint or style editor, and no instance ids to paint)
-//   - the filter bar (_45793: search, rarity / weapon / type / wear / season filters, sort, the
-//     "Group by wear" and paintable options) is not built; the grid keeps the account's order
-//   - the item tap opens v10's item popup (viewItem), not the Catalog page
-//   - Quick Sell is offered on every owned tile: the market's view says "Destroy Item" where the
-//     item has no KR value (its inventory row decides, as the market's own grid)
+// Not built: the filter bar (search, rarity / weapon / type / wear / season, sort, "Group by wear")
+// and the expanded-stack collapse (in-group / stack-collapse-fab). The grid keeps inventory order.
 #include <v10_wallet.h>
 #include <v10_ui.h>
 #include <kio_inventory.h>
 #include <kio_store.h>
 #include <market_bulk.h>
 #include <v10_bulk.h> // the bulk quick-sell confirm (deob-10.0.4.js:146908-147037)
+#include <paint_picker.h> // a copy's Paint button (paintTargets && instanceId, deob-10.0.7.js:169713-169722)
+#include <style_picker.h> // a copy's Style button, the paint button's else (styles && instanceId, :169725-169733)
 #include <inv_source.h> // the active account's inventory: krunker.io's (kio_inventory) or Box Office's (bo_inventory)
 #include <backend_ui.h>
 #include <i18n.h>
@@ -81,29 +78,9 @@ static char W_inv_err[160];
 
 static const AccountInfo *account(void) { return active_account(); }
 
-// the owned stacks: data slot 10's rows whose skin exists (v10's skins.map(...).filter(Boolean))
-typedef struct {
-    int index;
-    int count;
-    const ViewerSkin *skin;
-} WalletStack;
-
 static int copies_of(const cJSON *e) {
     const cJSON *cnt = cJSON_GetObjectItem(e, "cnt");
     return cJSON_IsNumber(cnt) ? cnt->valueint : 1;
-}
-
-static int stacks_of(const AccountInfo *a, WalletStack *out, const int cap) {
-    const cJSON *skins = a && a->data ? cJSON_GetArrayItem(a->data, 10) : NULL, *e;
-    int n = 0;
-    cJSON_ArrayForEach(e, skins) {
-        const cJSON *ind = cJSON_GetObjectItem(e, "ind");
-        if (!cJSON_IsNumber(ind)) continue;
-        const ViewerSkin *k = viewer_skin(ind->valueint);
-        if (!k || n >= cap) continue;
-        out[n++] = (WalletStack) {ind->valueint, copies_of(e), k};
-    }
-    return n;
 }
 
 static int stack_total(const AccountInfo *a) {
@@ -178,31 +155,7 @@ static void currencies(StrBuf *sb, const AccountInfo *a) {
     sb_append(sb, "</div>");
 }
 
-// one owned stack: the market card, then v10's overlay buttons (.wallet-item's children)
-static void tile(StrBuf *sb, const WalletStack *s) {
-    char onclick[64];
-    snprintf(onclick, sizeof(onclick), "knV10WalletItem(%d)", s->index);
-    sb_appendf(sb, "<div class=\"wallet-item svelte-1wcm5z8%s\">", s->count > 1 ? " is-stack" : "");
-    v10_market_card(sb, s->index, 128, 128, "top-center", onclick, NULL);
-    if (s->skin->type == 13) { // a spin ticket: Redeem (v10's spin-ticket-icon, _52335)
-        char label[160];
-        snprintf(label, sizeof(label), "%s %s", I18N("kn.wallet.redeem", "Redeem"), s->skin->name ? s->skin->name : "");
-        sb_appendf(sb, "<button type=\"button\" class=\"spin-ticket-icon svelte-1wcm5z8\" aria-label=\"");
-        sb_append_esc(sb, label);
-        sb_appendf(sb, "\" onclick=\"playSelect(0.1),knV10WalletRedeem(%d)\"><i class=\"material-icons svelte-1wcm5z8\">casino</i></button>", s->index);
-    }
-    {
-        char label[160];
-        snprintf(label, sizeof(label), "%s %s", I18N("kn.wallet.quickSell", "Quick sell"), s->skin->name ? s->skin->name : "");
-        sb_append(sb, "<button type=\"button\" class=\"quick-sell-icon svelte-1wcm5z8\" aria-label=\"");
-        sb_append_esc(sb, label);
-        sb_appendf(sb, "\" onclick=\"playSelect(0.1),knV10WalletSell(%d)\"><i class=\"material-icons svelte-1wcm5z8\">sell</i></button>", s->index);
-    }
-    if (s->count > 1) sb_appendf(sb, "<div class=\"stack-badge svelte-1wcm5z8\" aria-hidden=\"true\">\xc3\x97%d</div>", s->count);
-    sb_append(sb, "</div>");
-}
-
-// ---------------------------------------------------------------- the krunker.io inventory (kio_inventory.h)
+// ---------------------------------------------------------------- the inventory (kio_inventory.h / bo_inventory.h)
 
 // ---- the Keep options (iíiiììi, deob-10.0.4.js:108967-108975; localStorage "bulkSellKeep", :147278-147287, :147309-147313)
 
@@ -244,8 +197,59 @@ static int picked_row(const MarketGroup *g, const int copy) {
     return 0;
 }
 
-// one row of the official inventory: a stack (copy -1, with its count) or one copy. Its lock and, in select
-// mode, its pick name the official ids (gi = the group, copy = the copy or -1 for the stack).
+// spinWheel is truthy, or spinWheelId is present (0 counts): v10's Redeem gate (deob-10.0.7.js:169737-169738)
+static int ticket_has_wheel(const int index) {
+    const cJSON *j = ui_loadout_skin_json(index);
+    const cJSON *wheel = cJSON_GetObjectItemCaseSensitive(j, "spinWheel");
+    if (wheel && !cJSON_IsNull(wheel) && !cJSON_IsFalse(wheel) && !(cJSON_IsNumber(wheel) && wheel->valuedouble == 0.0) &&
+        !(cJSON_IsString(wheel) && !wheel->valuestring[0]))
+        return 1;
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(j, "spinWheelId");
+    return id && !cJSON_IsNull(id);
+}
+
+static void aria_icon(StrBuf *sb, const char *cls, const char *label, const char *onclick, const char *icon) {
+    sb_appendf(sb, "<button type=\"button\" class=\"%s svelte-1wcm5z8\" aria-label=\"", cls);
+    sb_append_esc(sb, label);
+    sb_appendf(sb, "\" onclick=\"%s\"><i class=\"material-icons svelte-1wcm5z8\">%s</i></button>", onclick, icon);
+}
+
+// Not in select mode (deob-10.0.7.js:169669-169765): the lock, then Paint or else Style or else Redeem, and Quick Sell
+// when the unit can be sold or destroyed and is not locked. A stack has no instance, so no Paint or Style.
+static void wallet_actions(StrBuf *sb, const MarketGroup *g, const int gi, const int copy, const int locked) {
+    const ViewerSkin *k = viewer_skin(g->item);
+    const int instance = copy >= 0 ? g->instances[copy] : 0;
+    const int count = copy < 0 ? g->stack_max : 1;
+    const char *name = k && k->name ? k->name : "";
+    char label[160], click[96];
+    sb_appendf(sb, "<button type=\"button\" class=\"lock-toggle svelte-1wcm5z8%s\" onclick=\"knV10WalletLock(%d,%d)\" aria-label=\"",
+               locked ? " is-locked" : "", gi, copy);
+    sb_append_esc(sb, locked ? I18N("kn.inv.unlock", "Unlock") : I18N("kn.inv.lock", "Lock"));
+    sb_appendf(sb, "\"><i class=\"material-icons svelte-1wcm5z8\">%s</i></button>", locked ? "lock" : "lock_open");
+    if (instance && paint_picker_can_open(g->item)) {
+        snprintf(label, sizeof(label), "Paint %s", name);
+        snprintf(click, sizeof(click), "playSelect(0.1),paintOpen(%d,%d)", g->item, instance);
+        aria_icon(sb, "paint-icon", label, click, "format_paint");
+    } else if (instance && style_picker_can_open(g->item)) {
+        snprintf(label, sizeof(label), "Style %s", name);
+        snprintf(click, sizeof(click), "playSelect(0.1),styleOpen(%d,%d)", g->item, instance);
+        aria_icon(sb, "paint-icon", label, click, "checkroom"); // v10's style control reuses .paint-icon
+    } else if (k && k->type == 13 && count > 0 && ticket_has_wheel(g->item)) {
+        snprintf(label, sizeof(label), "%s %s", I18N("kn.wallet.redeem", "Redeem"), name);
+        snprintf(click, sizeof(click), "playSelect(0.1),knV10WalletRedeem(%d)", g->item);
+        aria_icon(sb, "spin-ticket-icon", label, click, "casino");
+    }
+    const MarketQsValue sell = market_qs_value(ui_loadout_skin_json(g->item));
+    if (!locked && (sell.can_qs || sell.can_destroy)) {
+        snprintf(label, sizeof(label), "%s %s", I18N("kn.wallet.quickSell", "Quick sell"), name);
+        if (instance) snprintf(click, sizeof(click), "playSelect(0.1),knV10WalletSell(%d,%d)", g->item, instance);
+        else snprintf(click, sizeof(click), "playSelect(0.1),knV10WalletSell(%d)", g->item);
+        aria_icon(sb, "quick-sell-icon", label, click, "sell");
+    }
+}
+
+// one row of the inventory: a stack (copy -1, with its count) or one copy. Its lock and, in select
+// mode, its pick name the ids (gi = the group, copy = the copy or -1 for the stack).
 static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, const int copy) {
     const MarketGroup *g = &groups[gi];
     const int stack = copy < 0;
@@ -265,12 +269,10 @@ static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, c
     }
     sb_append(sb, ">");
     v10_market_card(sb, g->item, 128, 128, "top-center", onclick, NULL);
-    if (W_select && (reason == MARKET_KEEP_NONE || on))
+    if (!W_select) wallet_actions(sb, g, gi, copy, locked);
+    else if (reason == MARKET_KEEP_NONE || on)
         sb_appendf(sb, "<button type=\"button\" class=\"wallet-pick%s\" onclick=\"knV10WalletPick(%d,%d)\"><i class=\"material-icons\">%s</i></button>",
                    on ? " is-on" : "", gi, copy, on ? "check_box" : "check_box_outline_blank");
-    sb_appendf(sb, "<button type=\"button\" class=\"wallet-lock\" onclick=\"knV10WalletLock(%d,%d)\" aria-label=\"", gi, copy);
-    sb_append_esc(sb, locked ? I18N("kn.inv.unlock", "Unlock") : I18N("kn.inv.lock", "Lock"));
-    sb_appendf(sb, "\"><i class=\"material-icons\">%s</i></button>", locked ? "lock" : "lock_open");
     if (stack && g->stack_max > 1) sb_appendf(sb, "<div class=\"stack-badge svelte-1wcm5z8\" aria-hidden=\"true\">\xc3\x97%d</div>", g->stack_max);
     sb_append(sb, "</div>");
 }
@@ -420,29 +422,8 @@ static void official_grid(StrBuf *sb) {
 }
 
 static void grid(StrBuf *sb, const AccountInfo *a) {
-    // krunker.io: the official inventory's tiles; Box Office while selecting: its rows as the same tiles (bo_inventory.c)
-    if (kio_store_active() || W_select) {
-        official_grid(sb);
-        return;
-    }
-    official_toolbar(sb); // Box Office: Select (the bulk actions and the locks of v10.0.4)
-    const int cap = stack_count(a) > 0 ? stack_count(a) : 1;
-    WalletStack *list = calloc((size_t) cap, sizeof(*list));
-    const int n = list ? stacks_of(a, list, cap) : 0;
-    sb_append(sb, "<div class=\"items-grid svelte-1wcm5z8\" id=\"knV10WalletGrid\">");
-    for (int i = 0; i < n && i < W.shown; i++) tile(sb, &list[i]);
-    if (n > W.shown) {
-        sb_append(sb, "<div class=\"wallet-items-sentinel svelte-1wcm5z8\"><button type=\"button\" class=\"load-more-btn svelte-zhgogl\" id=\"knV10WalletMore\" onclick=\"knV10WalletMore()\">");
-        sb_append_esc(sb, I18N("kn.wallet.loadMore", "Load More"));
-        sb_append(sb, "</button></div>");
-    }
-    if (!n) {
-        sb_append(sb, "<div class=\"empty-state svelte-1wcm5z8\" id=\"knV10WalletEmpty\"><p class=\"svelte-1wcm5z8\">");
-        sb_append_esc(sb, I18N("kn.wallet.empty", "No items match your current filters."));
-        sb_append(sb, "</p></div>");
-    }
-    sb_append(sb, "</div>");
-    free(list);
+    (void) a; // both accounts: one tile per stack and one per copy (inv_groups)
+    official_grid(sb);
 }
 
 // the whole modal (.wallet-root) for the active account
@@ -577,7 +558,7 @@ static void open_modal(void) {
     remember(a);
     v10_view_push(markup(), refresh, closed, NULL);
     W.depth = v10_view_depth();
-    if (kio_store_active() && !inv_ready() && !inv_loading()) inv_load(inventory_loaded, NULL);
+    if (!inv_ready() && !inv_loading()) inv_load(inventory_loaded, NULL); // the locks ("ilk" on Box Office)
 }
 
 // the modal left the stack (Escape, a backdrop tap, Catalog, an account change): its market views go too
