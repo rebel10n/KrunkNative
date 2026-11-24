@@ -124,6 +124,9 @@ int      html_dom_get_rect(HtmlElem, HtmlRect *out);
 int      html_dom_is_shown(HtmlElem);
 float    html_dom_offset_width(HtmlElem);
 float    html_dom_offset_height(HtmlElem);
+// clientHeight: the padding box minus a horizontal scrollbar, rounded to whole CSS px as the DOM
+// does (0 when the element has no box)
+float    html_dom_client_height(HtmlElem);
 void     html_dom_viewport(float *w, float *h, float *dpr);          // innerWidth/innerHeight/devicePixelRatio
 // Native engine: the page's devicePixelRatio (CSS px = framebuffer px / dpr; 1 by default, the
 // framebuffer is laid out 1:1). A page made for phones (the Krunker Strike page, strike_ui.c) is

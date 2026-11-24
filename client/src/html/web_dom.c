@@ -647,6 +647,7 @@ EM_JS(int, kn_js_is_shown, (int id), {
 
 EM_JS(float, kn_js_offset_width, (int id), { var el = knEl(id); return el && el.offsetWidth != null ? el.offsetWidth : 0; });
 EM_JS(float, kn_js_offset_height, (int id), { var el = knEl(id); return el && el.offsetHeight != null ? el.offsetHeight : 0; });
+EM_JS(float, kn_js_client_height, (int id), { var el = knEl(id); return el && el.clientHeight != null ? el.clientHeight : 0; });
 
 EM_JS(void, kn_js_viewport, (float *out), {
     var o = out >> 2;
@@ -1354,6 +1355,7 @@ int html_dom_is_shown(const HtmlElem e) { return e ? kn_js_is_shown((int) e) : 0
 
 float html_dom_offset_width(const HtmlElem e) { return e ? kn_js_offset_width((int) e) : 0.0f; }
 float html_dom_offset_height(const HtmlElem e) { return e ? kn_js_offset_height((int) e) : 0.0f; }
+float html_dom_client_height(const HtmlElem e) { return e ? kn_js_client_height((int) e) : 0.0f; }
 
 void html_dom_viewport(float *w, float *h, float *dpr) {
     float v[3] = {0, 0, 1};

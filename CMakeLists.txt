@@ -1660,6 +1660,11 @@ else ()
             add_test(NAME end_return_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/end_return_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(end_return_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # strike_customize_scale_e2e: Strike's Customize Controls --base-scale is the layer's clientHeight and its
+            # joysticks are whole px, as in Chrome's capture of FRVR 1.37.2 (strike_menu.c customize_controls_tick)
+            add_test(NAME strike_customize_scale_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/strike_customize_scale_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(strike_customize_scale_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e;strike")
             # wallet_item_e2e: a click on a Wallet tile opens the item popup (viewItem), not the Catalog's item page
             add_test(NAME wallet_item_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/wallet_item_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

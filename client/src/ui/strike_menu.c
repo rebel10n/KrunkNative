@@ -1065,20 +1065,22 @@ const SpinWheelDraw *strike_menu_wheel_draw(void) { return &M.wheel; }
 // a5.oncreate in Customize mode (and on resize): .control-buttons' --base-scale is
 // `calc(${clientHeight} / 360 * 1px` (FRVR's string has no closing paren; a browser closes it at the end
 // of the declaration, this engine does not, so the value here is the closed calc()). The capture's
-// inline value (282 at its size) is replaced as soon as the box has a height.
+// inline value (282 at its size: the 284 px box less its 1px dashed border) is replaced as soon as the
+// box has a height.
 static void customize_controls_tick(void) {
     const HtmlElem root = strike_screen_root(STRIKE_SCREEN_CUSTOMIZE_CONTROLS);
     const HtmlElem box = root ? html_dom_query(root, ".control-buttons--customize") : 0;
     if (!box) return;
-    const int h = (int) html_dom_offset_height(box);
+    const int h = (int) html_dom_client_height(box);
     char want[64], have[64] = "";
     snprintf(want, sizeof(want), "calc(%d / 360 * 1px)", h);
     html_dom_get_attr(box, "data-kn-scale", have, sizeof(have));
     if (h <= 0 || !strcmp(want, have)) return;
     html_dom_set_attr(box, "data-kn-scale", want);
     html_dom_set_style(box, "--base-scale", want);
-    // the joysticks' nipplejs (static, rhe): size = --control-joystick-size at that scale (the capture's
-    // 83 px = 106 * 282 / 360), the front half of it, both centred by negative margins
+    // the joysticks' nipplejs (static, rhe): size = --control-joystick-size at that scale, rounded to a
+    // whole px (the capture's 83 px = 106 * 282 / 360 = 83.03 and 69 px = 88 * 282 / 360 = 68.93), the
+    // front half of it (41.5 / 34.5), both centred by negative margins
     HtmlElem sticks[4];
     const int n = html_dom_query_all(box, ".joystick", sticks, 4);
     for (int i = 0; i < n; i++) {
@@ -1086,7 +1088,7 @@ static void customize_controls_tick(void) {
         html_dom_get_attr(sticks[i], "style", style, sizeof(style));
         const char *k = strstr(style, "--control-joystick-size:");
         if (!k) continue;
-        const float size = (float) atof(k + strlen("--control-joystick-size:")) * (float) h / 360.0f;
+        const float size = roundf((float) atof(k + strlen("--control-joystick-size:")) * (float) h / 360.0f);
         static const char *const PARTS[2] = {".back", ".front"};
         for (int p = 0; p < 2; p++) {
             const HtmlElem el = html_dom_query(sticks[i], PARTS[p]);

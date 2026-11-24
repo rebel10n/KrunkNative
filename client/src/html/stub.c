@@ -182,6 +182,7 @@ int html_dom_is_shown(const HtmlElem e) { (void) e; return 0; }
 
 float html_dom_offset_width(const HtmlElem e) { (void) e; return 0.0f; }
 float html_dom_offset_height(const HtmlElem e) { (void) e; return 0.0f; }
+float html_dom_client_height(const HtmlElem e) { (void) e; return 0.0f; }
 
 HtmlElem html_dom_element_at(const float x, const float y) {
     (void) x;
