@@ -78,7 +78,10 @@ log = run_native("host", """
 4100 quit
 """)
 check("knHostFlow('practice')" in log, "host: Host Game's play offline ran")
-check(re.search(r"offline: playing map \d+", log) is not None, "host: the local game reloaded on the picked map")
+# The launch loads Kanji. Host Game's play-offline loads another map in the same process;
+# offline.c prints "playing map" only when that map is already built, so the sandbox line is the record.
+loaded = re.findall(r"\[sandbox\] Loaded map .+", log)
+check(len(loaded) >= 2 and "Kanji" not in loaded[-1], "host: the local game reloaded on the picked map (%s)" % loaded)
 check(vis(log, "@after").get("loadingBg") == "0", f"host: no map card after the switch ({vis(log, '@after')})")
 check(vis(log, "@later").get("loadingBg") == "0", f"host: still no map card later ({vis(log, '@later')})")
 check(len(re.findall(r"cam t=\d+ @spawn0 spawns=2", log)) >= 1, "host: the player spawned in the new game (the curtain lifted)")

@@ -163,7 +163,7 @@ handler by handler. Every gap is fixed unless its row says otherwise; the differ
 | Account | 3 | skin makers (`player_skinmaker`, :115136) and the krunker.io account's `tw_twitchname` / `player_skinmaker` (setData [23] / [42]) reach getSkins; a Twitch link or unlink updates the streamer items at once | none | `v10_customize_e2e.py` |
 | Map editor | 27 | entities and archetypes; Publish Game and Publish Asset as v10 sends them (`uploadM`, `plm`, migration 0403 `map_mobile`); multiplayer co-editing (windows 16 / 17, `#mp-chat`); the inspector, T-key picker and AI Rarity Chances; settings, history, resets, view resolution and object visuals; Tools and Quick GUI as v10 binds them, v10's own quirks included (E10:6610-20982, IDX:6124-15193, CFG:4406-9215) | `publish_ui_e2e`'s Burg template (`assets/maps/burg_new.json` is in no checkout) | `panels_e2e`, `inspector_check`, `objects_e2e`, `windows_check`, `tools_check`, `logic_parity`, `io_e2e`, `entities_e2e`, `mp_e2e`, `publish_e2e`, `asset_upload_test`, `brain_editor_rooms`, `editor_serialize_test` |
 | Mods, replays, streams, Twitch | 18 | the Mod Manager's cards, favourites, header, mod view, `#modLInfo` texts, `?mod=`, Reset Mods, Ctrl+/; the stream thumbnails as images, event tags and the promo without Twitch; v10's Twitch link, unlink and drops popups; a same-map replay seek (:18566-18600, :97248-97966, :108350-108478, :146848-148720, :201934-201954, :209629-209632, :218751-218932, :223416-223459, :225733-226475, :228180-228245, :229274-229551) | none: round 13 closed the replay viewer, Demos / Reviewers and the streams overlay | `mod_pack_test`, `brain_streams`, `brain_streams_e2e`, `brain_v10_api_mods`, `brain_v10_social_e2e`, `brain_hub_creator_e2e`, `demo_test`, `kpd_replay_vote_e2e.py`, `menu_sources_e2e` |
-| Loading, captcha, anti-cheat, ads | 7 | the map card's mode in capitals (:226159); the game socket's challenge on v10's Security Challenge card (ALTCHA 1.0.6, :98801-98984, :119735-119741); a hack-flagged login's BANNED popup and the fart_0 sounds (:216841-216855, :200724-200746); showAd's onShow after the ad (:229900-229912). v10.0.7 rotates no loading tips | Box Office's guest hosting card (`servers_ui.c`): menu agent | `v10_loading_test`, `kn_captcha_test`, `krunker_link_test`, `krunker_host_custom_test`, `brain_captcha_game_e2e`, `krunker_official_e2e` (native runs), `native_auth_e2e`, `captcha_e2e.py`, `loading_screens_e2e` |
+| Loading, captcha, anti-cheat, ads | 7 | the map card's mode in capitals (:226159); the game socket's challenge on v10's Security Challenge card (ALTCHA 1.0.6, :98801-98984, :119735-119741); a hack-flagged login's BANNED popup and the fart_0 sounds (:216841-216855, :200724-200746); showAd's onShow after the ad (:229900-229912). v10.0.7 rotates no loading tips | none | `v10_loading_test`, `kn_captcha_test`, `krunker_link_test`, `krunker_host_custom_test`, `brain_captcha_game_e2e`, `krunker_official_e2e` (native runs), `native_auth_e2e`, `captcha_e2e.py`, `loading_screens_e2e`, `loading_switch_e2e` |
 | Tests | 2 | the web e2e tests drive the checkout's own `dist/web` before `KN_WEB_DIST`; `html_anim` counts the ALTCHA spinner | none | `brain_email_web_e2e`, `html_anim_test` |
 
 `uidiff clan-settings` has no reference to re-render: it has no regions file, so `make smoke-ui` only renders it, and
@@ -252,6 +252,15 @@ replay scenarios' KN regression baselines were re-rendered for the intended v10 
   The instance is built from `data-wear-float`, `data-serial`, `data-paint`, `data-paint-shader`,
   `data-nametag` and `data-seed`, and only when one of wear, serial, paint, shader or seed is set.
 
-Tests: `weap_nametag_e2e.py`, `open_sales_e2e.py`. Still open from the menu list: the loadout and item
-tooltips' copy attributes, the guest hosting Security Challenge, `classPreviewCanvas` while a map loads,
-and `loading_switch_e2e`'s old "offline: playing map N" string.
+Tests: `weap_nametag_e2e.py`, `open_sales_e2e.py`.
+
+## Loadout tooltips, the hosting challenge, and the class preview (2026-11-24)
+
+- A loadout copy card carries `data-nametag`, `data-wear`, `data-wear-float`, `data-serial`, `data-paint`,
+  `data-paint-shader` and `data-seed`, so `createTip` and `openSales(this)` see the copy (:223628, ui_tooltip.c).
+- A guest's Start Game fetches the hosting challenge and shows the Security Challenge card (`altcha_modal_show`,
+  hidden once solved). `favoriteM` uses `ev->target` when `this` is not an element.
+- `#classPreviewCanvas` stays at main.css opacity 0 while a map loads (`menu_boot_arm`) and fades in four
+  frames after the session's menu is up (:226519, :228625-228626). A scenario is a settled page, so it shows at once.
+- `loading_switch_e2e` treats `[sandbox] Loaded map` as the host switch. `offline.c` prints "playing map" only
+  when that map is already built; the switch often loads it on the next frame.
