@@ -21,8 +21,9 @@ Headless client_bin runs (offline Kanji, private XDG_CONFIG_HOME):
   8. the customize block (deob-10.0.7.js:217209-217219, :214502-214508): exportSettings writes the stored
      scopes / favourites (krk_favList) / loadouts into settings.txt; importing a text with a customize block
      stores its lists, cleans the loadout keys and drops falsy loadouts, and makes the preset Custom.
-Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
-Prints PASS/FAIL lines; exit code 0 only when everything passed.
+Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it), and the checkout's
+assets (in a worktree the untracked font / model folders). CTest: settings_perf_e2e.
+Prints PASS/FAIL lines; exit code 0 only when everything passed, 77 = skipped (no client_bin).
 """
 import json
 import os
@@ -35,6 +36,9 @@ import tempfile
 import time
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
+if not os.path.exists(os.path.join(BUILD, "client_bin")):
+    print(f"needs client_bin in {BUILD}: skip")
+    sys.exit(77)
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-settings-perf-", dir=CACHE if os.path.isdir(CACHE) else None)
 results = []
