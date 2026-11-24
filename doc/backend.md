@@ -1990,7 +1990,7 @@ no URL: the native client only fetches from the asset host). Verify with
 | `NET_PACKET_BILLBOARD` (33) | S→C | `{char txt[64]; char txt_col[8]; char bg_col[8];}` | before every INIT, when the billboard has text |
 | `NET_PACKET_BILLBOARD_IMAGE` (36) | S→C | `{char path[128];}` (asset path under `assets/`) | before every INIT, after BILLBOARD, when the billboard has an image (older clients ignore it) |
 | `NET_PACKET_PLAYER_INFO` (34) | S→C | `{int32 uid, account_id, level; uint8 flags; char clan[8];}` flags: 1 premium, 2 verified/featured, 4 dev/op, 8 mod | brain-linked servers: after every SPAWN broadcast, and every player's to a joiner / spectator |
-| `NET_PACKET_JOIN` (72) | C→S | `{char game_id[48], client_key[352], session[64], name[32];}` (496 bytes; the 464-byte V1 without `name` is accepted) | right after HELLO, before the first ENT |
+| `NET_PACKET_JOIN` (72) | C→S | `{char game_id[48], client_key[352], session[64], name[31], password[17];}` (512 bytes; the 464-byte V1 without `name`, and the 495-byte V2 without `password`, are accepted) | right after HELLO, before the first ENT |
 
 Client use: nametag level box + clan + premium/featured badges, scoreboard badges +
 `[clan]`, kill card `lvl N`. JOIN: `client_key` = the seek-game `clientId` (JWS

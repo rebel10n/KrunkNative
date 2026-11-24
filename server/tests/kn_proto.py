@@ -62,7 +62,8 @@ class Conn:
         self.send(HELLO, bytes([1, 0, 0]))
 
     def join(self, client_key="", session="", name="", password="", game_id=""):
-        self.send(JOIN, cstr(game_id, 48) + cstr(client_key, 352) + cstr(session, 64) + cstr(name, 32) + cstr(password, 16))
+        # name[31] + password[17]: a 32-byte name put the password one byte late, so the server read it as empty
+        self.send(JOIN, cstr(game_id, 48) + cstr(client_key, 352) + cstr(session, 64) + cstr(name, 31) + cstr(password, 17))
 
     def ent(self, class_index=0, secondary=-1, cosmetics=(-1, -1, -1, -1, -1, -1, -1), spectate=0, slid=1, spray=None, skins=None,
             lag_comp=None):
