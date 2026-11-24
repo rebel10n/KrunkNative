@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <clan_recruit.h>
 
 static int g_failures;
 
@@ -267,6 +268,16 @@ static void test_validate(void) {
     const char *e = game_config_validate(big);
     CHECK(e && !strcmp(e, "weaponConfig - Too much data."), "a 15000+ character weps is rejected (%s)", e ? e : "ok");
     cJSON_Delete(big);
+}
+
+static void test_recruit_fields(void) {
+    /* deob-10.0.7.js:96870-96873: Number("10 ") is 10, and a blank box is 0 */
+    CHECK(clan_recruit_level_ok("10 ") && clan_recruit_level_ok(" 200") && clan_recruit_level_ok(" ") && clan_recruit_level_ok(""),
+          "a level keeps the spaces around it");
+    CHECK(!clan_recruit_level_ok("10a") && !clan_recruit_level_ok("10.5") && !clan_recruit_level_ok("201") && !clan_recruit_level_ok("-1"),
+          "a level is a whole number 0..200");
+    CHECK(clan_recruit_kd_ok("1.5 ") && clan_recruit_kd_ok("99.99") && clan_recruit_kd_ok(""), "a K/D keeps the spaces around it");
+    CHECK(!clan_recruit_kd_ok("100") && !clan_recruit_kd_ok("-0.1") && !clan_recruit_kd_ok("1.5x"), "a K/D stops at 99.99");
 }
 
 static void test_inputs_and_merge(void) {
@@ -859,6 +870,7 @@ int main(void) {
         printf("Failed to load assets/maps/311_sandstorm.json (run from the repository root)\n");
         return 1;
     }
+    test_recruit_fields();
     test_tables();
     test_v7_cases(sandstorm);
     test_validate();

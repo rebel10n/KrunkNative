@@ -45,6 +45,7 @@
 // v10's settings components apply them.
 #include <avatar_ui.h>
 #include <clan_discord.h>
+#include <clan_recruit.h>
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -1259,19 +1260,10 @@ static void select_opts(StrBuf *sb, const char *const (*opts)[2], const int n, c
     for (int i = 0; i < n; i++) sb_appendf(sb, "<option value=\"%s\"%s>%s</option>", opts[i][0], !strcmp(cur, opts[i][0]) ? " selected" : "", opts[i][1]);
 }
 
-static int level_ok(const char *v) {
-    if (!v[0]) return 1;
-    char *end;
-    const double d = strtod(v, &end);
-    return !*end && d >= 0 && d <= 200 && floor(d) == d;
-}
+/* Number(text) (deob-10.0.7.js:96870-96873): spaces around the digits are still that number */
+static int level_ok(const char *v) { return clan_recruit_level_ok(v); }
 
-static int kd_ok(const char *v) {
-    if (!v[0]) return 1;
-    char *end;
-    const double d = strtod(v, &end);
-    return !*end && d >= 0 && d <= 99.99;
-}
+static int kd_ok(const char *v) { return clan_recruit_kd_ok(v); }
 
 static void gen_recruit(StrBuf *sb) {
     fetch_recruit();
