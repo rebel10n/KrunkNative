@@ -50,6 +50,7 @@
 // then the bundled data/prices.js snapshot (social_estimate_value); with neither, v10's "~ Unknown".
 #include <backend.h>
 #include <i18n.h>
+#include <js_int.h>
 #include <backend_ui.h>
 #include <economy_client.h>
 #include <html_dom.h>
@@ -2309,7 +2310,7 @@ static void list_modal_dynamic(StrBuf *sb) {
     if (M.price_in[0] && valid) {
         // the fee the server charges: ceil(marketFee % of the price), as the list modal shows it
         char fee[32], label[48];
-        fmt(fee, sizeof(fee), econ_list_fee(atof(M.price_in)));
+        fmt(fee, sizeof(fee), econ_list_fee((double) js_list_price(M.price_in))); /* parseInt, so 10e2 is 10 */
         snprintf(label, sizeof(label), "Listing Fee (%d%%):", (int) g_econ_rules.market_fee);
         sb_appendf(sb, "<div class=\"fee-breakdown svelte-1pf0608\"><div class=\"fee-row svelte-1pf0608\"><span class=\"svelte-1pf0608\">%s</span> <span class=\"fee-value fee-cost svelte-1pf0608\">%s KR</span></div></div>", label, fee);
     }

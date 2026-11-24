@@ -6001,10 +6001,10 @@ H(h_calc_fee) {
     if (!in) return 1;
     char text[32] = "";
     html_dom_get_value(in, text, sizeof(text));
-    double a = atof(text);
-    if (a < 0) a = 0;
-    if (a > SALE_MAX) a = SALE_MAX;
-    const long long price = (long long) a, pct = (long long) g_econ.market_fee;
+    /* parseInt(listPrice): "10e2" is 10, not 1000 (deob list modal) */
+    long long price = js_list_price(text);
+    if (price > SALE_MAX) price = SALE_MAX;
+    const long long pct = (long long) g_econ.market_fee;
     const double fee = (price < 1 || price <= (long long) g_econ.market_fee_bypass || pct <= 0)
                            ? 0 : (double) ((price * pct + 99) / 100);
     StrBuf sb = {0};

@@ -18,6 +18,13 @@ static inline long js_parse_int(const char *s) {
     return strtol(s, 0, 10);
 }
 
+/* parseInt(listPrice) for the list modal's fee (deob-10.0.7.js). "10e2" is 10, not 1000.
+   Below 1 (and a blank box) is 0, so the fee is none. */
+static inline long js_list_price(const char *s) {
+    long p = js_parse_int(s);
+    return p < 1 ? 0 : p;
+}
+
 static inline long js_floor_tenth(const char *s) {
     double v = s && *s ? atof(s) : 0;
     if (v < 0) v = 0;

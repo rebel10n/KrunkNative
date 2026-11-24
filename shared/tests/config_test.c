@@ -282,6 +282,9 @@ static void test_recruit_fields(void) {
     /* chngMapFunds: parseInt, so a scientific amount is not a thousand */
     CHECK(js_parse_int("1e3") == 1 && js_parse_int("15.9") == 15 && js_parse_int("  -20") == -20 && js_parse_int("") == 0,
           "parseInt stops at the first non-digit");
+    CHECK(js_list_price("10e2") == 10 && js_list_price("1e2") == 1 && js_list_price("15.9") == 15 && js_list_price("") == 0 &&
+              js_list_price("-3") == 0,
+          "a listing price stops at the first letter");
     CHECK(js_floor_tenth("1e2") == 10 && js_floor_tenth("15") == 1 && js_floor_tenth("15.9") == 1 && js_floor_tenth("-4") == 0 &&
               js_floor_tenth("9") == 0,
           "a clan deposit fee is floor of 10 percent of the number");
