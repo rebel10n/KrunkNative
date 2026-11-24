@@ -379,6 +379,24 @@ async def scenario(names):
           and r["data"]["comments"][0]["txt"] == "nice" and r["data"]["comments"][0]["pln"] == bn, "post detail: 1 like, B's comment")
     st, r = await B.gapi("GET", "/social/feed?tab=hot")
     check(st == 200 and r["data"]["posts"][0]["pid"] == pid and r["data"]["posts"][0]["dlk"] == 1, "hot tab: the liked post first")
+
+    async def hub_feed(sock, who, name, tab):
+        await sock.send(["r", "feed", None, who, name, str(tab), 0])
+        f = await sock.recv_until(lambda fr: fr[0] == "0" and fr[1] == "feed")
+        return f[3] if f and isinstance(f[3], list) else None
+
+    posts = await hub_feed(B, b_id, bn, 5)
+    check(posts is not None and [p["pid"] for p in posts] == [gid] and posts[0].get("fds") == 100 and posts[0].get("exp", 0) > 0,
+          "hub Giveaways tab: the running giveaway and its KR: %r" % posts)
+    posts = await hub_feed(B, b_id, bn, 1)
+    check(posts is not None and [p["pid"] for p in posts] == [gid, pid],
+          "hub Following tab: the followee's posts only: %r" % ([p["pid"] for p in posts] if posts else posts))
+    posts = await hub_feed(B, b_id, bn, 0)
+    check(posts is not None and [p["pid"] for p in posts][:2] == [gid, pid], "hub Global tab: newest first")
+    posts = await hub_feed(B, b_id, bn, 4)
+    check(posts is not None and posts[0]["pid"] == pid, "hub Hot tab: the liked post first")
+    posts = await hub_feed(B, b_id, bn, 2)
+    check(posts == [], "hub Clan tab with no clan: empty (got %r)" % posts)
     st, r = await B.gapi("POST", "/social/post/%d/vote" % pid, {"value": 0})
     st, r = await A.gapi("GET", "/social/post/%d" % pid)
     check(st == 200 and r["data"]["post"]["vot"] == 0, "unlike")
@@ -444,6 +462,14 @@ async def scenario(names):
     # --- clans: the clan view and Request to Join
     cid = q("INSERT INTO clans (clan_name, clan_playerid, clan_score, clan_discord) VALUES ('TST', ?, 4321, 'abc') RETURNING clan_id", a_id)[0][0]
     q("INSERT INTO clan_members (account_id, clan_id, rank, score) VALUES (?, ?, 3, 99)", a_id, cid)
+    await A.send(["r", "feed", None, a_id, an, "2", 0])
+    f = await A.recv_until(lambda fr: fr[0] == "0" and fr[1] == "feed")
+    posts = f[3] if f and isinstance(f[3], list) else []
+    check([p.get("pid") for p in posts] == [gid, pid], "hub Clan tab: the member's posts (got %r)" % [p.get("pid") for p in posts])
+    await C.send(["r", "feed", None, c_id, cn, "2", 0])
+    f = await C.recv_until(lambda fr: fr[0] == "0" and fr[1] == "feed")
+    posts = f[3] if f and isinstance(f[3], list) else None
+    check(posts == [], "hub Clan tab: a non-member sees nothing (got %r)" % posts)
     st, r = await C.gapi("GET", "/clans/by-name/tst")
     check(st == 200 and r["data"]["clan_id"] == cid and r["data"]["creator_name"] == an and r["data"]["clan_score"] == 4321
           and r["data"]["clan_link4"] == "abc" and r["data"]["members"][0]["p"] == an and r["data"]["members"][0]["r"] == 3,

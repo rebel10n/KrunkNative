@@ -128,11 +128,18 @@ static cJSON *feed_of(Dbx *x, const kn_sql *ids_q, int n, const char *const *p, 
     return a;
 }
 
-/* kn_feed(viewer, author|NULL, limit, offset) */
+/* kn_feed(viewer, author|NULL, limit, offset, tab|NULL).
+ * tab is the hub's feedTab (ui/social.html, switchFeedTab): 0 global, 1 following, 2 clan,
+ * 4 hot, 5 giveaways. Missing and anything else is global, which is the tab the page opens on.
+ * An author ("guf", the profile activity tab) ignores the tab. The filters are GET /social/feed's
+ * (social_gapi.c social_feed): following is followees only, hot is the last week by likes + 2 x
+ * comments, giveaways are the running ones soonest first, clan is the viewer's clan.
+ * .pg is NULL. 0104's kn_feed has no tab (it served followees-or-everyone for every tab) and its
+ * kn_post_json omits a giveaway's fds/exp and a match result's raw lnk2, which the hub draws. */
 static kn_db_result *run_feed(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     int64_t now = dbx_int(&x, &SQL_NOW_MS, 0, NULL, 0);
-    const char *viewer = P(0) ? P(0) : "0";
+    const char *viewer = P(0) && P(0)[0] ? P(0) : "0";
     cJSON *a;
     if (P(1) && PI(1) > 0) {
         a = feed_of(&x, SQL(.any = "SELECT id FROM feed_posts WHERE author_id = $1 AND deleted_at IS NULL"
@@ -140,20 +147,38 @@ static kn_db_result *run_feed(kn_dbconn *c, int n, const char *const *p) {
                     KN_DB_ARGS(P(1), P(2), P(3)), viewer, now);
         return dbx_json(&x, "kn_feed", a);
     }
-    if (strtoll(viewer, NULL, 10) > 0) {
-        a = feed_of(&x, SQL(.any = "SELECT fp.id FROM feed_posts fp WHERE fp.deleted_at IS NULL AND (fp.author_id = $1"
-                                   " OR fp.author_id IN (SELECT followee_id FROM follows WHERE follower_id = $1))"
+    const int tab = (int) PI(4);
+    if (tab == 1) {
+        a = feed_of(&x, SQL(.any = "SELECT fp.id FROM feed_posts fp WHERE fp.deleted_at IS NULL"
+                                   " AND fp.author_id IN (SELECT followee_id FROM follows WHERE follower_id = $1)"
                                    " ORDER BY fp.id DESC LIMIT $2 OFFSET $3"),
                     KN_DB_ARGS(viewer, P(2), P(3)), viewer, now);
-        if (cJSON_GetArraySize(a) > 0) return dbx_json(&x, "kn_feed", a);
-        cJSON_Delete(a);
+    } else if (tab == 2) {
+        a = feed_of(&x, SQL(.any = "SELECT fp.id FROM feed_posts fp WHERE fp.deleted_at IS NULL"
+                                   " AND fp.author_id IN (SELECT m.account_id FROM clan_members m WHERE m.clan_id ="
+                                   " (SELECT cm.clan_id FROM clan_members cm WHERE cm.account_id = $1))"
+                                   " ORDER BY fp.id DESC LIMIT $2 OFFSET $3"),
+                    KN_DB_ARGS(viewer, P(2), P(3)), viewer, now);
+    } else if (tab == 4) {
+        a = feed_of(&x, SQL(.any = "SELECT fp.id FROM feed_posts fp WHERE fp.deleted_at IS NULL"
+                                   " AND fp.created_at > {ago:604800}"
+                                   " ORDER BY ((SELECT count(*) FROM feed_likes l WHERE l.post_id = fp.id)"
+                                   " + 2 * (SELECT count(*) FROM feed_comments c WHERE c.post_id = fp.id)) DESC,"
+                                   " fp.id DESC LIMIT $1 OFFSET $2"),
+                    KN_DB_ARGS(P(2), P(3)), viewer, now);
+    } else if (tab == 5) {
+        a = feed_of(&x, SQL(.any = "SELECT id FROM feed_posts WHERE deleted_at IS NULL AND type = 9"
+                                   " AND settled_at IS NULL AND ends_at > {now}"
+                                   " ORDER BY ends_at LIMIT $1 OFFSET $2"),
+                    KN_DB_ARGS(P(2), P(3)), viewer, now);
+    } else {
+        a = feed_of(&x, SQL(.any = "SELECT id FROM feed_posts WHERE deleted_at IS NULL"
+                                   " ORDER BY id DESC LIMIT $1 OFFSET $2"),
+                    KN_DB_ARGS(P(2), P(3)), viewer, now);
     }
-    a = feed_of(&x, SQL(.any = "SELECT id FROM feed_posts WHERE deleted_at IS NULL ORDER BY id DESC LIMIT $1 OFFSET $2"),
-                KN_DB_ARGS(P(2), P(3)), viewer, now);
     return dbx_json(&x, "kn_feed", a);
 }
-/* two call shapes on postgres (viewer only / viewer + author): the C side takes 4 params */
-const kn_proc P_FEED = {"feed", "SELECT kn_feed($1, $2, $3, $4)", run_feed};
+const kn_proc P_FEED = {"feed", NULL, run_feed};
 
 /* ------------------------------------------------------------------ clans */
 

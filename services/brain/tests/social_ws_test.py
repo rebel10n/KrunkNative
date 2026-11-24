@@ -362,6 +362,28 @@ async def scenario(base, internal_url, secret):
         r = await b.call("uf", "guf", bob_id)
         check(len(r[1]) == 1, "profile activity tab")
 
+        # hub feed tabs (ui/social.html feedTab, the "r" frame's k). bob follows alice, who has not posted yet
+        async with Social(ws_url) as a:
+            await a.call("a", "a", 1, [alice, None, alice_token])
+            r = await a.call("psr", "ps", {"txt": "from alice"})
+            check(r[1] == 1, "alice posted")
+        r = await b.call("0", "r", "feed", None, bob_id, bob, "0", 0)
+        posts = r[3] or []
+        check(posts and posts[0]["txt"] == "from alice" and any(p["txt"] == "&lt;b&gt;hello&lt;/b&gt; krunker" for p in posts),
+              "global tab: newest first, everyone's posts: %r" % [p.get("txt") for p in posts])
+        r = await b.call("0", "r", "feed", None, bob_id, bob, "1", 0)
+        posts = r[3] or []
+        check([p.get("txt") for p in posts] == ["from alice"],
+              "following tab: followees only, not the viewer's own post: %r" % [p.get("txt") for p in posts])
+        r = await b.call("0", "r", "feed", None, bob_id, bob, "4", 0)
+        posts = r[3] or []
+        check(posts and posts[0]["txt"] == "&lt;b&gt;hello&lt;/b&gt; krunker",
+              "hot tab: the commented post ranks above a newer one: %r" % [p.get("txt") for p in posts])
+        r = await b.call("0", "r", "feed", None, bob_id, bob, "5", 0)
+        check(r[3] == [], "giveaways tab: a plain post is not a running giveaway: %r" % (r[3],))
+        r = await b.call("0", "r", "feed", None, bob_id, bob, "2", 0)
+        check(r[3] == [], "clan tab before a clan: empty: %r" % (r[3],))
+
         # settings sync, display name
         r = await b.call("pRes", "uploadS", '{"fov":90}')
         check(r[1] == "SUCCESS", "settings uploaded")
@@ -398,6 +420,10 @@ async def scenario(base, internal_url, secret):
         # clans (menu window protocol)
         r = await b.call("cln", "cln", 1, "BOB", None)
         check(r[1] is None and r[2]["clan_name"] == "BOB" and r[3] == 1, "clan created")
+        r = await b.call("0", "r", "feed", None, bob_id, bob, "2", 0)
+        texts = [p.get("txt") for p in (r[3] or [])]
+        check(texts == ["&lt;b&gt;hello&lt;/b&gt; krunker"],
+              "clan tab: the member's post, not a followed outsider's: %r" % texts)
         async with Social(ws_url) as a:
             await a.call("a", "a", 1, [alice, None, alice_token])
             r = await a.call("cln", "cln", "bob")

@@ -208,7 +208,13 @@ void sh_page(SocialSession *s, const cJSON *f) {
         return;
     }
     if (!strcmp(page, "feed")) {
-        social_call(s, &P_FEED, KN_DB_ARGS(social_viewer(s, viewer), NULL, "50", "0"), page_json_done, c);
+        /* the "r" frame's k (Ja[4]): feedTab 0 global, 1 following, 2 clan, 4 hot, 5 giveaways.
+         * absent on the first load, and feedTab0 is the tab the page paints selected */
+        char tab[16] = "0";
+        const cJSON *k = fa(f, 5);
+        if (cJSON_IsString(k) && k->valuestring[0]) snprintf(tab, sizeof tab, "%.15s", k->valuestring);
+        else if (cJSON_IsNumber(k)) snprintf(tab, sizeof tab, "%d", (int) k->valuedouble);
+        social_call(s, &P_FEED, KN_DB_ARGS(social_viewer(s, viewer), NULL, "50", "0", tab), page_json_done, c);
         return;
     }
     if (!strcmp(page, "clan")) {
