@@ -365,6 +365,11 @@ async def scenario(names):
     # --- posts
     st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "low level"})
     check(st == 400 and r["error"]["code"] == "SOCIAL_LEVEL_TOO_LOW", "level 1: SOCIAL_LEVEL_TOO_LOW")
+    await A.send(["ps", {"txt": "low level hub"}])
+    f = await A.recv_until(lambda fr: fr[0] == "psr")
+    check(f and f[1] is None and f[2] == "You must be level 10 or higher to post."
+          and not q("SELECT id FROM feed_posts WHERE author_id = ? AND body = ?", a_id, "low level hub"),
+          "a hub post under level 10 is refused (deob-10.0.7.js errors.social.levelTooLow)")
     q("UPDATE players SET player_score = 2000000, player_funds = 1000 WHERE player_id IN (?, ?)", a_id, b_id)
     # #shareTxt has no maxlength (deob-10.0.7.js:227052). The note is kept in characters, leading blanks dropped.
     q("INSERT INTO match_ends (match_id, mode, ed) VALUES ('share1', 0, '[1]')")

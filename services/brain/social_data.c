@@ -69,9 +69,39 @@ static void post_done(SocialSession *s, kn_db_result *res, void *extra) {
     else social_send_n(s, "psr", 1, cJSON_CreateNumber(1));
 }
 
+/* the hub Post button carries the trimmed text until the level check comes back */
+typedef struct HubPost {
+    char text[4096];
+    char l1[256], l2[256];
+    int type;
+} HubPost;
+
+/* level 10, the same gate as the compose box (deob-10.0.7.js errors.social.levelTooLow) */
+static void post_scored(SocialSession *s, kn_db_result *res, void *extra) {
+    HubPost *p = extra;
+    if (!kn_db_ok(res)) {
+        social_send_n(s, "psr", 2, cJSON_CreateNull(), cJSON_CreateString(acct_db_error(res, "post")));
+        return;
+    }
+    const int64_t score = kn_db_rows(res) > 0 ? kn_db_get_int64(res, 0, 0, 0) : 0;
+    if (db_level(score, 0.03) < 10) {
+        social_send_n(s, "psr", 2, cJSON_CreateNull(), cJSON_CreateString("You must be level 10 or higher to post."));
+        return;
+    }
+    char me[24], typ[24];
+    /* at most 20 posts an hour */
+    social_query(s,
+                 SQL(.pg = "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, $3, nullif($4, ''), nullif($5, '') "
+                           "WHERE (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > now() - interval '1 hour') < 20",
+                     .any = "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, $3, nullif($4, ''), nullif($5, '') "
+                            "FROM accounts WHERE id = $1 "
+                            "AND (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > {ago:3600}) < 20"),
+                 KN_DB_ARGS(me_str(s, me), p->text, acct_itoa(typ, p->type), p->l1, p->l2), post_done, ctx_new("ps", 0, 0));
+}
+
 /* ["ps", {txt, typ, lnk, lnk2}] -> ["psr", 1] | ["psr", null, err]
  * #postInput has no maxlength. The hub Post button is the compose box (deob-10.0.7.js:141204, :141216):
- * trim, then at most 500 characters, never a cut in the middle of a letter. */
+ * trim, then at most 500 characters, never a cut in the middle of a letter. Level 10, as that box. */
 void sh_post(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) {
         social_send_n(s, "psr", 2, cJSON_CreateNull(), cJSON_CreateString("Login required."));
@@ -93,25 +123,22 @@ void sh_post(SocialSession *s, const cJSON *f) {
     int max = g_acct.post_max_len > 0 ? g_acct.post_max_len : 500;
     if (max > 500) max = 500;
     const size_t cut = brain_utf16_prefix(trimmed, (size_t) max);
-    char text[4096];
-    memcpy(text, trimmed, cut);
-    text[cut] = 0;
-    char me[24], typ[24];
+    HubPost *p = calloc(1, sizeof *p);
+    if (!p) {
+        social_send_n(s, "psr", 2, cJSON_CreateNull(), cJSON_CreateString("Server unavailable"));
+        return;
+    }
+    memcpy(p->text, trimmed, cut);
+    p->text[cut] = 0;
     const int64_t type = kn_json_int(body, "typ", 0);
-    Ctx *c = ctx_new("ps", 0, 0);
+    p->type = type >= 0 && type < 16 ? (int) type : 0;
     const cJSON *lnk = cJSON_GetObjectItemCaseSensitive(body, "lnk"), *lnk2 = cJSON_GetObjectItemCaseSensitive(body, "lnk2");
-    char l1[256] = "", l2[256] = "";
-    if (cJSON_IsString(lnk)) snprintf(l1, sizeof l1, "%s", lnk->valuestring);
-    else if (cJSON_IsNumber(lnk)) snprintf(l1, sizeof l1, "%lld", (long long) lnk->valuedouble);
-    if (cJSON_IsString(lnk2)) snprintf(l2, sizeof l2, "%s", lnk2->valuestring);
-    /* at most 20 posts an hour */
-    social_query(s,
-                 SQL(.pg = "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, $3, nullif($4, ''), nullif($5, '') "
-                           "WHERE (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > now() - interval '1 hour') < 20",
-                     .any = "INSERT INTO feed_posts (author_id, body, type, link, link2) SELECT $1, $2, $3, nullif($4, ''), nullif($5, '') "
-                            "FROM accounts WHERE id = $1 "
-                            "AND (SELECT count(*) FROM feed_posts WHERE author_id = $1 AND created_at > {ago:3600}) < 20"),
-                 KN_DB_ARGS(me_str(s, me), text, acct_itoa(typ, type >= 0 && type < 16 ? type : 0), l1, l2), post_done, c);
+    if (cJSON_IsString(lnk)) snprintf(p->l1, sizeof p->l1, "%s", lnk->valuestring);
+    else if (cJSON_IsNumber(lnk)) snprintf(p->l1, sizeof p->l1, "%lld", (long long) lnk->valuedouble);
+    if (cJSON_IsString(lnk2)) snprintf(p->l2, sizeof p->l2, "%s", lnk2->valuestring);
+    char me[24];
+    social_query(s, SQL(.any = "SELECT player_score FROM players WHERE player_id = $1"),
+                 KN_DB_ARGS(me_str(s, me)), post_scored, p);
 }
 
 /* ["com", postId, {txt}] -> ["psr", 1, null, 2] | ["psr", null, err, 2] */
