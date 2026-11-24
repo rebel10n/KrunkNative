@@ -46,6 +46,7 @@
 #include <avatar_ui.h>
 #include <clan_discord.h>
 #include <clan_recruit.h>
+#include <js_int.h>
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -1512,14 +1513,12 @@ static void manage_funds(void) {
     generic_popup(html, "contPop", NULL);
 }
 
-// calcFee(input): 10% deposit fee preview
+// calcFee (deob-10.0.7.js, windows[12].calcFee): Math.floor(0.1 * Number(text)). "1e2" is 10, not 0.
 static void calc_fee(void) {
     HtmlElem in = html_dom_by_id("clanFundsIn");
     char v[32] = "";
     if (in) html_dom_get_value(in, v, sizeof(v));
-    long long kr = atoll(v);
-    if (kr < 0) kr = 0;
-    const long long fee = kr / 10;
+    const long long fee = js_floor_tenth(v);
     HtmlElem out = html_dom_by_id("clnFeeVal");
     if (!out) return;
     if (!fee) {
