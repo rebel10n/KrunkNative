@@ -379,7 +379,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "rows") || !strcmp(e->cmd, "gpad") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
-            !strcmp(e->cmd, "waitfor") || !strcmp(e->cmd, "skindef") ||
+            !strcmp(e->cmd, "waitfor") || !strcmp(e->cmd, "skindef") || !strcmp(e->cmd, "killed") ||
             !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "wars") || !strcmp(e->cmd, "rankflag") || !strcmp(e->cmd, "wheels") || !strcmp(e->cmd, "wheelrar") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "pg") || !strcmp(e->cmd, "toast") || !strcmp(e->cmd, "placewatch") || !strcmp(e->cmd, "touch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
@@ -1535,7 +1535,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
         fprintf(stderr, "[input_script] damage t=%.0f value=%.1f target=%d\n", g_script.time, e->v[0], target ? target->uid : -1);
     } else if (!strcmp(e->cmd, "killed")) {
         // the KILL packet of a death by the first other active player (a rifle kill, no weapon): the
-        // death cam with its killer (client/tests/death_cam_e2e.py); the kill feed and the card follow
+        // death cam with its killer (client/tests/death_cam_e2e.py); the kill feed and the card follow.
+        // `killed <weapon index>` names the killer's weapon, so the card shows its skin (death_rainbow_e2e.py)
         const Player *me = client->me;
         const Player *killer = NULL;
         for (size_t i = 0; me && !killer && i < client->game.player_count; i++) {
@@ -1546,7 +1547,7 @@ static void script_run(Client *client, const ScriptEvent *e) {
             NetKillPacket kill = {0};
             kill.victim_uid = me->uid;
             kill.killer_uid = killer->uid;
-            kill.weapon_index = -1;
+            kill.weapon_index = e->arg[0] ? atoi(e->arg) : -1;
             kill.victim_deaths = 1;
             kill.killer_kills = 1;
             kill.respawn_delay = 1.0f;
