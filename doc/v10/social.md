@@ -154,8 +154,9 @@ back to the author. News: `accounts.news` (HTML strings).
   hub's map / mod pages instead of v10's Svelte ones (`svelte-1kkpw01` / `svelte-1v2j2f2`, not
   ported). Box Office games and assets
   show v10's fallback picture: their ids are not krunker.io user-asset ids.
-* Post types 5 (unboxed item) and 8 (match result) are rendered by the brain only if such posts exist
-  (KrunkNative creates none yet).
+* Post types 5 (unboxed item) and 8 (match result) draw in the Social hub when such posts exist
+  (`sb_unboxed`, `sb_match_result`). Share Match Results creates type 8; an unbox still does not
+  create a type 5 post (v10's server is not in the bundle).
 * Join in the conversation header calls `v10_party_join_game` (v10-party): the matchmaker's join, else the id as a
   pasted code (v10's switchServer always switches).
 * Reports: `rp_text` is sent raw on the gapi path (10.0.3 puts it in a text node, deob-10.0.3.js:126950)

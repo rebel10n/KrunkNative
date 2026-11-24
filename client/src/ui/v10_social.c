@@ -35,6 +35,7 @@
 #include <follower_counts.h> // a follow moves the author's count on every copy (followers_moved)
 #include <social_list.h>     // friends:list pages without duplicates, msg:recv's entry, the read conversation
 #include <ruleset.h>
+#include <modes.h>  // a MatchResult post's endStats (typ 8)
 #include <weapons.h>
 #include <badges.h>     // the profile's Badges tab and selected badge (badge_get / badge_texture)
 #include <ranked.h>     // the profile's rank chip (ranked_rank_name / color / icon)
@@ -1443,6 +1444,127 @@ static void sb_share(StrBuf *sb, const char *kind, const char *value, const int 
 static int g_post_ids = 1;
 
 // post card _35330 (svelte-10yvzvw); clickable = onOpenDetail set (feeds), not in the detail view
+// A MatchResult cell as v10 stringifies it (deob-10.0.7.js:107036): an array joins with ",", null / 0 / "" is "0".
+static void match_cell(char *out, const size_t n, const cJSON *v) {
+    if (n) out[0] = 0;
+    if (cJSON_IsArray(v)) {
+        const cJSON *el;
+        cJSON_ArrayForEach(el, v) {
+            char part[96] = "";
+            if (cJSON_IsString(el)) snprintf(part, sizeof part, "%s", el->valuestring);
+            else if (cJSON_IsNumber(el)) fmt_js_num(part, sizeof part, el->valuedouble);
+            else if (cJSON_IsBool(el)) snprintf(part, sizeof part, "%s", cJSON_IsTrue(el) ? "true" : "false");
+            const size_t at = strlen(out);
+            snprintf(out + at, n > at ? n - at : 0, "%s%s", el != v->child ? "," : "", part);
+        }
+    } else if (cJSON_IsString(v) && v->valuestring[0]) {
+        snprintf(out, n, "%s", v->valuestring);
+        return;
+    } else if (cJSON_IsNumber(v) && v->valuedouble != 0) {
+        fmt_js_num(out, n, v->valuedouble);
+        return;
+    } else if (cJSON_IsTrue(v)) {
+        snprintf(out, n, "true");
+        return;
+    }
+    if (!out[0]) snprintf(out, n, "0");
+}
+
+// The reward column is the only HTML cell (deob-10.0.7.js:107016-107019, 107183). The end table's own markup is
+// endForm's "+N KR" span; anything else is text, as the hub page draws it.
+static void match_cell_html(StrBuf *sb, const char *stat, const char *val) {
+    int kr = 0;
+    char tail[8] = "";
+    if (stat && !strcmp(stat, "reward") && sscanf(val, "<span style='color:#F8C55C'>+%d</span> K%2s", &kr, tail) == 2 &&
+        !strcmp(tail, "R") && kr > 0) {
+        char exact[96];
+        snprintf(exact, sizeof exact, "<span style='color:#F8C55C'>+%d</span> KR", kr);
+        if (!strcmp(exact, val)) {
+            sb_append(sb, exact);
+            return;
+        }
+    }
+    sb_append_esc(sb, val);
+}
+
+// typ 8 (svelte-10yvzvw, deob-10.0.7.js:107009-107198): the mode's endStats, else config's, over lnk2's flat rows.
+static void sb_match_result(StrBuf *sb, const cJSON *p) {
+    static const char *const k_default[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL};
+    const char *lnk = jstr(p, "lnk"), *lnk2 = jstr(p, "lnk2"), *pln = jstr(p, "pln");
+    const cJSON *lj = cJSON_GetObjectItemCaseSensitive(p, "lnk");
+    const int mode = cJSON_IsNumber(lj) ? (int) lj->valuedouble : lnk ? atoi(lnk) : 0;
+    const GameModeConfig *mc = mode_config(mode);
+    if (!mc) return;
+    const char *const *stats = mc->end_stats ? mc->end_stats : k_default;
+    int len = 0;
+    while (stats[len]) len++;
+    if (len < 2) return;
+    cJSON *rows = lnk2 && lnk2[0] ? cJSON_Parse(lnk2) : NULL;
+    if (!cJSON_IsArray(rows)) {
+        cJSON_Delete(rows);
+        return;
+    }
+    sb_append(sb, "<table class=\"postGameRes svelte-10yvzvw\"><thead><tr><th class=\"postResRo svelte-10yvzvw\">Rank</th>");
+    for (int i = 1; i < len; i++) {
+        char cap[48];
+        snprintf(cap, sizeof cap, "%s", stats[i]);
+        cap[0] = (char) toupper((unsigned char) cap[0]);
+        sb_append(sb, "<th class=\"postResRo svelte-10yvzvw\">");
+        sb_append_esc(sb, cap);
+        sb_append(sb, "</th>");
+    }
+    sb_append(sb, "</tr></thead><tbody>");
+    const int n = cJSON_GetArraySize(rows);
+    int nrows = 0;
+    for (int i = 0; i + len <= n; i += len) nrows++;
+    for (int i = 0, rank = 1, row = 0; i + len <= n; i += len, rank++, row++) {
+        int mine = 0;
+        char cells[16][160];
+        const int ncol = len < 16 ? len : 16;
+        snprintf(cells[0], sizeof cells[0], "%d.", rank);
+        for (int j = 1; j < ncol; j++) {
+            match_cell(cells[j], sizeof cells[j], cJSON_GetArrayItem(rows, i + j));
+            if (pln && pln[0] && !strcmp(cells[j], pln)) mine = 1;
+        }
+        sb_appendf(sb, "<tr%s>", row == nrows - 1 ? " style=\"border-bottom:none\"" : "");
+        for (int j = 0; j < ncol; j++) {
+            const int white = mine || (pln && pln[0] && !strcmp(cells[j], pln));
+            sb_appendf(sb, "<td class=\"postResRoD svelte-10yvzvw\"%s>", white ? " style=\"color:#fff\"" : "");
+            match_cell_html(sb, j == 0 ? NULL : stats[j], cells[j]);
+            sb_append(sb, "</td>");
+        }
+        sb_append(sb, "</tr>");
+    }
+    sb_append(sb, "</tbody></table> ");
+    cJSON_Delete(rows);
+}
+
+// typ 5 (deob-10.0.7.js:107096-107123): "Just unboxed a <name> !" and the item card, when the skin exists.
+static void sb_unboxed(StrBuf *sb, const cJSON *p) {
+    const char *lnk = jstr(p, "lnk");
+    const cJSON *lj = cJSON_GetObjectItemCaseSensitive(p, "lnk");
+    const int index = cJSON_IsNumber(lj) ? (int) lj->valuedouble : lnk ? atoi(lnk) : -1;
+    const ViewerSkin *s = index >= 0 ? viewer_skin(index) : NULL;
+    if (!s || !s->name || !s->name[0]) return;
+    const int r = s->rarity >= 0 && s->rarity < g_viewer_rarity_count ? s->rarity : 0;
+    const char *col = g_viewer_rarities[r].color ? g_viewer_rarities[r].color : "#fff";
+    const int rainbow = s->rarity == 6;
+    char url[256];
+    store_skin_preview(index, url, sizeof url);
+    sb_append(sb, "<div class=\"post-unboxed-label svelte-10yvzvw\">Just unboxed a <span");
+    if (rainbow) sb_append(sb, " class=\"rainbowText\"");
+    sb_appendf(sb, " style=\"color: %s; font-weight: 700;\">", col);
+    sb_append_esc(sb, s->name);
+    sb_appendf(sb, "</span> !</div> <button class=\"post-item-card svelte-10yvzvw\" type=\"button\" onclick=\"v10s('stop');v10s('pskin',%d)\">"
+                   "<img class=\"post-item-thumb svelte-10yvzvw\" loading=\"lazy\" src=\"", index);
+    sb_append_esc(sb, url);
+    sb_append(sb, "\" alt=\"");
+    sb_append_esc(sb, s->name);
+    sb_appendf(sb, "\"> <span class=\"post-item-name svelte-10yvzvw%s\" style=\"color: %s\">", rainbow ? " rainbowText" : "", col);
+    sb_append_esc(sb, s->name);
+    sb_append(sb, "</span></button> ");
+}
+
 static void sb_post(StrBuf *sb, const cJSON *p, const int clickable) {
     const int64_t pid = (int64_t) jnum(p, "pid");
     const int typ = (int) jnum(p, "typ");
@@ -1477,6 +1599,7 @@ static void sb_post(StrBuf *sb, const cJSON *p, const int clickable) {
     if (jnum(p, "ftr") > 0) sb_append(sb, "<i class=\"material-icons post-badge svelte-10yvzvw\" style=\"color: #4fc3f7\">check_circle</i> ");
     commas(num, sizeof(num), jnum(p, "flw"));
     sb_appendf(sb, "<span class=\"post-time svelte-10yvzvw\">%s</span></div> <div class=\"post-sub svelte-10yvzvw\">%s followers</div></div></div> ", time_s, num);
+    if (typ == 5) sb_unboxed(sb, p);
     // media (map / mod / hosted game thumbnails on user-assets)
     const char *lnk = jstr(p, "lnk"), *lnk2 = jstr(p, "lnk2");
     char url[160] = "";
@@ -1508,6 +1631,7 @@ static void sb_post(StrBuf *sb, const cJSON *p, const int clickable) {
         }
         sb_append(sb, "</div> ");
     }
+    if (typ == 8) sb_match_result(sb, p);
     if (typ != 8 && jstr(p, "txt")[0]) {
         sb_append(sb, "<div class=\"post-text svelte-10yvzvw\">");
         sb_append_esc(sb, jstr(p, "txt"));
@@ -4510,7 +4634,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             snprintf(url, sizeof(url), "/social.html?p=%s&q=%s", is_mod ? "mod" : "map", enc);
             ui_open_external(url);
         }
-    } else if (!strcmp(op, "pskin") && v && v->type == V_PROFILE) { // a created skin: its item page (svelte-dmu4q2, deob-10.0.3.js:125918-125922)
+    } else if (!strcmp(op, "pskin")) { // a created skin, or an unbox post's item card (deob-10.0.7.js:107102)
         v10_market_wallet_item((int) arg_num(args, argc, 1, -1));
     } else if (!strcmp(op, "btip") && v && v->type == V_PROFILE) { // a badge's tooltip: its name and description (deob-10.0.3.js:125949-125975)
         const BadgeDef *b = badge_get((int) arg_num(args, argc, 1, -1));
