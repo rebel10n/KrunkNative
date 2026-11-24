@@ -1879,6 +1879,46 @@ static void owned_name_tags(StrBuf *out, const cJSON *meta) {
     cJSON_Delete(parsed);
 }
 
+// createTip's attributes (deob-10.0.7.js:221824, read at :223708-223712). A wear writes the tier name
+// and the float; the seed is iiiíìiî of the copy (data-seed), 0 omitted.
+void ui_loadout_tooltip_attrs(StrBuf *sb, const cJSON *meta, const int64_t copy_id) {
+    cJSON *parsed = cJSON_IsString(meta) && meta->valuestring ? cJSON_Parse(meta->valuestring) : NULL;
+    const cJSON *m = parsed ? parsed : (cJSON_IsObject(meta) ? meta : NULL);
+    if (cJSON_IsObject(m)) {
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(m, "name"));
+        if (name && name[0]) {
+            sb_append(sb, " data-nametag='");
+            sb_append_esc(sb, name);
+            sb_append(sb, "'");
+        }
+        const cJSON *wear = cJSON_GetObjectItemCaseSensitive(m, "wear");
+        if (cJSON_IsNumber(wear)) {
+            const char *tier = i18n_t(ui_loadout_wear_tier_key(wear->valuedouble));
+            sb_append(sb, " data-wear='");
+            sb_append_esc(sb, tier ? tier : "");
+            sb_appendf(sb, "' data-wear-float='%.4f'", wear->valuedouble);
+        }
+        const cJSON *serial = cJSON_GetObjectItemCaseSensitive(m, "serial");
+        if (cJSON_IsNumber(serial)) sb_appendf(sb, " data-serial='%.15g'", serial->valuedouble);
+        const char *paint = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(m, "paint"));
+        if (paint && paint[0]) {
+            char clean[16];
+            size_t k = 0;
+            for (const char *p = paint; *p && k + 1 < sizeof clean; p++) {
+                if (*p == '#' || (*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) clean[k++] = *p;
+            }
+            clean[k] = 0;
+            if (clean[0]) sb_appendf(sb, " data-paint='%s'", clean);
+        }
+        const cJSON *shader = cJSON_GetObjectItemCaseSensitive(m, "paintShader");
+        if (cJSON_IsNumber(shader)) sb_appendf(sb, " data-paint-shader='%d'", shader->valueint);
+    }
+    const cJSON *seed = cJSON_IsObject(m) ? cJSON_GetObjectItemCaseSensitive(m, "seed") : NULL;
+    const int32_t v = skin_copy_seed(copy_id, cJSON_IsNumber(seed), cJSON_IsNumber(seed) ? seed->valuedouble : 0.0);
+    if (v) sb_appendf(sb, " data-seed='%d'", (int) v);
+    cJSON_Delete(parsed);
+}
+
 static void fav_button(StrBuf *out, const int ind, const int id, const int fav) {
     sb_appendf(out, "<div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='%s' data-icon='%s' onclick='favItem(this, %d",
                fav ? "yellow" : "white", fav ? "star" : "star_border", ind);
@@ -1917,7 +1957,9 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
     } else {
         sb_append(out, " ");
     }
-    sb_appendf(out, "data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>", o->ind);
+    sb_appendf(out, "data-index='%d'", o->ind);
+    ui_loadout_tooltip_attrs(out, o->meta, o->copy_id);
+    sb_append(out, " onmouseover='createTip(this)' onmouseout='cancelTip()'>");
     if (!is_free) sb_appendf(out, "<div class='itemCnt' data-badge='x%d'></div>", o->cnt);
     sb_append_esc(out, s->name ? s->name : "");
     owned_name_tags(out, o->meta);

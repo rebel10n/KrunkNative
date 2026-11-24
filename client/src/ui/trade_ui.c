@@ -215,30 +215,9 @@ static void item_key(char *out, const size_t n, const int skin, const int64_t co
     else snprintf(out, n, "%d", skin);
 }
 
-// the data-* attributes ui_tooltip.c reads (nametag, wear, serial, paint): v10's iïÍìîîì (:251136)
-static void meta_attrs(StrBuf *sb, const cJSON *m) {
-    if (!cJSON_IsObject(m)) return;
-    const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(m, "name"));
-    if (name && *name) {
-        sb_append(sb, " data-nametag='");
-        sb_append_esc(sb, name);
-        sb_append(sb, "'");
-    }
-    const cJSON *wear = cJSON_GetObjectItemCaseSensitive(m, "wear"), *serial = cJSON_GetObjectItemCaseSensitive(m, "serial");
-    if (cJSON_IsNumber(wear)) sb_appendf(sb, " data-wear-float='%.4f'", wear->valuedouble);
-    if (cJSON_IsNumber(serial)) sb_appendf(sb, " data-serial='%lld'", (long long) serial->valuedouble);
-    const char *paint = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(m, "paint"));
-    if (paint && *paint) {
-        char clean[16];
-        size_t k = 0;
-        for (const char *p = paint; *p && k + 1 < sizeof(clean); p++) {
-            if (*p == '#' || (*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) clean[k++] = *p;
-        }
-        clean[k] = 0;
-        sb_appendf(sb, " data-paint='%s'", clean);
-    }
-    const cJSON *shader = cJSON_GetObjectItemCaseSensitive(m, "paintShader");
-    if (cJSON_IsNumber(shader)) sb_appendf(sb, " data-paint-shader='%d'", (int) shader->valuedouble);
+// the data-* attributes createTip and openSales read (deob-10.0.7.js:221824)
+static void meta_attrs(StrBuf *sb, const cJSON *m, const int64_t copy) {
+    ui_loadout_tooltip_attrs(sb, m, copy);
 }
 
 static void item_image(StrBuf *sb, const ViewerSkin *s) {
@@ -268,7 +247,7 @@ static void inv_card(StrBuf *sb, const int side, const TradeUiItem *it) {
     const int offered = offered_units(side, it->skin, it->copy);
     sb_appendf(sb, " style='border: 2px solid %s;%s' oncontextmenu='openSales(%d,this)' data-index='%d'", rarity_color(s),
                it->copy && offered ? "opacity: 0.3;" : "", it->skin, it->skin);
-    meta_attrs(sb, it->meta);
+    meta_attrs(sb, it->meta, it->copy);
     sb_append(sb, " onmouseover='createTip(this)' onmouseout='cancelTip()'>");
     item_image(sb, s);
     sb_append(sb, "<div class='tItemN'>");
@@ -299,7 +278,7 @@ static char *trade_list_html(const int side) {
         else if (sel->copy) sb_appendf(&sb, "onclick='windows[36].remove(%d,%lld)' ", sel->skin, (long long) sel->copy);
         else sb_appendf(&sb, "onclick='windows[36].remove(%d)' ", sel->skin);
         sb_appendf(&sb, "style='border: 2px solid %s;' data-index='%d'", rarity_color(s), sel->skin);
-        meta_attrs(&sb, it ? it->meta : NULL);
+        meta_attrs(&sb, it ? it->meta : NULL, sel->copy);
         sb_append(&sb, " onmouseover='createTip(this)' onmouseout='cancelTip()'>");
         item_image(&sb, s);
         sb_append(&sb, "<div class='tItemN'>");

@@ -839,6 +839,10 @@ int ui_loadout_copy_style(int index, int copy_id);
 // The copy's name tag (m.name, deob-10.0.7.js:176440): only the copy `copy_id` names (a slot's "<copyId>#<index>").
 // A plain index has no m on the slot, so none. 1 and the name in `out` when that copy has one, else 0 and out empty.
 int ui_loadout_copy_name(int index, int copy_id, char *out, size_t n);
+// createTip's data-* on a copy card (deob-10.0.7.js:221824): data-nametag, data-wear (the tier) and
+// data-wear-float, data-serial, data-paint, data-paint-shader, and data-seed (iiiíìiî of the copy).
+// meta is the entry's m, an object or a JSON string. copy_id 0 is a stack (no seed).
+void ui_loadout_tooltip_attrs(StrBuf *sb, const cJSON *meta, int64_t copy_id);
 // The copy ids of the last look built for an ENT (ui_loadout_look(.., for_ent=1, ..)): the local player's model reads its
 // copies from it while in a game, as the server does (NET_EXT_KN_SKIN_COPY_IDS).
 const NetSkinCopyIdsPacket *ui_loadout_ent_copies(void);
