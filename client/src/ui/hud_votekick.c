@@ -11,7 +11,9 @@
 #include <html_ui.h>
 #include <hud_social.h>
 #include <player_accounts.h>
+#include <backend.h> // the Demos / Reviewers web API lists
 #include <backend_ui.h> // active_account: v10 shows Votekick / K.P.D to accounts only; servers_ui_join_game (policeJoin)
+#include <krunker_account.h> // the same reads for an official krunker.io account
 #include <krunker_net.h> // policeJoin's queue hand-off on the official link (krunker_net_join_queue)
 #include <audio.h>
 #include <net_ext.h>
@@ -66,6 +68,7 @@ static struct {
     int list_code;
     int list_timer;            // the list request's no-answer timer, 0 none
     int list_wait;             // the code it waits for (tab + 1)
+    unsigned list_gen;         // a direct web answer is stale after a newer list request
     // --render-scenario / tests: the rows come from here instead of the live game
     cJSON *override;
 } g_vk;
@@ -796,8 +799,8 @@ static void kpd_demo_rows(StrBuf *sb, const cJSON *rows, const int more, const i
                     sb_append(sb, "</a>");
                 } else {
                     sb_appendf(sb, "<span style='font-size:16px'>Suspect #%d</span>", group);
+                    if (kpd_num(d, "gst")) sb_append(sb, " <span style='color:#858585;font-size:13px'>guest</span>");
                 }
-                if (kpd_num(d, "gst")) sb_append(sb, " <span style='color:#858585;font-size:13px'>guest</span>");
                 sb_append(sb, "</td>");
             } else {
                 sb_append(sb, "<td></td>");
@@ -871,11 +874,80 @@ static void kpd_reviewer_rows(StrBuf *sb, const cJSON *rows) {
     sb_append(sb, "</div>");
 }
 
+// The web API answers {data:{rows:[{group,demos:[...]}],more}} and {data:{month:[...],all:[...]}}.
+// The older game-server relay already flattens both. Give the renderer one shape, propagating the group's
+// ban flag to every demo exactly as policeRes does (:223203-223214).
+static void kpd_copy_field(cJSON *to, const cJSON *from, const char *key) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(from, key);
+    cJSON_DeleteItemFromObject(to, key);
+    if (v) cJSON_AddItemToObject(to, key, cJSON_Duplicate(v, 1));
+}
+
+static cJSON *kpd_list_payload(const int code, cJSON *root) {
+    if (!root) return NULL;
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (cJSON_IsObject(data) || cJSON_IsArray(data)) {
+        cJSON *unwrapped = cJSON_Duplicate(data, 1);
+        cJSON_Delete(root);
+        root = unwrapped;
+    }
+    if (cJSON_IsArray(root)) return root;
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    if (code == 4) {
+        const cJSON *groups = cJSON_GetObjectItemCaseSensitive(root, "rows");
+        if (!cJSON_IsArray(groups)) {
+            cJSON_Delete(root);
+            return NULL;
+        }
+        cJSON *out = cJSON_CreateArray();
+        const cJSON *group;
+        cJSON_ArrayForEach(group, groups) {
+            const cJSON *demo;
+            cJSON_ArrayForEach(demo, cJSON_GetObjectItemCaseSensitive(group, "demos")) {
+                cJSON *flat = cJSON_Duplicate(demo, 1);
+                kpd_copy_field(flat, group, "grp");
+                kpd_copy_field(flat, group, "name");
+                kpd_copy_field(flat, group, "gst");
+                kpd_copy_field(flat, group, "ban");
+                cJSON_AddItemToArray(out, flat);
+            }
+        }
+        if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "more")) || kpd_num(root, "more")) {
+            cJSON *trailer = cJSON_CreateObject();
+            cJSON_AddNumberToObject(trailer, "more", 1);
+            cJSON_AddItemToArray(out, trailer);
+        }
+        cJSON_Delete(root);
+        return out;
+    }
+    if (code == 5) {
+        static const char *const ranges[] = {"month", "all"};
+        cJSON *out = cJSON_CreateArray();
+        for (size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++) {
+            const cJSON *row;
+            cJSON_ArrayForEach(row, cJSON_GetObjectItemCaseSensitive(root, ranges[i])) {
+                cJSON *flat = cJSON_Duplicate(row, 1);
+                cJSON_DeleteItemFromObject(flat, "range");
+                cJSON_AddStringToObject(flat, "range", ranges[i]);
+                cJSON_AddItemToArray(out, flat);
+            }
+        }
+        cJSON_Delete(root);
+        return out;
+    }
+    cJSON_Delete(root);
+    return NULL;
+}
+
 // The list's HTML for #kpdCalls (policeRes codes 1..5). A failed request says its message (v10 _71741,
 // "Request Failed" by default). rows: the parsed JSON array of the list; codes 4 and 5 take the trailer
 // {"more": 1} of the demos. Malloc'd.
 char *hud_kpd_list_html(const int code, const int status, const char *message, const char *json, const size_t json_len) {
-    cJSON *rows = json && json_len ? cJSON_ParseWithLength(json, json_len) : NULL;
+    cJSON *parsed = json && json_len ? cJSON_ParseWithLength(json, json_len) : NULL;
+    cJSON *rows = kpd_list_payload(code, parsed);
     StrBuf sb = {0};
     if (status != NET_KPD_REPORTED) {
         sb_append_esc(&sb, message && message[0] ? message : "Request Failed");
@@ -904,6 +976,85 @@ char *hud_kpd_list_html(const int code, const int status, const char *message, c
     return sb_finish(&sb);
 }
 
+// ---------------------------------------------------------------- Demos / Reviewers over the web API
+
+// v10 calls kpd.listDemos / kpd.reviewers directly, not through the game socket (:223066-223076,
+// :27443-27479). Box Office uses its brain; an official game uses the official account's gapi token.
+typedef struct { int code; unsigned gen; } KpdWebRequest;
+static void list_no_answer(void *user);
+
+static int kpd_web_take(const KpdWebRequest *req) {
+    if (!req || req->gen != g_vk.list_gen || req->code != g_vk.list_wait || req->code - 1 != ui_loadout_kpd_tab()) return 0;
+    if (g_vk.list_timer) html_timer_cancel(g_vk.list_timer);
+    g_vk.list_timer = 0;
+    return 1;
+}
+
+static const char *kpd_web_error(const cJSON *root) {
+    const cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    const cJSON *message = cJSON_IsObject(error) ? cJSON_GetObjectItemCaseSensitive(error, "message") : error;
+    return cJSON_IsString(message) && message->valuestring[0] ? message->valuestring : "Request Failed";
+}
+
+static void kpd_web_answer(KpdWebRequest *req, const int status, const cJSON *root, const char *body, const size_t length) {
+    if (!kpd_web_take(req)) return;
+    if (status >= 200 && status < 300) {
+        if (root) {
+            char *text = cJSON_PrintUnformatted(root);
+            kpd_list_show(req->code, NET_KPD_REPORTED, "", text, text ? strlen(text) : 0);
+            free(text);
+        } else {
+            kpd_list_show(req->code, NET_KPD_REPORTED, "", body, length);
+        }
+    } else {
+        kpd_list_show(req->code, NET_KPD_UNAVAILABLE, kpd_web_error(root), NULL, 0);
+    }
+}
+
+static void kpd_http_done(void *user, const int status, const char *body, const size_t length) {
+    KpdWebRequest *req = user;
+    cJSON *root = body && length ? cJSON_ParseWithLength(body, length) : NULL;
+    kpd_web_answer(req, status, root, body, length);
+    cJSON_Delete(root);
+    free(req);
+}
+
+static void kpd_kio_done(void *user, const int status, const cJSON *root) {
+    KpdWebRequest *req = user;
+    kpd_web_answer(req, status, root, NULL, 0);
+    free(req);
+}
+
+// listDemos includes off and q only when truthy, with URLSearchParams escaping (:27445-27453).
+static int kpd_web_start(const int code, const int off, const char *q) {
+    KpdWebRequest *req = calloc(1, sizeof(*req));
+    if (!req) return 0;
+    req->code = code;
+    req->gen = g_vk.list_gen;
+    char path[256];
+    if (code == 4) {
+        snprintf(path, sizeof path, "/kpd/demos");
+        if (off) snprintf(path + strlen(path), sizeof(path) - strlen(path), "?off=%d", off);
+        if (q && q[0]) {
+            char enc[96];
+            backend_url_encode(enc, sizeof enc, q);
+            snprintf(path + strlen(path), sizeof(path) - strlen(path), "%sq=%s", off ? "&" : "?", enc);
+        }
+    } else {
+        snprintf(path, sizeof path, "/kpd/reviewers");
+    }
+    g_vk.list_wait = code;
+    g_vk.list_timer = html_timer_add(KPD_NO_ANSWER_MS, list_no_answer, NULL);
+    const int sent = krunker_net_active()
+        ? krunker_account_api("GET", KRUNKER_SVC_API, path, NULL, kpd_kio_done, req)
+        : backend_http_get_auth(path, account_session_token(), kpd_http_done, req);
+    if (sent) return 1;
+    if (g_vk.list_timer) html_timer_cancel(g_vk.list_timer);
+    g_vk.list_timer = 0;
+    free(req);
+    return 0;
+}
+
 // KrunkNative: a list request nothing answered in KPD_NO_ANSWER_MS (a server that refuses it in
 // silence, a dropped brain request) says v10's failed-request text (_71741) instead of "Loading..."
 // for good, if its tab is still the one on show.
@@ -918,6 +1069,7 @@ static void list_no_answer(void *user) {
 }
 
 void hud_votekick_kpd_request(Client *client, const int tab) {
+    g_vk.list_gen++; // invalidate a direct web answer from the previous tab
     if (g_vk.list_timer) html_timer_cancel(g_vk.list_timer);
     g_vk.list_timer = 0;
     if (g_scenario_lists) return;
@@ -934,12 +1086,18 @@ void hud_votekick_kpd_request(Client *client, const int tab) {
     g_vk.list_timer = html_timer_add(KPD_NO_ANSWER_MS, list_no_answer, NULL);
 }
 
-// "kpd" tab 4 (Demos: v10 kpd.listDemos {off, q}) / tab 5 (Reviewers: kpd.reviewers()) as NET_EXT_KPD_LIST.
-// The answer is policeRes code 4 / 5 (NET_EXT_KPD_RESPONSE, joined pages).
+// "kpd" tab 4 (Demos: v10 kpd.listDemos {off, q}) / tab 5 (Reviewers: kpd.reviewers()) from the
+// account backend's web API. The native-server fallback is NET_EXT_KPD_LIST; both render through policeRes 4 / 5.
 void hud_votekick_kpd_list(Client *client, const int code, const int off, const char *q) {
+    g_vk.list_gen++;
     if (g_vk.list_timer) html_timer_cancel(g_vk.list_timer);
     g_vk.list_timer = 0;
     if (g_scenario_lists) return;
+    if (krunker_net_active() || backend_enabled()) { // the web API is independent of the game socket
+        if (!kpd_web_start(code, off, q)) kpd_list_show(code, NET_KPD_UNAVAILABLE, "Request Failed", NULL, 0);
+        return;
+    }
+    // A standalone server with no account backend keeps the legacy relay's refusal.
     if (!client || !call_reachable(client)) {
         kpd_list_show(code, NET_KPD_UNAVAILABLE, "Not connected to a server", NULL, 0);
         return;
@@ -959,12 +1117,34 @@ void hud_votekick_watch_demo(const char *tok, const char *ct) {
     hud_replay_watch(NULL, tok, ct);
 }
 
-// copyDemoLink(el, tok, ct) (v10 :222653): "?demo=<tok>&sus=<ct>" to the clipboard (the page's origin is
-// the one this client runs under; KrunkNative has no demo page to open it on yet).
-void hud_votekick_copy_demo_link(const char *tok, const char *ct) {
-    char link[96];
-    snprintf(link, sizeof(link), "?demo=%s%s%s", tok ? tok : "", ct && ct[0] ? "&sus=" : "", ct ? ct : "");
+// copyDemoLink(el, tok, ct) (:229835-229844): the page's absolute demo URL, then "check" for 1250 ms.
+static struct { HtmlElem el; char text[32]; int timer; } g_demo_copy;
+
+static void demo_copy_restore(void *user) {
+    (void) user;
+    if (g_demo_copy.el) html_dom_set_text(g_demo_copy.el, g_demo_copy.text);
+    g_demo_copy.el = 0;
+    g_demo_copy.text[0] = 0;
+    g_demo_copy.timer = 0;
+}
+
+void hud_votekick_copy_demo_link(const HtmlElem el, const char *tok, const char *ct) {
+    char origin[256], link[512];
+    html_page_origin(origin, sizeof origin);
+    snprintf(link, sizeof(link), "%s/?demo=%s%s%s", origin, tok ? tok : "", ct && ct[0] ? "&sus=" : "", ct ? ct : "");
     html_clipboard_write(link);
+    if (!el) return;
+    char before[32] = "";
+    html_dom_get_text(el, before, sizeof before);
+    if (!strcmp(before, "check")) return; // the first click's timer and original text stay
+    if (g_demo_copy.timer) {
+        html_timer_cancel(g_demo_copy.timer);
+        demo_copy_restore(NULL);
+    }
+    g_demo_copy.el = el;
+    snprintf(g_demo_copy.text, sizeof g_demo_copy.text, "%s", before);
+    html_dom_set_text(el, "check");
+    g_demo_copy.timer = html_timer_add(1250.0, demo_copy_restore, NULL);
 }
 
 // The player list's Kick / Ban (v10 ADMIN_ACTIONS): one NET_EXT_ADMIN_ACTION. The button shows only

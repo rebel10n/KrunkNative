@@ -423,7 +423,7 @@ H(h_toggle_log) { UNUSED; v10_news_toggle_log(arg_elem(ev, args, argc, 0)); retu
 H(h_kpd_demo_search) { UNUSED; ui_loadout_kpd_demo_search(arg_bool(ev, args, argc, 0, 0)); return 1; } // kpdDemoSearch(clear)
 H(h_kpd_demo_page) { UNUSED; ui_loadout_kpd_demo_page(arg_int(args, argc, 0, 0)); return 1; }          // kpdDemoPage(delta)
 H(h_watch_demo) { UNUSED; hud_votekick_watch_demo(arg_str(ev, args, argc, 0, ""), arg_str(ev, args, argc, 1, "")); return 1; } // watchDemo(tok, ct)
-H(h_copy_demo_link) { UNUSED; hud_votekick_copy_demo_link(arg_str(ev, args, argc, 1, ""), arg_str(ev, args, argc, 2, "")); return 1; } // copyDemoLink(this, tok, ct)
+H(h_copy_demo_link) { UNUSED; hud_votekick_copy_demo_link(arg_elem(ev, args, argc, 0), arg_str(ev, args, argc, 1, ""), arg_str(ev, args, argc, 2, "")); return 1; } // copyDemoLink(this, tok, ct)
 H(h_toggle_spect) {
     UNUSED;
     spectate_set_requested(arg_bool(ev, args, argc, 0, 0));

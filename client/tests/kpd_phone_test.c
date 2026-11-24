@@ -16,9 +16,9 @@
 //   * a list in pages (name "page/pages") is joined and rendered into #kpdCalls with the last page;
 //     a list for another tab than the one on show is ignored; v10's call order and rating colours;
 //     the Stats tab's Range / Tag Count table
-//   * the Demos tab (code 4: NET_EXT_KPD_LIST with off and q) renders the search line, the suspects' table
-//     with Watch / copy, Prev / Next from the trailer, and the empty texts; watchDemo fails with v10's text
-//   * the Reviewers tab (code 5) renders Last 30 Days and All Time side by side
+//   * the Demos tab (code 4) and Reviewers (code 5) use the web API, render both grouped HTTP and
+//     relay-flat rows, propagate the group ban and show guest only when not banned; copyDemoLink copies
+//     the absolute URL and restores its icon after 1250 ms
 //   * an officer's list needs a session: with none it says "Not connected to a server" and sends nothing
 //   * [Y] twice (kpdVoteY) tags the case: one "rkpd" 1; no case or not spectating: the key does nothing
 //   * a list request nobody answers (an official krunker.io server that sends an officer's list only to
@@ -31,7 +31,9 @@
 #include <html_dom.h>
 #include <html_ui.h>
 #include <audio.h>
+#include <backend.h>
 #include <backend_ui.h>
+#include <krunker_account.h>
 #include <game_config.h>
 #include <net_ext.h>
 #include <spectate.h>
@@ -99,9 +101,11 @@ static void advance(const double ms) {
 #define ELEM_PHONE 1
 #define ELEM_VOTE 2
 #define ELEM_KPD_CALLS 3
+#define ELEM_COPY 4
 static char *g_kpd_calls_html; // #kpdCalls' innerHTML (NULL: never set)
 static int g_kpd_tab_shown;    // ui_loadout_kpd_tab()
 static char g_phone_margin[32] = "-700px"; // the stylesheet's #phoneImg default is hidden (the INIT state)
+static char g_copy_text[32] = "content_copy", g_clipboard[512];
 
 HtmlElem html_dom_by_id(const char *id) {
     if (!strcmp(id, "phoneImg")) return ELEM_PHONE;
@@ -121,7 +125,17 @@ void html_dom_set_display(HtmlElem e, const char *value) { (void) e; (void) valu
 void html_dom_set_style(HtmlElem e, const char *prop, const char *value) {
     if (e == ELEM_PHONE && !strcmp(prop, "margin-bottom")) snprintf(g_phone_margin, sizeof(g_phone_margin), "%s", value);
 }
-void html_clipboard_write(const char *text) { (void) text; }
+void html_dom_set_text(HtmlElem e, const char *text) {
+    if (e == ELEM_COPY) snprintf(g_copy_text, sizeof(g_copy_text), "%s", text ? text : "");
+}
+int html_dom_get_text(HtmlElem e, char *buf, size_t n) {
+    if (e != ELEM_COPY) return -1;
+    const size_t len = strlen(g_copy_text);
+    if (buf && n) snprintf(buf, n, "%s", g_copy_text);
+    return (int) len;
+}
+void html_page_origin(char *buf, size_t n) { if (buf && n) snprintf(buf, n, "https://krunk.io"); }
+void html_clipboard_write(const char *text) { snprintf(g_clipboard, sizeof(g_clipboard), "%s", text ? text : ""); }
 
 static int phone_up(void) { return !strcmp(g_phone_margin, "0px"); }
 
@@ -205,6 +219,34 @@ void ui_loadout_clear_pops(void) { g_popups_cleared++; }
 
 // ------------------------------------------------------------------ game / session stubs
 const AccountInfo *active_account(void) { return NULL; }
+static int g_backend_enabled, g_http_calls;
+static char g_http_path[256];
+static BackendHttpFn g_http_done;
+static void *g_http_user;
+int backend_enabled(void) { return g_backend_enabled; }
+const char *account_session_token(void) { return "test-token"; }
+void backend_url_encode(char *out, size_t n, const char *s) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t o = 0;
+    for (; s && *s && o + 4 < n; s++) {
+        const unsigned char c = (unsigned char) *s;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strchr("-_.~", c)) out[o++] = (char) c;
+        else { out[o++] = '%'; out[o++] = hex[c >> 4]; out[o++] = hex[c & 15]; }
+    }
+    if (n) out[o] = 0;
+}
+int backend_http_get_auth(const char *path, const char *bearer, BackendHttpFn fn, void *user) {
+    (void) bearer;
+    g_http_calls++;
+    snprintf(g_http_path, sizeof(g_http_path), "%s", path ? path : "");
+    g_http_done = fn;
+    g_http_user = user;
+    return 1;
+}
+int krunker_account_api(const char *method, KrunkerService svc, const char *path, const char *body, KrunkerApiFn fn, void *user) {
+    (void) method; (void) svc; (void) path; (void) body; (void) fn; (void) user;
+    return 0;
+}
 int game_config_is_custom(const Game *g) { (void) g; return 0; }
 int servers_ui_join_game(const char *game_id) { (void) game_id; return 0; }
 static int g_spectating;
@@ -295,6 +337,13 @@ static void reset_world(void) {
     g_popups_cleared = 0;
     g_sent = 0;
     g_last_sub = 0;
+    g_backend_enabled = 0;
+    g_http_calls = 0;
+    g_http_path[0] = 0;
+    g_http_done = NULL;
+    g_http_user = NULL;
+    snprintf(g_copy_text, sizeof(g_copy_text), "content_copy");
+    g_clipboard[0] = 0;
     hud_votekick_reset(); // the INIT state of a fresh session: nothing in flight, phone down
     g_sent = 0; // the reset itself sends nothing; keep the counters at zero for the case
     g_chat_n = 0;
@@ -577,6 +626,66 @@ static void case_reviewers_and_watch(void) {
     free(c);
 }
 
+static void case_web_lists(void) {
+    reset_world();
+    Client *c = make_client(0);
+    c->net_socket = -1; // v10's web lists do not need the game socket
+    g_backend_enabled = 1;
+    g_kpd_tab_shown = 3;
+    hud_votekick_kpd_list(c, 4, 30, "Bad Name");
+    CHECK(g_sent == 0 && g_http_calls == 1 && !strcmp(g_http_path, "/kpd/demos?off=30&q=Bad%20Name"),
+          "Demos use GET /kpd/demos with v10's query, not the game socket (%s)", g_http_path);
+    CHECK(live_timers() == 1 && g_last_timer_ms == 15000.0, "the web list has the same no-answer timeout");
+    const char demos[] = "{\"data\":{\"rows\":["
+        "{\"grp\":2,\"name\":\"Bad_Ann\",\"gst\":1,\"ban\":1,\"demos\":["
+        "{\"tok\":\"tokA\",\"ct\":\"ctA\",\"typ\":1,\"map\":\"Kanji\",\"mod\":\"ffa\",\"dat\":1700000000,\"dur\":125000,\"opn\":1,\"yes\":2,\"f_no\":1,\"myv\":1},"
+        "{\"tok\":\"tokB\",\"ct\":\"ctB\",\"typ\":0,\"map\":\"Burg\",\"mod\":\"ffa\",\"dat\":1700000001,\"dur\":60000,\"opn\":0}]},"
+        "{\"grp\":3,\"name\":\"\",\"gst\":1,\"ban\":0,\"demos\":["
+        "{\"tok\":\"tokC\",\"ct\":\"\",\"typ\":0,\"map\":\"Sandstorm\",\"mod\":\"tdm\",\"dat\":1700000002,\"dur\":1000,\"opn\":1,\"yes\":0,\"f_no\":0}]}],"
+        "\"more\":true}}";
+    g_http_done(g_http_user, 200, demos, strlen(demos));
+    g_http_done = NULL;
+    const char *h = g_kpd_calls_html ? g_kpd_calls_html : "";
+    CHECK(live_timers() == 0 && strstr(h, "watchDemo('tokA','ctA')") && strstr(h, "copyDemoLink(this,'tokC','')"),
+          "the grouped HTTP demos flatten into Watch / copy rows (%s)", h);
+    CHECK(strstr(h, "Bad_Ann") && strstr(h, "BANNED") && strstr(h, "Suspect #3") && strstr(h, "kpdDemoPage(1)"),
+          "group name, ban propagation, anonymous group and More survive (%s)", h);
+    CHECK(strstr(h, "Suspect #3</span> <span style='color:#858585;font-size:13px'>guest") && !strstr(h, "Bad_Ann</a> <span"),
+          "only a non-banned suspect gets the guest tag (%s)", h);
+
+    g_kpd_tab_shown = 4;
+    hud_votekick_kpd_list(c, 5, 0, "");
+    CHECK(g_http_calls == 2 && !strcmp(g_http_path, "/kpd/reviewers"), "Reviewers use GET /kpd/reviewers (%s)", g_http_path);
+    const char reviewers[] = "{\"data\":{\"month\":[{\"name\":\"rev_one\",\"cnt\":4}],\"all\":[{\"name\":\"rev_two\",\"cnt\":9}]}}";
+    g_http_done(g_http_user, 200, reviewers, strlen(reviewers));
+    g_http_done = NULL;
+    h = g_kpd_calls_html ? g_kpd_calls_html : "";
+    CHECK(strstr(h, "Last 30 Days") && strstr(h, "rev_one") && strstr(h, "rev_two"), "month / all reviewer arrays render in their own tables (%s)", h);
+
+    hud_votekick_kpd_list(c, 5, 0, "");
+    const char denied[] = "{\"error\":{\"message\":\"Not an officer\"}}";
+    g_http_done(g_http_user, 401, denied, strlen(denied));
+    g_http_done = NULL;
+    CHECK(g_kpd_calls_html && !strcmp(g_kpd_calls_html, "Not an officer"), "the web error's own text reaches the list (%s)", g_kpd_calls_html);
+    free(c);
+}
+
+static void case_copy_demo_link(void) {
+    reset_world();
+    hud_votekick_copy_demo_link(ELEM_COPY, "tokA", "ctA");
+    CHECK(!strcmp(g_clipboard, "https://krunk.io/?demo=tokA&sus=ctA"), "copyDemoLink copies the absolute page URL (%s)", g_clipboard);
+    CHECK(!strcmp(g_copy_text, "check") && live_timers() == 1 && g_last_timer_ms == 1250.0, "the copy icon becomes check for 1250 ms");
+    hud_votekick_copy_demo_link(ELEM_COPY, "tokA", "ctA");
+    CHECK(live_timers() == 1, "a second click while checked keeps the first restore timer");
+    advance(1249);
+    CHECK(!strcmp(g_copy_text, "check"), "the check remains just before 1250 ms");
+    advance(1);
+    CHECK(!strcmp(g_copy_text, "content_copy") && live_timers() == 0, "the original icon returns at 1250 ms");
+    hud_votekick_copy_demo_link(ELEM_COPY, "tokB", "");
+    CHECK(!strcmp(g_clipboard, "https://krunk.io/?demo=tokB"), "no call token means no sus query (%s)", g_clipboard);
+    advance(1250);
+}
+
 static void case_list_no_answer(void) {
     reset_world();
     Client *c = make_client(0);
@@ -657,6 +766,8 @@ int main(void) {
     case_ring_and_report_drop();
     case_demos_list();
     case_reviewers_and_watch();
+    case_web_lists();
+    case_copy_demo_link();
     case_list_no_answer();
     case_vision_case_owner();
     free(g_kpd_calls_html);

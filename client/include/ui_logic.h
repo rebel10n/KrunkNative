@@ -411,7 +411,7 @@ void hud_votekick_kpd_list(Client*, int code, int off, const char *q); // "kpd" 
 void hud_votekick_scenario_lists(int on);          // --render-scenario state.kpdPolice: lists from the fixture, no request
 void hud_votekick_scenario_list(Client*, int code, const char *json); // the fixture's policeRes (one page)
 void hud_votekick_watch_demo(const char *tok, const char *ct);   // watchDemo: no demo file here, v10's failed download
-void hud_votekick_copy_demo_link(const char *tok, const char *ct); // copyDemoLink: "?demo=tok&sus=ct" to the clipboard
+void hud_votekick_copy_demo_link(HtmlElem el, const char *tok, const char *ct); // copyDemoLink: <origin>/?demo=tok&sus=ct
 void hud_votekick_kpd_request(Client*, int tab);  // "kpd" tab 1 / 2 / 3: an officer's list for the K.P.D popup
 void hud_votekick_admin_action(Client*, int uid, int action); // NET_EXT_ADMIN_ACTION: 0 kick, 1 ban (DEV; the server checks)
 char *hud_kpd_list_html(int code, int status, const char *message, const char *json, size_t json_len); // policeRes 1 / 2 / 3 table, malloc'd

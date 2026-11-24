@@ -3161,8 +3161,7 @@ static void view_item(const int index, const int mode) {
 }
 
 // v10 _7291: the officers' tabs; switchKPDTab(i) asks the server for list i + 1 (policeRes code i + 1)
-// for the first three. Demos and Reviewers are v10 web API lists (kpd.listDemos / kpd.reviewers)
-// that KrunkNative has no backend for: their tab says so in #kpdCalls (v10's request-failed path).
+// for the first three. Demos and Reviewers use v10's web API lists (kpd.listDemos / kpd.reviewers).
 static const char *const KPD_TABS[] = {"Active Calls", "Ban Logs", "Stats", "Demos", "Reviewers"};
 #define KPD_TAB_COUNT ((int) (sizeof(KPD_TABS) / sizeof(KPD_TABS[0])))
 static int g_kpd_tab; // _71731
