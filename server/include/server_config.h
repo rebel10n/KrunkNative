@@ -103,7 +103,7 @@ typedef struct {
     float kr_multiplier;                 // on top of the mode's rewardMlt
 
     // ---- dedicated server (server.cfg, doc/backend.md 8.7)
-    char password[16];                   // sv_password: JOIN.password must match ("" = open server)
+    char password[17];                   // sv_password: 16 characters, JOIN.password must match ("" = open server)
     char rcon_password[GS_STR_SMALL];    // remote console password ("" = local rcon off; coordinator rcon still works)
     char rcon_host[GS_STR_SMALL];        // local rcon bind address (default 127.0.0.1)
     unsigned short rcon_port;            // local rcon TCP port, 0 = off

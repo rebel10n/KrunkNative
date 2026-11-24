@@ -3323,9 +3323,12 @@ typedef struct {
     char game_id[48];
     char client_key[352];  // the brain's signed join ticket (JWS HS256, ~250 chars)
     char session[64];
-    char name[32];
-    char password[16];     // server password (gameserver.password / server.cfg sv_password), "" none
+    char name[31];         // guest nickname (maxNameLength 14). 31, not 32, so the password below
+    char password[17];     // still fits this 512-byte packet: 16 characters (deob-10.0.7.js:204698
+                           // refuses a longer one), "" none
 } NetJoinPacket;           // 512 bytes = NET_MAX_PAYLOAD
+_Static_assert(sizeof(NetJoinPacket) == NET_MAX_PAYLOAD, "NetJoinPacket fills NET_MAX_PAYLOAD");
+_Static_assert(sizeof(((NetJoinPacket *) 0)->password) == 17, "a server password holds 16 characters");
 
 #define NET_JOIN_PACKET_V1_SIZE (offsetof(NetJoinPacket, name))
 #define NET_JOIN_PACKET_V2_SIZE (offsetof(NetJoinPacket, password)) // before the password field

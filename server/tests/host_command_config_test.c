@@ -56,6 +56,18 @@ int main(void) {
     CHECK(strstr(merged.game_request, "\"canSlide\":false") != NULL, "the file's canSlide survives the CLI game keys: %s", merged.game_request);
     CHECK(merged.game.game_time == 7, "CLI gameTime wins over the file's 3 (got %g)", (double) merged.game.game_time);
 
+    // 3. the host form allows 16 characters (deob-10.0.7.js:204698). The config and the JOIN field both keep them.
+    write_file("{\"gameserver\":{\"password\":\"0123456789abcdef\"}}");
+    GsConfig pw;
+    gs_config_defaults(&pw);
+    memset(err, 0, sizeof(err));
+    CHECK(gs_config_load(&pw, CFG_FILE, 1, err, sizeof(err)) == 0, "load password: %s", err);
+    CHECK(strcmp(pw.password, "0123456789abcdef") == 0, "a 16-character server password is kept (got %s)", pw.password);
+    NetJoinPacket join;
+    memset(&join, 0, sizeof(join));
+    snprintf(join.password, sizeof(join.password), "%s", pw.password);
+    CHECK(strcmp(join.password, pw.password) == 0, "the join packet carries all 16 characters");
+
     remove(CFG_FILE);
     if (g_failures) {
         printf("host_command_config_test: %d failure(s)\n", g_failures);
