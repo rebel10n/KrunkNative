@@ -2482,7 +2482,7 @@ def run_native_ingame():
     level 33, featured, class 1, the lobby's host; we kill it four ways, chat arrives on both tabs, the
     host moves to us, then the bot kills us with deathStats."""
     label = "native-ingame"
-    dense = ["nodes @wb [src='./img/wallbang_0.png']", "nodes @hs [src='img/headshot_0.png']",
+    dense = ["nodes @wb [src='./img/wallbang_0.png']", "nodes @hs [src='./img/headshot_0.png']",
              "nodes @thrown .thrownChatIcon", "nodes @stk2 [src='img/streaks/2.png']",
              "nodes @stk3 [src='img/streaks/3.png']", "text @feed [id=killFeed]"]
     sparse = ["text @lead [id=leaderContainer]", "nodes @team1 [data-tab='1']", "grep @chatteam push [id=chatList]",
