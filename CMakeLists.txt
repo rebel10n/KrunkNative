@@ -1655,6 +1655,11 @@ else ()
             add_test(NAME loadout_tip_attrs_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/loadout_tip_attrs_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(loadout_tip_attrs_e2e PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # end_return_e2e: the end screen's Return seeks a game (backToOrigin, deob-10.0.7.js:275828) offline and
+            # with a brain, and never disconnects
+            add_test(NAME end_return_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/end_return_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(end_return_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # chat_actions_e2e: a chat line's v10 actions ([Join Queue], NET_EXT_KN_CHAT_ACTIONS) in the rendered document
             add_test(NAME chat_actions_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chat_actions_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
