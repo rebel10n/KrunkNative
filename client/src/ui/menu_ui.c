@@ -757,6 +757,7 @@ static const char *connect_error_text(const char *error) {
 // until a map load that is not the page's first shows it (deob-10.0.5.js:224307-224331). Raising the curtain is a
 // fresh page for it too (v10_loading_page_reset), so the game the switch lands on shows no card, as in v10.
 static int g_boot_curtain = 1; // #instructionsFadeBG is up, waiting for an INIT
+static int g_preview_reveal = -1; // frames left before #classPreviewCanvas fades in; -1 not waiting (:226519, :228625)
 static int g_boot_settled;     // ... and has been drawn once at opacity 1 (the fade's start value)
 // The game it waits past: an in-place switch (menu_show_connecting, menu_host_offline) lifts the
 // curtain only on a later INIT, not on the game still loaded. Every INIT's game_init swaps
@@ -824,6 +825,8 @@ static void menu_boot_arm(const int any) {
     g_boot_mode = !any && g_ui.client ? (const void *) g_ui.client->game.mode : NULL;
     set_style("instructionsFadeBG", "transition", "opacity 0.001s");
     set_style("instructionsFadeBG", "opacity", "1");
+    set_style("classPreviewCanvas", "opacity", "0"); // hidden while this map loads (main.css starts it at 0)
+    g_preview_reveal = -1;
     v10_loading_page_reset();
     g_ui.last_instructions[0] = 0;
 }
@@ -847,6 +850,19 @@ static void menu_boot_tick(void) {
     set_style("instructionsFadeBG", "transition", ""); // main.css: opacity 0.7s ease-in-out
     set_style("instructionsFadeBG", "opacity", "0");
     menu_update_instructions();
+    // the session started (:226519 sets the reveal to 4). A scenario is a settled page: show it this frame.
+    g_preview_reveal = scenario_on() ? 0 : 4;
+}
+
+// #classPreviewCanvas stays at main.css opacity 0 through the map load, then one frame of the menu
+// after the countdown (:228625-228626) sets it to 1. Once shown it stays shown.
+static void preview_reveal_tick(void) {
+    if (g_preview_reveal < 0) return;
+    if (g_preview_reveal > 0) g_preview_reveal--;
+    if (g_preview_reveal == 0 && html_ui_is_menu_open()) {
+        set_style("classPreviewCanvas", "opacity", "1");
+        g_preview_reveal = -1;
+    }
 }
 
 // ui_scenario.c state.boot: the page before its first INIT (true, or {loadGamNm: "play" | "host" |
@@ -1963,10 +1979,11 @@ static void setup_dom(void) {
     set_display("frvrFTUEVideoHolder", "none");
     set_display("expertModeBtn", "none");
     // The class preview canvas keeps the size the three.js renderer gives it (750x600 CSS
-    // px); class_preview.c renders the player model into it (html_dom_canvas_gl).
+    // px); class_preview.c renders the player model into it (html_dom_canvas_gl). Opacity stays
+    // main.css's 0 until the map has loaded (:228626), except a scenario, which is a settled page.
     set_style("classPreviewCanvas", "width", "750px");
     set_style("classPreviewCanvas", "height", "600px");
-    set_style("classPreviewCanvas", "opacity", "1");
+    if (scenario_on()) set_style("classPreviewCanvas", "opacity", "1");
     set_style("bubbleContainer", "transform", "scale(0.0)");
     // #mainLogoFace: index.html's mainLogoFace.src = "./img/menu/faces/f_" + randInt(0, 15) + ".png"
     // (f_0 in --render-scenario renders, the reference captures pin it)
@@ -2176,6 +2193,7 @@ void client_menu_tick(Client *client) {
         menu_refresh_tables(client);
         if (menu_state_changed(client)) menu_apply_state(client);
         menu_boot_tick();
+        preview_reveal_tick();
         if (gamepad_active() != g_instructions_pad) menu_update_instructions(); // PRESS START <-> CLICK TO PLAY
         menu_update_ping(client);
         download_ui_tick(); // ?download opens the Download window (download_ui.c)
