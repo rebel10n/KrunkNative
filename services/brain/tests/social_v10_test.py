@@ -377,6 +377,17 @@ async def scenario(names):
     st, r = await A.gapi("GET", "/social/post/%d" % pid)
     check(st == 200 and r["data"]["post"]["vot"] == 1 and r["data"]["post"]["cnt"] == 1 and r["data"]["post"]["dlk"] == 0
           and r["data"]["comments"][0]["txt"] == "nice" and r["data"]["comments"][0]["pln"] == bn, "post detail: 1 like, B's comment")
+    st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "   "})
+    check(st == 400 and r["error"]["code"] == "SOCIAL_POST_TEXT_REQUIRED", "a blank post is refused (deob-10.0.7.js:141204)")
+    st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "  padded post  "})
+    pad = r["data"]["post_id"] if st == 200 else 0
+    st, got = await A.gapi("GET", "/social/post/%d" % pad)
+    check(st == 200 and got["data"]["post"]["txt"] == "padded post", "a post is stored trimmed (deob-10.0.7.js:141252): %s" % got)
+    st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "q" * 600})
+    long_id = r["data"]["post_id"] if st == 200 else 0
+    st, got = await A.gapi("GET", "/social/post/%d" % long_id)
+    check(st == 200 and got["data"]["post"]["txt"] == "q" * 500, "a post stops at 500 characters (deob-10.0.7.js:141216): %s" % (len((got.get("data") or {}).get("post", {}).get("txt") or "")))
+    q("DELETE FROM feed_posts WHERE id IN (?, ?)", pad, long_id)
     st, r = await B.gapi("GET", "/social/feed?tab=hot")
     check(st == 200 and r["data"]["posts"][0]["pid"] == pid and r["data"]["posts"][0]["dlk"] == 1, "hot tab: the liked post first")
 

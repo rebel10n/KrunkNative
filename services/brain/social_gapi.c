@@ -376,13 +376,23 @@ static void social_create(SocialSession *s, const GapiReq *r) {
         gapi_error(s, r->rid, 429, "SOCIAL_RATE_LIMITED", "Rate limit exceeded. Try again later.");
         return;
     }
-    const char *text = kn_json_str(r->body, "text", "");
-    while (*text == ' ' || *text == '\n' || *text == '\t') text++;
+    /* the compose box (deob-10.0.7.js:141204, :141216, :141252): trim, then at most 500 characters */
+    const char *raw = kn_json_str(r->body, "text", "");
+    while (*raw && isspace((unsigned char) *raw)) raw++;
+    size_t n = strlen(raw);
+    while (n && isspace((unsigned char) raw[n - 1])) n--;
+    char text[2048];
+    if (n >= sizeof text) n = sizeof text - 1;
+    memcpy(text, raw, n);
+    text[n] = 0;
+    text[brain_utf16_prefix(text, 500)] = 0;
     char me[24], type[24], funds[24], max[24], hours[24];
     const int64_t t = body_int(r->body, "type", 0) == 9 ? 9 : 0;
+    int64_t cap = g_acct.post_max_len > 0 ? g_acct.post_max_len : 1024;
+    if (cap > 500) cap = 500;
     social_call(s, &P_POST_CREATE_V10,
                 KN_DB_ARGS(social_viewer(s, me), acct_itoa(type, t), text, acct_itoa(funds, body_int(r->body, "funds", 0)),
-                           acct_itoa(max, g_acct.post_max_len > 0 ? g_acct.post_max_len : 1024), "20",
+                           acct_itoa(max, cap), "20",
                            acct_itoa(hours, kn_config_int(g_acct_brain->cfg, "accounts.giveaway_hours", 24))),
                 create_done, gctx(r, t, 0, NULL));
 }
