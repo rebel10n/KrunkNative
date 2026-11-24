@@ -285,6 +285,18 @@ static void test_recruit_fields(void) {
     CHECK(js_floor_tenth("1e2") == 10 && js_floor_tenth("15") == 1 && js_floor_tenth("15.9") == 1 && js_floor_tenth("-4") == 0 &&
               js_floor_tenth("9") == 0,
           "a clan deposit fee is floor of 10 percent of the number");
+    /* the gift dialog: Number, then Math.ceil(0.1 * amount), shown with toLocaleString */
+    char shown[48];
+    js_locale_en(shown, sizeof shown, js_gift_amount("1e2"));
+    CHECK(js_gift_amount("1e2") == 100 && js_gift_fee(js_gift_amount("1e2")) == 10 && !strcmp(shown, "100"),
+          "1e2 is 100 KR with a 10 KR fee (%s)", shown);
+    js_locale_en(shown, sizeof shown, js_gift_amount("10.4"));
+    CHECK(js_gift_fee(js_gift_amount("10.4")) == 2 && !strcmp(shown, "10.4"), "10.4 KR has a 2 KR fee (%s)", shown);
+    js_locale_en(shown, sizeof shown, js_gift_amount("1000") + js_gift_fee(js_gift_amount("1000")));
+    CHECK(js_gift_fee(15) == 2 && js_gift_fee(10) == 1 && js_gift_fee(29) == 3 && !strcmp(shown, "1,100"),
+          "an integer gift fee matches the ceil, and the total is grouped (%s)", shown);
+    js_locale_en(shown, sizeof shown, 1000.5 + js_gift_fee(1000.5));
+    CHECK(js_gift_fee(1000.5) == 101 && !strcmp(shown, "1,101.5"), "a fractional total keeps its fraction (%s)", shown);
 }
 
 static void test_inputs_and_merge(void) {

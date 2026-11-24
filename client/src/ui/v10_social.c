@@ -29,6 +29,7 @@
 #include <html_dom.h>
 #include <html_ui.h>
 #include <i18n.h>
+#include <js_int.h>
 #include <ui_logic.h>
 #include <v10_social.h>
 #include <v10_ui.h>
@@ -3485,21 +3486,27 @@ static void sb_gift(StrBuf *sb, View *v) {
         sb_append(sb, "</span> <button class=\"gift-done svelte-g5j1wf\" type=\"button\" onclick=\"v10s('back')\">Done</button></div></div>");
         return;
     }
-    const long long amt = atoll(g_gift_amount), fee = (amt * 10 + 99) / 100;
+    /* amount is the number input's number; the fee line and the button use toLocaleString
+       (deob-10.0.7.js gift dialog). "1e2" is 100 KR, not 1. */
+    const double amt = js_gift_amount(g_gift_amount), fee = js_gift_fee(amt), total = amt + fee;
+    char amt_s[48], fee_s[48], total_s[48];
+    js_locale_en(amt_s, sizeof amt_s, amt);
+    js_locale_en(fee_s, sizeof fee_s, fee);
+    js_locale_en(total_s, sizeof total_s, total);
     sb_appendf(sb, "<div class=\"gift-body svelte-g5j1wf\"><label class=\"gift-field svelte-g5j1wf\"><span class=\"gift-label svelte-g5j1wf\">Amount (10%% fee)</span> "
                    "<input type=\"number\" min=\"10\" class=\"gift-input svelte-g5j1wf\" id=\"v10sGiftAmount\" value=\"%s\" oninput=\"v10sInput('giftamt',this.value)\"></label> "
                    "<label class=\"gift-field svelte-g5j1wf\"><span class=\"gift-label svelte-g5j1wf\">Message (optional)</span> <textarea maxlength=\"500\" rows=\"3\" class=\"gift-input svelte-g5j1wf\" "
                    "id=\"v10sGiftMsg\" oninput=\"v10sInput('giftmsg',this.value)\">",
                g_gift_amount);
     sb_append_esc(sb, g_gift_msg);
-    sb_appendf(sb, "</textarea></label> <div class=\"gift-fee svelte-g5j1wf\">Fee: %lld KR (10%%) — Total cost: %lld KR</div> ", fee, amt + fee);
+    sb_appendf(sb, "</textarea></label> <div class=\"gift-fee svelte-g5j1wf\">Fee: %s KR (10%%) — Total cost: %s KR</div> ", fee_s, total_s);
     if (v->error[0]) {
         sb_append(sb, "<div class=\"gift-error svelte-g5j1wf\">");
         sb_append_esc(sb, v->error);
         sb_append(sb, "</div> ");
     }
     if (v->loading) sb_append(sb, "<button class=\"gift-send svelte-g5j1wf\" type=\"button\" disabled>Sending...</button></div></div>");
-    else sb_appendf(sb, "<button class=\"gift-send svelte-g5j1wf\" type=\"button\" id=\"v10sGiftSend\" onclick=\"v10s('giftsend')\">Send %lld KR (+%lld fee)</button></div></div>", amt, fee);
+    else sb_appendf(sb, "<button class=\"gift-send svelte-g5j1wf\" type=\"button\" id=\"v10sGiftSend\" onclick=\"v10s('giftsend')\">Send %s KR (+%s fee)</button></div></div>", amt_s, fee_s);
 }
 
 // iÎíìiîi (deob-10.0.7.js:111805): trim().length. The byte length copies the text; the count is
@@ -4200,16 +4207,17 @@ static void gift_open(const char *who, const char *message) {
 }
 
 static void gift_send(View *v) {
-    const long long amt = atoll(g_gift_amount);
+    const double amt = js_gift_amount(g_gift_amount);
     v->error[0] = 0;
-    if (amt < 10) {
+    if (!(amt >= 10)) {
         snprintf(v->error, sizeof(v->error), "Minimum gift is 10 KR");
         render_views();
         return;
     }
     v->loading = 1;
     // the economy's KR gift (services/brain/economy.c "kr"): v10 POST /players/<name>/gift
-    social_frame_send("kr", cJSON_CreateString(v->name), cJSON_CreateNumber((double) amt), cJSON_CreateString(g_gift_msg), cJSON_CreateNull());
+    // the amount is the number, the same one the button shows (deob-10.0.7.js giftKR)
+    social_frame_send("kr", cJSON_CreateString(v->name), cJSON_CreateNumber(amt), cJSON_CreateString(g_gift_msg), cJSON_CreateNull());
     render_views();
 }
 
