@@ -37,7 +37,7 @@
     "chat": [],
     "console": [
       "notarget on",
-      "bot 1",
+      "bot 1 name=Bot",
       {
         "at_ms": 1500,
         "cmd": "kill @bots"

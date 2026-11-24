@@ -11,8 +11,7 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#killFeed rows (gone at 4 s)",
-      "pending": "T: the sandbox servers name the players differently (native Guest 1 / a random bot, v10 Local User / Bot); needs a player-name override in the scenario"
+      "note": "#killFeed rows (gone at 4 s): state.name joins as Local User and the bot command pins name=Bot, as in the Chromium sandbox"
     },
     {
       "name": "popup",

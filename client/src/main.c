@@ -1119,6 +1119,12 @@ int main(int argc, char **argv) {
         glfwGetFramebufferSize(INSTANCE.window, &fb_width, &fb_height);
 
         client_menu_bind(&INSTANCE);
+        // A scenario's name is the joining player's name, not just the menu label applied after boot.
+        // The in-process sandbox sends its JOIN below, so set it before local_game_start().
+        if (SCENARIO_ACTIVE()) {
+            const char *scenario_name = ui_scenario_player_name();
+            if (scenario_name) snprintf(INSTANCE.menu_name, sizeof(INSTANCE.menu_name), "%s", scenario_name);
+        }
 
         if (html_ui_available() && !html_ui_init(&INSTANCE, ui_dir, fb_width, fb_height)) {
             fprintf(stderr, "HTML UI unavailable, falling back to the built-in menu\n");

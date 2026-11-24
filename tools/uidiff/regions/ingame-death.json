@@ -27,7 +27,7 @@
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "class images + lvl, Bot VS Local User (KrunkNative's offline sandbox names us Guest_1, v10's Local User)",
+      "note": "class images + lvl, Bot VS Local User; the scenario now joins with state.name, so the old Guest_1 name mismatch is fixed",
       "skip": true
     },
     {

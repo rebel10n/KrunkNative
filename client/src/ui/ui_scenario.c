@@ -596,6 +596,10 @@ void ui_scenario_window_size(int *w, int *h) {
 }
 
 const char *ui_scenario_map_path(void) { return g_sc.map_path[0] ? g_sc.map_path : NULL; }
+const char *ui_scenario_player_name(void) {
+    const char *name = st_str("name");
+    return name && name[0] ? name : NULL;
+}
 
 int ui_scenario_draws_preview(void) { return g_sc.preview; }
 int ui_scenario_draws_nametags(void) { return g_sc.active && st_bool("nametags", 0); }
@@ -1654,6 +1658,7 @@ int ui_scenario_active(void) { return 0; }
 int ui_scenario_client_chrome(void) { return 0; }
 void ui_scenario_window_size(int *w, int *h) { (void) w; (void) h; }
 const char *ui_scenario_map_path(void) { return NULL; }
+const char *ui_scenario_player_name(void) { return NULL; }
 int ui_scenario_run(Client *client) { (void) client; return 1; }
 void ui_scenario_end(void) {}
 void ui_scenario_draw_background(void) {}

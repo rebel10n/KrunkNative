@@ -156,7 +156,7 @@ local server are ready):
 
 | Key | C path |
 |---|---|
-| `name`, `classIndex` | `Client.menu_name` + `menu_update_class_box()`, `menu_set_class_index(i, 1)` |
+| `name`, `classIndex` | `Client.menu_name` + `menu_update_class_box()`, `menu_set_class_index(i, 1)`; the name is also set before the offline JOIN, so the real player / kill feed use it |
 | `region` | `menu_set_region_label()` (shown while connected; default `MENU_REGION_NAME`) |
 | `inGame` | `client_set_menu_open(0)` + `client_enter_game()` (ENT -> SPAWN via the local server), then the HUD runs from `client_hud_html_tick()` |
 | `hud` | `hud_ui_set_override()`: replaces the sampled values (weapons looked up by name; `scoped` shows Krunker's reticle only for scope weapons, other weapons just aim: crosshair hidden) |
