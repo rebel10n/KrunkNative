@@ -209,9 +209,10 @@ typedef enum {
     // 0x81A0 v10.0.7 hit / kill-feed extras an official lobby sends (client/src/net/krunker_link.c, client-local)
     NET_EXT_KN_HIT_SILENT = 0x81A0,   // NetHitSilentPacket, right before a NET_PACKET_HIT: DO_DAMAGE `silent` (no hit sound)
     NET_EXT_KN_KILL_PACKAGE = 0x81A1, // NetKillPackagePacket, right before a NET_PACKET_KILL: killInfo.pkg (stk 1's package)
-    NET_EXT_KN_LOOK = 0x81A2,         // C -> link NetLookPacket, before each ENT to an official lobby: the colours and title
-    // 0x81B0 v10.0.7 ADD_PLAYERS' rankedRank and flagIndex (KrunkNative server and the krunker.io link -> player_accounts.c)
+    NET_EXT_KN_LOOK = 0x81A2,         // C -> link / S NetLookPacket, before each ENT: the colours and title (a KN server reads the title)
+    // 0x81B0 v10.0.7 ADD_PLAYERS' rankedRank, flagIndex and titleIndex (KrunkNative server and the krunker.io link -> player_accounts.c)
     NET_EXT_KN_PLAYER_RANK_FLAG = 0x81B0, // S -> C NetPlayerRankFlagPacket, right after a player's NET_PACKET_PLAYER_INFO
+    NET_EXT_KN_PLAYER_TITLE = 0x81B1,     // S -> C NetPlayerTitlePacket, right after that NET_EXT_KN_PLAYER_RANK_FLAG
     // 0x81C0 v10.0.7 loadout copies: the "<copyId>#<index>" slots (doc/v10/paint-copy.md section 6)
     NET_EXT_KN_SKIN_COPY_IDS = 0x81C0, // C -> S / link NetSkinCopyIdsPacket, right before each ENT: the copy each slot names
     // 0x81D0 v10.0.7 item copies in a match: the end table's skin reward and the worn copies' wear, serial and name tag
@@ -424,9 +425,10 @@ typedef struct {
 } NetKillPackagePacket;
 #pragma pack(pop)
 
-// NET_EXT_KN_LOOK (C -> krunker_link only, before each ENT like NET_PACKET_PC_STAT): ENTER_GAME's [10] skinColIndex
-// (an index of config.skinColors, or a premium "#rrggbb"), [17] hairCol, [18] chatCol (premium "#rrggbb", else -1) and
-// [34] titleIndex (deob-10.0.7.js:215052). KrunkNative's own server takes the colours from the ENT's 0xRRGGBB fields.
+// NET_EXT_KN_LOOK (C -> krunker_link or an EXT KrunkNative server, before each ENT like NET_PACKET_PC_STAT): ENTER_GAME's
+// [10] skinColIndex (an index of config.skinColors, or a premium "#rrggbb"), [17] hairCol, [18] chatCol (premium
+// "#rrggbb", else -1) and [34] titleIndex (deob-10.0.7.js:215052). KrunkNative's own server takes the colours from the
+// ENT's 0xRRGGBB fields and only the title from here (NET_EXT_KN_PLAYER_TITLE).
 #pragma pack(push, 1)
 typedef struct {
     int16_t skin_col_index; // -1: skin_col (when set) or none
@@ -937,6 +939,18 @@ typedef struct {
     int32_t flag;        // the Country Flag index (client account_flags.h), -1 = none
 } NetPlayerRankFlagPacket;
 _Static_assert(sizeof(NetPlayerRankFlagPacket) == 12, "NetPlayerRankFlagPacket: the wire body is 12 bytes");
+
+// NET_EXT_KN_PLAYER_TITLE (S -> C, EXT peers; also the krunker.io link's "0" ADD_PLAYERS): getPlayerAddData's [52]
+// `anonMode && !viewerIsDev ? -1 : titleIndex` (deob-10.0.7.js:176753), the handler's parseInt([52]) (:227161), for the
+// Tab board's .leaderTitle after the name and clan (iiiiìïí(titleIndex, !isUsingRankedNames), :227597-227603, :227638).
+// The title is ENTER_GAME's [34] titleIndex (:215052), which a KrunkNative server takes from the NET_EXT_KN_LOOK before
+// the ENT and sends only when the account owns it (kn_brain's account "titles", player_titles). It follows the player's
+// NET_EXT_KN_PLAYER_RANK_FLAG; the PLAYER_INFO resets it to -1 on the client. A separate packet, as that one is.
+typedef struct {
+    int32_t uid;
+    int32_t title_index; // assets/titles.json id, -1 = none shown
+} NetPlayerTitlePacket;
+_Static_assert(sizeof(NetPlayerTitlePacket) == 8, "NetPlayerTitlePacket: the wire body is 8 bytes");
 
 // NET_EXT_KN_END_REWARD (S -> C, every peer): v10.0.7 endGame's player.skinReward (deob-10.0.7.js:195141, :195158: the
 // map's 1-in-100 mapReward skin, then the event's reward skin, the later one kept) makes that player's endData.ed

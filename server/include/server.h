@@ -99,6 +99,10 @@ typedef struct {
     char clan[8];
     int flag;                  // stats.flg: the Country Flag index (client account_flags.h), -1 none (the Strike kill card)
     int ranked_rank;           // account ranked_rank (v10 setData, deob-10.0.7.js:115141): the running season's tier, 0 Unranked
+    // the account's titles (kn_brain's account "titles": player_titles ids, v10's account.titles): the worn titleIndex is
+    // sent only when it is one of them (NET_EXT_KN_PLAYER_TITLE)
+#define SERVER_TITLE_MAX 512
+    uint8_t titles_owned[SERVER_TITLE_MAX / 8];
     unsigned char flags;       // NET_PLAYER_INFO_*
     unsigned char hack:1;      // account.hack: no rewards / stats (game.js)
     unsigned char premium:1;
@@ -221,6 +225,10 @@ typedef struct {
     // from the spawn on like the skins (worn_copies, accounts_worn_copy)
     NetSkinCopyIdsPacket ent_copies;
     NetSkinCopyIdsPacket worn_copies;
+    // v10.0.7 ENTER_GAME [34] titleIndex: NET_EXT_KN_LOOK before the ENT (ent_title, -1 for an older client), worn from
+    // the spawn on (title_index) and sent as ADD_PLAYERS' [52] when the account owns it (NET_EXT_KN_PLAYER_TITLE)
+    int ent_title;
+    int title_index;
     char name[SERVER_PLAYER_NAME_MAX];
     char address[CHAT_CMD_ADDRESS_SIZE]; // dotted peer address (chat /ip, /banip)
     unsigned char op:1;            // CLI `op`: passes the DEV checks of chat commands while perms are on

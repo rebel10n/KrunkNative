@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
-"""v10.0.7 ADD_PLAYERS' rankedRank and flagIndex on a brain-linked server_bin (NET_EXT_KN_PLAYER_RANK_FLAG, 0x81B0).
+"""v10.0.7 ADD_PLAYERS' rankedRank, flagIndex and titleIndex on a brain-linked server_bin (NET_EXT_KN_PLAYER_RANK_FLAG,
+0x81B0, and NET_EXT_KN_PLAYER_TITLE, 0x81B1).
 
   python3 -I server/tests/player_rank_flag_e2e.py BUILD_DIR      (run from the repository root)
 
 getPlayerAddData (deob-10.0.7.js:176753) gives each viewer [46] `account && showBadges.rank ? rankedRank : 0` and
-[26] `anonMode && !viewerIsDev ? -1 : account ? account.stats.flg : -1`. kn_brain on a scratch database
-(KN_TEST_DB_DRIVER, default sqlite; brain.ranked.season pinned) with two accounts, both placed in the running ranked
-season at Gold 2 (cr 7: 1700 MMR) and with a Country Flag (stats.flg), and one brain-linked server_bin node:
-  A  an EXT peer (protocol 1.4) signed in to account A, which shows its rank: everyone gets (8, 12) for A
-  B  an EXT peer signed in to account B, in anonMode with rankBadge off (ENT V9: anon_mode 1, PLAYER_SHOW_BADGE_RANK clear):
-     everyone, B itself too, gets (0, -1) for B
-  G  an EXT guest: (0, -1)
+[26] `anonMode && !viewerIsDev ? -1 : account ? account.stats.flg : -1` and [52] `anonMode && !viewerIsDev ? -1 :
+titleIndex`, the ENT's [34] titleIndex (:215052), which the client sends to our server in NET_EXT_KN_LOOK before the
+ENT; the server sends it only when the account owns it (the account's "titles", player_titles). kn_brain on a scratch
+database (KN_TEST_DB_DRIVER, default sqlite; brain.ranked.season pinned) with three accounts, A and B placed in the
+running ranked season at Gold 2 (cr 7: 1700 MMR) and with a Country Flag (stats.flg), A owning title 87 and B title 90,
+and one brain-linked server_bin node:
+  A  an EXT peer (protocol 1.4) signed in to account A, which shows its rank and wears 87: everyone gets (8, 12) and 87
+  B  an EXT peer signed in to account B, in anonMode with rankBadge off (ENT V9: anon_mode 1, PLAYER_SHOW_BADGE_RANK clear),
+     wearing its 90: everyone, B itself too, gets (0, -1) and -1 for B
+  C  an EXT peer signed in to account C, wearing 87, which it does not own: -1
+  G  an EXT guest wearing 87: (0, -1) and -1
   O  a protocol 1.3.1 peer (no EXT): it gets every PLAYER_INFO at its exact 21-byte size and no EXT at all, so an older
      client's stream is what it was
-Each rank / flag packet comes right after its player's PLAYER_INFO (which resets both on the client).
+Each rank / flag packet comes right after its player's PLAYER_INFO (which resets both on the client), each title right
+after that.
 Exit 77 when the database is unavailable. Prints PASS/FAIL lines; exit code 0 only when all passed.
 """
 import json
@@ -42,14 +48,15 @@ SECRET = "kn-rankflag-%d" % os.getpid()
 PORT = kn_proto.free_ports(1)[0]
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-rankflag-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
-ACC_A, ACC_B = "rfa%d" % STAMP, "rfb%d" % STAMP
+ACC_A, ACC_B, ACC_C = "rfa%d" % STAMP, "rfb%d" % STAMP, "rfc%d" % STAMP
 PW = "pw-rankflag-%d" % os.getpid()
 SEASON = 7
 FLAG_A, FLAG_B = 12, 30
+TITLE_A, TITLE_B = 87, 90  # assets/titles.json: No-Life, Roadrunner
 GOLD2 = 8  # shared/include/ranked.h RANK_GOLD2: 1000 + 100 * cr = 1700
 
 PLAYER_INFO, FORWARDED, EXT = 34, 85, 254
-EXT_AUTH, EXT_RIGHTS, EXT_RANK_FLAG = 0x8000, 0x8001, 0x81B0
+EXT_AUTH, EXT_RIGHTS, EXT_RANK_FLAG, EXT_TITLE, EXT_LOOK = 0x8000, 0x8001, 0x81B0, 0x81B1, 0x81A2
 AUTH_SESSION = 1
 ST_STATE, ST_OK = 0, 1
 RIGHTS_FMT = "<BBBBii32s64s"
@@ -151,8 +158,10 @@ class Peer(kn_proto.Conn):
         self.send(EXT, struct.pack("<H", EXT_AUTH) + body)
         return self.wait_rights(lambda r: r["seq"] == seq and r["status"] != ST_STATE, 12, mark)
 
-    def enter(self, payload):
+    def enter(self, payload, title=None):
         self._ent, self._ent_retry = payload, None
+        if title is not None:  # NetLookPacket before the ENT: skinColIndex -1, titleIndex, three empty colours
+            self.send(EXT, struct.pack("<H", EXT_LOOK) + struct.pack("<hh8s8s8s", -1, title, b"", b"", b""))
         self.send(kn_proto.ENT, payload)
         end = time.time() + 12
         while time.time() < end:
@@ -178,6 +187,25 @@ class Peer(kn_proto.Conn):
                 last[uid] = (rank, flag)
                 at.append((i, uid))
         return last, at
+
+    def titles(self):
+        """uid -> the last title packet's titleIndex; also the list of (index, uid) of each one."""
+        last, at = {}, []
+        for i, (t, p) in enumerate(self.packets):
+            if t == EXT and len(p) == 2 + 8 and struct.unpack("<H", p[:2])[0] == EXT_TITLE:
+                uid, title = struct.unpack("<ii", p[2:])
+                last[uid] = title
+                at.append((i, uid))
+        return last, at
+
+    def title_follows_rank_flag(self):
+        """Every title packet comes right after a rank / flag packet of the same uid."""
+        _, at = self.titles()
+        for i, uid in at:
+            t, p = self.packets[i - 1] if i > 0 else (None, b"")
+            if t != EXT or len(p) != 2 + 12 or struct.unpack("<Hi", p[:6]) != (EXT_RANK_FLAG, uid):
+                return False
+        return bool(at)
 
     def follows_info(self):
         """Every rank / flag packet comes right after a PLAYER_INFO of the same uid."""
@@ -215,10 +243,11 @@ def run_sql(db, statements):
         raise RuntimeError("no SQL access for driver %s" % db.get("driver"))
 
 
-def account_sql(name, flag):
+def account_sql(name, flag, title):
     pid = "(SELECT id FROM accounts WHERE username = '%s')" % name
     return ["UPDATE players SET player_stats = '{\"flg\":%d}' WHERE player_id = %s" % (flag, pid),
-            "INSERT INTO ranked_profiles (account_id, season, region, cr, wins) VALUES (%s, %d, 'eu', 7, 6)" % (pid, SEASON)]
+            "INSERT INTO ranked_profiles (account_id, season, region, cr, wins) VALUES (%s, %d, 'eu', 7, 6)" % (pid, SEASON),
+            "INSERT INTO player_titles (account_id, title_id, source, ref) VALUES (%s, %d, 'blackmarket', -1)" % (pid, title)]
 
 
 def main():
@@ -267,10 +296,10 @@ def main():
         procs.append(node)
         check("the node links to the coordinator", wait_for(lambda: "welcomed" in read_log(node_log) or "linked" in read_log(node_log), 20),
               read_log(node_log)[-300:])
-        tokens = {n: register(port, n) for n in (ACC_A, ACC_B)}
+        tokens = {n: register(port, n) for n in (ACC_A, ACC_B, ACC_C)}
         if not all(tokens.values()):
             return 1
-        run_sql(db, account_sql(ACC_A, FLAG_A) + account_sql(ACC_B, FLAG_B))
+        run_sql(db, account_sql(ACC_A, FLAG_A, TITLE_A) + account_sql(ACC_B, FLAG_B, TITLE_B))
 
         a = Peer(PORT, "192.0.2.51")
         peers.append(a)
@@ -280,19 +309,25 @@ def main():
         peers.append(b)
         ok = b.sign_in(tokens[ACC_B])
         check("B signs in", ok is not None and ok["status"] == ST_OK, str(ok))
+        c = Peer(PORT, "192.0.2.55")
+        peers.append(c)
+        ok = c.sign_in(tokens[ACC_C])
+        check("C signs in", ok is not None and ok["status"] == ST_OK, str(ok))
         g = Peer(PORT, "192.0.2.53")
         peers.append(g)
         o = Peer(PORT, "192.0.2.54", hello=bytes([1, 3, 1]))
         peers.append(o)
 
-        check("A enters", a.enter(ent_v9()) is not None)
-        check("B enters (anonMode, rankBadge off)", b.enter(ent_v9(anon=1, show_badges=SHOW_ALL & ~SHOW_RANK)) is not None)
-        check("G enters (a guest)", g.enter(ent_v9()) is not None)
+        check("A enters (wearing its title 87)", a.enter(ent_v9(), title=TITLE_A) is not None)
+        check("B enters (anonMode, rankBadge off, wearing its title 90)",
+              b.enter(ent_v9(anon=1, show_badges=SHOW_ALL & ~SHOW_RANK), title=TITLE_B) is not None)
+        check("C enters (wearing 87, not its own)", c.enter(ent_v9(), title=TITLE_A) is not None)
+        check("G enters (a guest wearing 87)", g.enter(ent_v9(), title=TITLE_A) is not None)
         check("O enters (protocol 1.3.1)", o.enter(ent_v9()) is not None)
         for p in peers:
             p.pump(1.5)
-        ua, ub, ug, uo = a.my_uid(), b.my_uid(), g.my_uid(), o.my_uid()
-        check("every peer has its uid", None not in (ua, ub, ug, uo), str((ua, ub, ug, uo)))
+        ua, ub, uc, ug, uo = a.my_uid(), b.my_uid(), c.my_uid(), g.my_uid(), o.my_uid()
+        check("every peer has its uid", None not in (ua, ub, uc, ug, uo), str((ua, ub, uc, ug, uo)))
 
         seen_a, _ = a.rank_flags()
         seen_b, _ = b.rank_flags()
@@ -305,6 +340,21 @@ def main():
         check("a guest's: (0, -1)", seen_a.get(ug) == (0, -1) and seen_b.get(ug) == (0, -1), str((seen_a, seen_b)))
         check("A: each one right after its PLAYER_INFO", a.follows_info())
         check("B: each one right after its PLAYER_INFO", b.follows_info())
+
+        # [52] titleIndex: the LOOK's title of an account that owns it, else -1 (anonMode hides it from everyone but a dev)
+        ta, _ = a.titles()
+        tb, _ = b.titles()
+        tg, _ = g.titles()
+        tc, _ = c.titles()
+        check("A: its own title 87", ta.get(ua) == TITLE_A, str(ta))
+        check("B, C and G see A's title 87", tb.get(ua) == TITLE_A and tc.get(ua) == TITLE_A and tg.get(ua) == TITLE_A,
+              str((tb, tc, tg)))
+        check("B (anonMode): no title for anyone, B itself too", ta.get(ub) == -1 and tb.get(ub) == -1 and tg.get(ub) == -1,
+              str((ta, tb, tg)))
+        check("C wears a title it does not own: -1", ta.get(uc) == -1 and tc.get(uc) == -1, str((ta, tc)))
+        check("a guest's title: -1", ta.get(ug) == -1 and tg.get(ug) == -1, str((ta, tg)))
+        check("A: each title right after its rank / flag", a.title_follows_rank_flag())
+        check("G: each title right after its rank / flag", g.title_follows_rank_flag())
 
         infos = [p for t, p in o.packets if t == PLAYER_INFO]
         info_uids = {struct.unpack("<i", p[:4])[0] for p in infos if len(p) >= 4}

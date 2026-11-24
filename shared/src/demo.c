@@ -1,6 +1,6 @@
 // K.P.D demo files (shared/include/demo.h, doc/v10/replays.md).
 #include <demo.h>
-#include <net_ext.h> // NET_EXT_KN_PLAYER_RANK_FLAG
+#include <net_ext.h> // NET_EXT_KN_PLAYER_RANK_FLAG, NET_EXT_KN_PLAYER_TITLE
 #include <shared.h>
 #include <cJSON.h>
 #include <stdio.h>
@@ -287,6 +287,13 @@ static int anonymize_packet(void *user, const uint8_t type, uint8_t *payload, co
         rank_flag.ranked_rank = 0;
         rank_flag.flag = -1;
         memcpy(payload + NET_EXT_HEADER_SIZE, &rank_flag, sizeof(rank_flag));
+    } else if (type == NET_PACKET_EXT && length == NET_EXT_HEADER_SIZE + sizeof(NetPlayerTitlePacket) &&
+               (payload[0] | payload[1] << 8) == NET_EXT_KN_PLAYER_TITLE) {
+        // and its worn title (ADD_PLAYERS' [52], -1 under anonMode as well)
+        NetPlayerTitlePacket title;
+        memcpy(&title, payload + NET_EXT_HEADER_SIZE, sizeof(title));
+        title.title_index = -1;
+        memcpy(payload + NET_EXT_HEADER_SIZE, &title, sizeof(title));
     }
     return 1;
 }
