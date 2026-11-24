@@ -22,6 +22,8 @@ int account_links_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
 // A social frame: ["dlnkR", result] (kn_brain's DISCORD_LINK_RESULT, discord.c) shows v10's result popup
 // (:216792-216796) and reloads the mounted Discord row. Other frames are ignored.
 void account_links_social_frame(const cJSON *frame);
+// A render scenario's already-loaded getStatus().data (without an account service).
+void account_links_discord_scenario(const cJSON *status);
 // Sign-out / account switch: forget everything.
 void account_links_reset(void);
 

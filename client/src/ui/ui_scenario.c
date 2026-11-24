@@ -59,6 +59,7 @@
 #include <modes.h>
 #include <ui_interact.h> // state.interact
 #include <backend_ui.h> // WP-E part 2c: state.account
+#include <account_links.h> // state.discord: the loaded getStatus().data
 #include <alt_manager_ui.h> // state.altAccounts: the Account Manager's stand-in rows
 #include <app_mode.h> // state.page: hub / editor / viewer pages
 #include <flavor.h> // top-level "flavor": the Krunker Strike page (strike_ui.c)
@@ -333,6 +334,7 @@ static void warn_unknown_keys(void) {
         "clientChrome", "settingsView", "windowActions", "spinActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
         "officialClasses", // the class list an official krunker.io game sent (game_config_apply, ui_scenario_apply)
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
+        "discord", // the Connections tab's loaded getStatus().data (account_links_discord_scenario)
         "rentServers", // the brain's ["dsrvl", 0, rows] for Rent Dedicated Server: {rows, game} (rent_servers_ui.c)
         "guestEarned", // {kr, score}: a guest's unclaimed rewards (v10_rewards.c: the menu's box, the signup rewards')
         "altAccounts", // the Account Manager's rows [{name, backend: "krunk.io" | "krunker.io", active}] (alt_manager_ui.c)
@@ -1322,6 +1324,7 @@ static int ui_scenario_apply(Client *client) {
     if (st_bool("officialSession", 0)) v10_menu_scenario_official(1);
     if (st_bool("sandbox", 0)) v10_menu_set_sandbox(1); // v10's sandbox menu (capture-v10.js's custMap storage)
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
+    account_links_discord_scenario(st("discord")); // before the window mounts the Connections tab
     apply_chat_actions();               // state.chat's actions read that account
     v10_rewards_guest_earned_scenario(st("guestEarned")); // a guest's unclaimed KR / score (v10_rewards.c)
     alt_manager_ui_scenario(st("altAccounts")); // the Account Manager's rows (alt_manager_ui.c): stand-in accounts

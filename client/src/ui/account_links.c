@@ -756,6 +756,12 @@ void account_links_social_frame(const cJSON *frame) {
         dc_link_result(cJSON_IsString(result) ? result->valuestring : NULL);
 }
 
+void account_links_discord_scenario(const cJSON *status) {
+    if (!cJSON_IsObject(status)) return;
+    cJSON_Delete(g_dc.status);
+    g_dc.status = cJSON_Duplicate(status, 1);
+}
+
 void account_links_reset(void) {
     dc_stop_wait();
     if (g_dc.confirm_timer) html_timer_cancel(g_dc.confirm_timer);

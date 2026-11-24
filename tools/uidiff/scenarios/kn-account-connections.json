@@ -27,6 +27,9 @@
       "stats": {},
       "challenges": []
     },
+    "discord": {
+      "configured": false
+    },
     "windowActions": [
       [
         "windows.4.switchTab",
@@ -43,5 +46,5 @@
     ]
   },
   "frames": 3,
-  "note": "KN only: the Account window's Connections tab (switchTab(3)) with the Discord and v10.0.7's Connected apps sections open (client/src/ui/account_links.c). With no account service the Discord row is v10's unavailable state and the apps list is empty (settings.apps.none). The reference is KN's own render."
+  "note": "KN only: the Account window's Connections tab (switchTab(3)) with the Discord and v10.0.7's Connected apps sections open (client/src/ui/account_links.c). state.discord is the loaded getStatus().data with no Discord app configured, so v10's unavailable line is deterministic; the apps list is empty (settings.apps.none). The reference is KN's own render."
 }
