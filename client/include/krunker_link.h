@@ -228,6 +228,7 @@ typedef struct {
     NetPlayerInfoPacket info; // "0"'s account fields (level, clan, flags) as emitted (HOST follows "uh")
     int ranked_rank; // "0" [46] rankedRank (0 none), emitted with the info as NET_EXT_KN_PLAYER_RANK_FLAG
     int flag;        // "0" [26] flagIndex (-1 none)
+    int title;       // "0" [52] titleIndex (-1 none), emitted after it as NET_EXT_KN_PLAYER_TITLE
     int grapple;   // "k"[11] grapple: 1 hooked at grapple_point (NET_PACKET_GRAPPLE goes out on a change)
     float grapple_point[3];
 } KrunkerLinkPlayer;

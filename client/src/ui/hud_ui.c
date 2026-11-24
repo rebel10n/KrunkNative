@@ -598,6 +598,7 @@ typedef struct {
     int is_you, is_ally, team;
     int badge;                    // badgeIndex, -1 none
     int rank;                     // rankedRank (NET_EXT_KN_PLAYER_RANK_FLAG), 0 none
+    int title;                    // titleIndex (NET_EXT_KN_PLAYER_TITLE), -1 none
     const NetPlayerInfoPacket *acc;
     int hide_stats;               // another player's stats are blank (Hide player names)
     NetPlayerInfoPacket acc_buf;  // a scenario row's account (verified / premium flags), for acc
@@ -616,6 +617,22 @@ static void hud_old_board_row_html(char *out, const size_t size, size_t *len, co
     hb_append(out, size, len, "</div><div class='leaderScore'>%s</div></div>", num);
 }
 
+// iiiiìïí(titleIndex, !isUsingRankedNames()) (deob-10.0.7.js:227597-227603): the title's tag after the name and clan,
+// <span class='leaderTitle' style='<iiiíîíî: its colour, a Contraband outline>'><its name, escaped></span>, nothing
+// for -1 or an id the titles catalogue (assets/titles.json, v10's GET /titles map) does not have
+static void hb_append_title(char *out, const size_t size, size_t *len, const int title) {
+    const cJSON *t = title >= 0 ? v10_customize_title_get(title) : NULL;
+    if (!t) return;
+    StrBuf style = {0};
+    v10_customize_title_style(&style, t);
+    char *css = sb_finish(&style);
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(t, "name"));
+    hb_append(out, size, len, "<span class='leaderTitle' style='%s'>", css ? css : "");
+    hb_append_escaped(out, size, len, name ? name : "");
+    hb_append(out, size, len, "</span>");
+    free(css);
+}
+
 // f1985's row of the #centerLeaderDisplay table.
 static void hud_center_board_row_html(char *out, const size_t size, size_t *len, const int rank, const BoardRow *r, const int columns) {
     char shown[PLAYER_NAME_SIZE];
@@ -630,6 +647,7 @@ static void hud_center_board_row_html(char *out, const size_t size, size_t *len,
     hb_append(out, size, len, "<div class='newLeaderName%s'>", r->is_you ? "M" : r->is_ally ? "F" : "");
     hb_append_escaped(out, size, len, streamer_name(r->name && r->name[0] ? r->name : "Guest", shown, sizeof(shown)));
     hb_append_clan(out, size, len, r->acc && r->acc->account_id > 0 ? r->acc->clan : NULL, "#fff");
+    hb_append_title(out, size, len, r->title); // the worn title last in .newLeaderName (:227638)
     hb_append(out, size, len, "</div></div></td>");
     for (int i = 0; i < columns; i++) {
         char num[32];
@@ -709,13 +727,15 @@ static void hud_board_fill(const Client *client, const Player *p, const int32_t 
     r->acc = player_accounts_get(p->uid);
     r->badge = p->cosmetics_v7.badge;
     r->rank = player_accounts_ranked_rank(p->uid);
+    r->title = player_accounts_title(p->uid);
     r->hide_stats = player_names_extras_hidden(r->is_you); // Hide player names: no stats, badges or level of the others
-    // v10 isUsingRankedNames (a ranked match up to WARMUP): both boards draw no badge, rank or clan (deob-10.0.7.js:227607,
-    // :227632-227638)
+    // v10 isUsingRankedNames (a ranked match up to WARMUP): both boards draw no badge, rank, clan or title
+    // (deob-10.0.7.js:227607, :227632-227638)
     if (r->hide_stats || game_names_masked(&client->game)) {
         r->acc = NULL;
         r->badge = -1;
         r->rank = 0;
+        r->title = -1;
     }
 }
 
@@ -746,6 +766,7 @@ static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out
             r->team = ROW_INT("team");
             r->badge = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "badge")) ? ROW_INT("badge") : -1;
             r->rank = ROW_INT("rankedRank") > 0 ? ROW_INT("rankedRank") : 0; // a scenario row's rankedRank ("rank" is its place)
+            r->title = cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "titleIndex")) ? ROW_INT("titleIndex") : -1;
             if (ROW_INT("verified") || ROW_INT("premium") || ROW_INT("creator")) { // a scenario row's account flags
                 r->acc_buf.account_id = 1;
                 r->acc_buf.flags = (uint8_t) ((ROW_INT("premium") ? NET_PLAYER_INFO_PREMIUM : 0) | (ROW_INT("verified") ? NET_PLAYER_INFO_VERIFIED : 0) |
@@ -757,6 +778,7 @@ static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out
                 r->acc = NULL;
                 r->badge = -1;
                 r->rank = 0;
+                r->title = -1;
             }
 #undef ROW_INT
             r->is_ally = hud_board_ally(client, r->is_you, r->team, my_team);
@@ -781,6 +803,7 @@ static int hud_board_rows(const Client *client, const cJSON *rows, BoardRow *out
         r->team = my_team;
         r->is_you = 1;
         r->badge = client->me ? client->me->cosmetics_v7.badge : -1;
+        r->title = -1;
     }
     return n;
 }

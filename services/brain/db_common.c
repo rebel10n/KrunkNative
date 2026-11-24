@@ -612,9 +612,25 @@ static void db_account_skin_maker(Dbx *x, const int64_t id, cJSON *o) {
         (double) dbx_int(x, SQL(.any = "SELECT player_skinmaker FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)), 0));
 }
 
+/* "titles": v10's account.titles (setData; the client wears a titleIndex only when acc.titles.indexOf(id) >= 0), the
+ * player_titles ids (0361: Black Market and challenge grants) in id order, as the "ttl" reply lists them (social_data.c).
+ * The game server sends the ENT's titleIndex as ADD_PLAYERS' [52] only for one of them (server/src/accounts.c,
+ * NET_EXT_KN_PLAYER_TITLE). Added in C for every driver (kn_account_json is unchanged). */
+static void db_account_titles(Dbx *x, const int64_t id, cJSON *o) {
+    if (!o) return;
+    cJSON *rows = dbx_rows(x, SQL(.any = "SELECT title_id AS t__i FROM player_titles WHERE account_id = $1 ORDER BY title_id"),
+                           KN_DB_ARGS(I64S(id)));
+    cJSON *titles = cJSON_CreateArray();
+    const cJSON *row;
+    cJSON_ArrayForEach(row, rows) cJSON_AddItemToArray(titles, cJSON_CreateNumber(num(row, "t")));
+    cJSON_Delete(rows);
+    cJSON_DeleteItemFromObjectCaseSensitive(o, "titles");
+    cJSON_AddItemToObject(o, "titles", titles);
+}
+
 /* PostgreSQL's kn_account_json (and the functions that return it, e.g. kn_commit_stats) builds the account in SQL; what
  * the other drivers' C adds is added here: the owned list (the SQL's data[10] counts every unit; painted copies apart,
- * counter skins' m[stat]), reqDel / twitchId / raidStats, chat_banned, trades and ranked_rank. Every account a PostgreSQL proc hands out goes
+ * counter skins' m[stat]), reqDel / twitchId / raidStats, chat_banned, trades, ranked_rank and titles. Every account a PostgreSQL proc hands out goes
  * through this (db_accounts.c: session_account, account_json, commit_stats). */
 void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v) {
     if (!v || id <= 0) return;
@@ -627,6 +643,7 @@ void db_account_pg_finish(Dbx *x, int64_t id, cJSON *v) {
     db_account_trades(x, id, v);
     db_account_ranked_rank(x, id, v);
     db_account_skin_maker(x, id, v);
+    db_account_titles(x, id, v);
 }
 
 cJSON *db_account_json(Dbx *x, int64_t id) {
@@ -711,5 +728,6 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     db_account_trades(x, id, o);
     db_account_ranked_rank(x, id, o);
     db_account_skin_maker(x, id, o);
+    db_account_titles(x, id, o);
     return o;
 }

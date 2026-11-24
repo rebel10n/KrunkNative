@@ -108,6 +108,7 @@ static KrunkerLinkPlayer *player(KrunkerLink *l, const int sid, const int create
     p->max_health = 100;
     p->ranked_rank = 0; // until its "0"
     p->flag = -1;
+    p->title = -1;
     return p;
 }
 
@@ -441,6 +442,9 @@ static void emit_player_info(KrunkerLink *l, KrunkerLinkPlayer *p) {
     // sends them, since the PLAYER_INFO resets both on the client
     const NetPlayerRankFlagPacket rank_flag = {.uid = p->info.uid, .ranked_rank = p->ranked_rank, .flag = p->flag};
     emit_hud_ext(l, NET_EXT_KN_PLAYER_RANK_FLAG, &rank_flag, sizeof(rank_flag));
+    // "0" [52] titleIndex (the Tab board's .leaderTitle), after it the same way
+    const NetPlayerTitlePacket title = {.uid = p->info.uid, .title_index = p->title};
+    emit_hud_ext(l, NET_EXT_KN_PLAYER_TITLE, &title, sizeof(title));
 }
 
 // ADD_PLAYERS' propID: offset 21 of the 10.0.3 layout (KRUNKER_ADD_PROP_ID_1003, see on_add_players), NULL
@@ -525,6 +529,9 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
             const double rank = num(E(KRB_ADD_RANKED_RANK), 0), flag = num(E(KRB_ADD_FLAG_INDEX), -1);
             p->ranked_rank = rank > 0 ? (int) rank : 0;
             p->flag = flag > -1 ? (int) flag : -1;
+            // the handler's titleIndex = parseInt([52]) (:227161); NaN (absent) draws no title
+            const double title = num(E(KRB_ADD_TITLE_INDEX), -1);
+            p->title = title > -1 ? (int) title : -1;
         }
 #undef E
         if (s.is_you) {

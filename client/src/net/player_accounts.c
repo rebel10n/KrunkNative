@@ -9,6 +9,7 @@ static struct {
     NetPlayerInfoPacket infos[PA_MAX];
     int32_t ranked_rank[PA_MAX]; // NET_EXT_KN_PLAYER_RANK_FLAG of infos[i].uid: rankedRank, 0 none
     int32_t flag[PA_MAX];        // its flagIndex, -1 none
+    int32_t title[PA_MAX];       // NET_EXT_KN_PLAYER_TITLE: its titleIndex, -1 none
     int count;
 } g_pa;
 
@@ -25,6 +26,7 @@ void player_accounts_on_info(const NetPlayerInfoPacket *info) {
     // a PLAYER_INFO starts the player over: its NET_EXT_KN_PLAYER_RANK_FLAG follows it (none from a bot or an older server)
     g_pa.ranked_rank[i] = 0;
     g_pa.flag[i] = -1;
+    g_pa.title[i] = -1;
 }
 
 void player_accounts_on_rank_flag(const NetPlayerRankFlagPacket *packet) {
@@ -32,6 +34,14 @@ void player_accounts_on_rank_flag(const NetPlayerRankFlagPacket *packet) {
         if (g_pa.infos[i].uid != packet->uid) continue;
         g_pa.ranked_rank[i] = packet->ranked_rank > 0 ? packet->ranked_rank : 0;
         g_pa.flag[i] = packet->flag >= 0 ? packet->flag : -1;
+        return;
+    }
+}
+
+void player_accounts_on_title(const NetPlayerTitlePacket *packet) {
+    for (int i = 0; packet && i < g_pa.count; i++) {
+        if (g_pa.infos[i].uid != packet->uid) continue;
+        g_pa.title[i] = packet->title_index >= 0 ? packet->title_index : -1;
         return;
     }
 }
@@ -53,6 +63,13 @@ int player_accounts_ranked_rank(const int uid) {
 int player_accounts_flag(const int uid) {
     for (int i = 0; i < g_pa.count; i++) {
         if (g_pa.infos[i].uid == uid) return g_pa.flag[i];
+    }
+    return -1;
+}
+
+int player_accounts_title(const int uid) {
+    for (int i = 0; i < g_pa.count; i++) {
+        if (g_pa.infos[i].uid == uid) return g_pa.title[i];
     }
     return -1;
 }

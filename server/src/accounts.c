@@ -545,6 +545,28 @@ static void acc_send_rank_flag(const ClientConnection *client, const ClientConne
     if (n) net_send_packet(to->fd, NET_PACKET_EXT, buf, n);
 }
 
+// 1 when the account owns title `id` (its "titles", acc_apply_account)
+static int acc_owns_title(const ClientConnection *client, const int id) {
+    return client->acct.account_id > 0 && id >= 0 && id < SERVER_TITLE_MAX && (client->acct.titles_owned[id / 8] & (1u << (id % 8)));
+}
+
+// getPlayerAddData's [52] `anonMode && !viewerIsDev ? -1 : titleIndex` (deob-10.0.7.js:176753) of `client` as `to` sees
+// it: the ENT's titleIndex (NET_EXT_KN_LOOK, worn from the spawn), and only a title the account owns (a guest has none)
+static int acc_title_for(const ClientConnection *client, const ClientConnection *to) {
+    const Player *player = client->player;
+    const int anon_hidden = player && player->anon_mode && !(to && (to->acct.flags & NET_PLAYER_INFO_DEV));
+    return !anon_hidden && acc_owns_title(client, client->title_index) ? client->title_index : -1;
+}
+
+// NET_EXT_KN_PLAYER_TITLE right after `client`'s NET_EXT_KN_PLAYER_RANK_FLAG to `to`, an EXT peer
+static void acc_send_title(const ClientConnection *client, const ClientConnection *to) {
+    if (!to || to->peer_minor < NET_PROTOCOL_MINOR_EXT) return;
+    const NetPlayerTitlePacket body = {.uid = client->player ? client->player->uid : client->id, .title_index = acc_title_for(client, to)};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(body)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_PLAYER_TITLE, &body, sizeof(body));
+    if (n) net_send_packet(to->fd, NET_PACKET_EXT, buf, n);
+}
+
 static void acc_broadcast_info(const ClientConnection *client) {
     if (!g_acc.brain || !client->player) return;
     NetPlayerInfoPacket info;
@@ -552,6 +574,7 @@ static void acc_broadcast_info(const ClientConnection *client) {
         acc_fill_info(client, &info, &g_server->clients[i]);
         net_send_packet(g_server->clients[i].fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
         acc_send_rank_flag(client, &g_server->clients[i]);
+        acc_send_title(client, &g_server->clients[i]);
     }
 }
 
@@ -564,6 +587,7 @@ void accounts_send_infos_to(ClientConnection *target) {
         acc_fill_info(client, &info, target);
         net_send_packet(target->fd, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
         acc_send_rank_flag(client, target);
+        acc_send_title(client, target);
     }
 }
 
@@ -3031,6 +3055,7 @@ static void acc_become_guest(ClientConnection *client, const char *why) {
     client->acct.central_pending = 0;
     client->acct.flag = -1;
     client->acct.ranked_rank = 0;
+    memset(client->acct.titles_owned, 0, sizeof(client->acct.titles_owned));
     client->acct.username[0] = 0;
     if (director_gate_enabled()) { // Krunker Strike: required tickets, private lobbies (director_gate.h)
         char msg[96] = "";
@@ -3075,6 +3100,7 @@ static int acc_director_join(ClientConnection *client, const NetJoinPacket *join
     client->acct.central_pending = 0;
     client->acct.flag = -1;
     client->acct.ranked_rank = 0;
+    memset(client->acct.titles_owned, 0, sizeof(client->acct.titles_owned));
     client->acct.username[0] = 0;
     client->acct.account_id = 0;
     acc_set_ready(client);
@@ -3462,6 +3488,14 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     // tier (db_common.c db_account_ranked_rank), sent as ADD_PLAYERS' rankedRank (NET_EXT_KN_PLAYER_RANK_FLAG)
     const cJSON *rr = cJSON_GetObjectItem(account, "ranked_rank");
     client->acct.ranked_rank = cJSON_IsNumber(rr) && rr->valueint > 0 && rr->valueint <= RANK_KRACKED ? rr->valueint : 0;
+    // v10 account.titles (setData; acc.titles.indexOf(titleIndex)): kn_brain's account "titles" (player_titles ids,
+    // db_common.c db_account_titles); the ENT's titleIndex is sent as ADD_PLAYERS' [52] only when it is one of them
+    memset(client->acct.titles_owned, 0, sizeof(client->acct.titles_owned));
+    const cJSON *title;
+    cJSON_ArrayForEach(title, cJSON_GetObjectItem(account, "titles")) {
+        if (cJSON_IsNumber(title) && title->valueint >= 0 && title->valueint < SERVER_TITLE_MAX)
+            client->acct.titles_owned[title->valueint / 8] |= (uint8_t) (1u << (title->valueint % 8));
+    }
     client->acct.badge = cJSON_IsNumber(bdg) && bdg->valueint >= 0 ? bdg->valueint : -1;
     // WP-E part 2c: only a badge the account owns (kn_brain's account "badges", badges.js indices)
     const cJSON *owned = cJSON_GetObjectItem(account, "badges");
@@ -3691,6 +3725,7 @@ static void acc_live_leave_account(ClientConnection *client) {
     a->badge = -1;
     a->flag = -1;
     a->ranked_rank = 0;
+    memset(a->titles_owned, 0, sizeof(a->titles_owned));
     a->skins_known = 0;
     a->skin_paint_count = 0;
     memset(a->skins_owned, 0, sizeof(a->skins_owned));

@@ -1,15 +1,19 @@
-"""v10.0.7's rankedRank and flagIndex on the Tab board and the end table, on --render-scenario fixtures.
+"""v10.0.7's rankedRank, flagIndex and titleIndex on the Tab board and the end table, on --render-scenario fixtures.
 
-The scenario rows carry what NET_EXT_KN_PLAYER_RANK_FLAG gives a live row (player_accounts.c): "rankedRank" and
-"flagIndex" (with "verified" / "premium" / "creator" / "clan" / "badge" for the end table's other player cell icons).
+The scenario rows carry what NET_EXT_KN_PLAYER_RANK_FLAG and NET_EXT_KN_PLAYER_TITLE give a live row (player_accounts.c):
+"rankedRank", "flagIndex" and "titleIndex" (with "verified" / "premium" / "creator" / "clan" / "badge" for the end
+table's other player cell icons).
   - Tab board (f1985, deob-10.0.7.js:227637): `!isUsingRankedNames && rankedRank` adds, after the badges and before
     .newLeaderName, <div class="newLeaderRanked"><img src="<asset host>img/ranked/ranks/rank_<tier>.svg" alt="Rank"
     class="newLeaderRankedIcon"></div> (iîíìíîì, :98188-98191); a row with rankedRank 0 has none.
+  - Tab board (:227638): .newLeaderName ends with iiiiìïí(titleIndex, !isUsingRankedNames) (:227597-227603), the title's
+    <span class='leaderTitle' style='color:<its colour>;[Contraband outline]'><name></span> (iiiíîíî, :104102-104108);
+    a row without a title (or with an id the catalogue lacks) has none.
   - End table (showTable, :226755-226764), the name cell in order: <div class='endTableFlag flag-icon flag-icon-<iso>'>
     (flagIndex > -1, flags[i][1]), the .endTablePfp picture, the .endTableN link with the " [clan]" span, the
     verified / beenhere / check_circle icons (margin-top:-12px; font-size:28px) and <div class="endTableRanked"><img ...
     class="endTableRankedIcon"></div>; a row without them has none of it.
-  - Hide player names: another row's flag, rank, clan and icons go.
+  - Hide player names: another row's flag, rank, title, clan and icons go.
 
   python3 -I client/tests/player_rank_flag_e2e.py BUILD_DIR [SOURCE_DIR]   (run from the repository root)
 """
@@ -61,8 +65,8 @@ def render(name, state):
 ROWS = [
     {"rank": 1, "name": "Local User", "score": 30, "kills": 3, "me": True},
     {"rank": 2, "name": "Quentin", "score": 20, "kills": 2, "rankedRank": 8, "flagIndex": 12, "verified": 1, "premium": 1,
-     "creator": 1, "clan": "QQ"},
-    {"rank": 3, "name": "Rhea", "score": 10, "kills": 1, "rankedRank": 0, "flagIndex": -1},
+     "creator": 1, "clan": "QQ", "titleIndex": 87},
+    {"rank": 3, "name": "Rhea", "score": 10, "kills": 1, "rankedRank": 0, "flagIndex": -1, "titleIndex": -1},
 ]
 HUD = {"health": 100, "maxHealth": 100, "scoreboard": True}
 
@@ -71,6 +75,20 @@ def board_row(doc, name):
     """The .newLeaderItem of the row named `name` (its markup up to the name's end)."""
     m = re.search(r"<div class=['\"]newLeaderItem['\"]>((?:(?!newLeaderItem).)*?" + re.escape(name) + ")", doc, re.S)
     return m.group(1) if m else ""
+
+
+def board_name(doc, name):
+    """The .newLeaderName div of the row named `name`, double quotes."""
+    m = re.search(r"<div class=['\"]newLeaderName[MF]?['\"]>" + re.escape(name) + r"(.*?)</div>", doc, re.S)
+    return m.group(0).replace("'", '"') if m else ""
+
+
+def title_of(tid):
+    """assets/titles.json's title `tid`: (name, the tag style iiiíîíî gives it)."""
+    with open(os.path.join(SRC, "assets", "titles.json"), encoding="utf-8") as f:
+        t = next(t for t in json.load(f) if t["id"] == tid)
+    style = "color:%s;" % t["color"]  # a title with its own colour (No-Life: #ff3333); Contraband without one is outlined
+    return t["name"], style
 
 
 def end_cell(doc, name):
@@ -110,6 +128,18 @@ def main():
     check("board: after the badges, before .newLeaderName", m is not None and q.find("check_circle") < m.start() < q.find("newLeaderName"), q[-600:])
     check("board: Rhea (rankedRank 0) has no rank icon", rh and "newLeaderRanked" not in rh, rh[-300:])
     check("board: the local row has none", "newLeaderRanked" not in board_row(doc, "Local User"))
+    tname, tstyle = title_of(87)
+    qn = board_name(doc, "Quentin")
+    # (a scenario board row has no clan: the live row's " [clan]" span comes before the title, as in v10's markup)
+    check("board: Quentin's titleIndex 87 ends .newLeaderName with its .leaderTitle tag (No-Life, #ff3333)",
+          qn == '<div class="newLeaderName">Quentin<span class="leaderTitle" style="%s">%s</span></div>' % (tstyle, tname), qn)
+    check("board: Rhea (titleIndex -1) and the local row (none) have no title",
+          board_name(doc, "Rhea") and "leaderTitle" not in board_name(doc, "Rhea") and "leaderTitle" not in board_name(doc, "Local User"),
+          board_name(doc, "Rhea"))
+    doc = render("board-unknown-title", {"hud": HUD, "scoreboard": [dict(ROWS[1], titleIndex=9999)]})
+    check("board: an id the catalogue lacks draws no title", doc and "Quentin" in doc and "leaderTitle" not in doc)
+    doc = render("board-hidden", {"hud": HUD, "scoreboard": ROWS, "storage": {"knClient": json.dumps({"hidePlayerNames": True})}})
+    check("hide player names: no other row's title on the board", doc and "leaderTitle" not in doc)
 
     end = {"hud": dict(HUD, scoreboard=False), "scoreboard": ROWS, "endTab": "leaderboard",
            "endscreen": {"place": 1, "result": 1, "text": "#1 VICTORY", "nextRound": "00:17", "results": 1}}

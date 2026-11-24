@@ -520,6 +520,7 @@ static void test_combat(void) {
     b[KRUNKER_ADD_CREATOR_BADGE] = KRUNKER_V_NUM(1);
     b[KRUNKER_ADD_RANKED_RANK] = KRUNKER_V_NUM(7); // Gold 2
     b[KRUNKER_ADD_FLAG_INDEX] = KRUNKER_V_NUM(12); // Australia
+    b[KRUNKER_ADD_TITLE_INDEX] = KRUNKER_V_NUM(87); // No-Life
     feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
     {
         READ_IN(NetSpawnPacket, s1, SPAWN, 1);
@@ -546,6 +547,20 @@ static void test_combat(void) {
               ok ? r[1].ranked_rank : -9, ok ? r[1].flag : -9);
         CHECK(ok && find_in(NET_PACKET_PLAYER_INFO, 1) < find_in(NET_PACKET_EXT, at[1]) && find_in(NET_PACKET_EXT, at[0]) < find_in(NET_PACKET_PLAYER_INFO, 1),
               "0: each one follows its PLAYER_INFO");
+        // [52] titleIndex (parseInt, deob-10.0.7.js:227161): NET_EXT_KN_PLAYER_TITLE right after each rank / flag (nil: -1)
+        NetPlayerTitlePacket t[2];
+        int tat[2] = {-1, -1}, tok = 1;
+        for (int n = 0; n < 2; n++) {
+            uint16_t len = 0;
+            tat[n] = find_ext(NET_EXT_KN_PLAYER_TITLE, n, &len);
+            const uint8_t *body = tat[n] >= 0 ? ext_body(tat[n], NET_EXT_KN_PLAYER_TITLE, &len) : NULL;
+            if (!body || len != sizeof(t[n])) tok = 0;
+            else memcpy(&t[n], body, sizeof(t[n]));
+        }
+        CHECK(tok && t[0].uid == 9 && t[0].title_index == -1, "0: our titleIndex (none: -1)");
+        CHECK(tok && t[1].uid == 7 && t[1].title_index == 87, "0: 7's titleIndex 87 (%d)", tok ? t[1].title_index : -9);
+        CHECK(tok && ok && tat[0] == at[0] + 1 && tat[1] == at[1] + 1, "0: each title right after its rank / flag (%d %d, %d %d)",
+              at[0], tat[0], at[1], tat[1]);
     }
     clear();
 

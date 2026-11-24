@@ -235,9 +235,11 @@ void client_send_pc_stat(Client *client) {
 }
 
 // NET_EXT_KN_LOOK: an official lobby's ENTER_GAME also carries skinColIndex, hairCol, chatCol and titleIndex
-// (deob-10.0.7.js:215052): the saved values, a premium colour as its hex string.
+// (deob-10.0.7.js:215052): the saved values, a premium colour as its hex string. Our own server takes the titleIndex.
 void client_send_look(Client *client) {
-    if (!krunker_net_active()) return;
+    // the krunker.io link builds ENTER_GAME from it; a KrunkNative server with the EXT envelope reads the titleIndex
+    // (ADD_PLAYERS' [52], NET_EXT_KN_PLAYER_TITLE). An older one would not read it.
+    if (!krunker_net_active() && !client->offline && client->net_server_minor < NET_PROTOCOL_MINOR_EXT) return;
     NetLookPacket look;
     memset(&look, 0, sizeof(look));
     char buf[16];
@@ -1642,6 +1644,10 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 NetPlayerRankFlagPacket rank_flag;
                 memcpy(&rank_flag, body, sizeof(rank_flag));
                 player_accounts_on_rank_flag(&rank_flag);
+            } else if (subtype == NET_EXT_KN_PLAYER_TITLE && body_length == sizeof(NetPlayerTitlePacket)) { // ADD_PLAYERS' [52] titleIndex
+                NetPlayerTitlePacket title;
+                memcpy(&title, body, sizeof(title));
+                player_accounts_on_title(&title);
             }
             else if (subtype == NET_EXT_KN_CHAT_ACTIONS && body_length == sizeof(NetChatActionsPacket)) { // the last line's actions
                 NetChatActionsPacket actions;

@@ -1182,6 +1182,7 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->spray_index = client->spray_index; // applyEntData: player.sprayIndex = ent[1]
     client->player->skins = client->skins;             // applyEntData: player.skins = ent[2], meleeIndex = ent[9]
     client->worn_copies = client->ent_copies;          // their "<copyId>#<index>" copies (v10.0.7's skinId, accounts_worn_copy)
+    client->title_index = client->ent_title;           // ENTER_GAME [34] titleIndex (NET_EXT_KN_LOOK), ADD_PLAYERS' [52]
     client->player->lag_comp = client->lag_comp;       // applyLagCompFromEnt: player.lagComp = ent[11]
     client->player->attach_index = client->attach_index; // WP-C: player.attachIndex = ent[12] (sent in SPAWN)
     client->player->chall_mode = client->chall_mode;     // WP-C: player.challMode = ent[7]
@@ -1703,6 +1704,8 @@ void net_add_client(ClientConnection *client) {
     client->skins = PLAYER_SKINS_NONE;
     memset(&client->ent_copies, 0, sizeof(client->ent_copies));
     memset(&client->worn_copies, 0, sizeof(client->worn_copies));
+    client->ent_title = -1;
+    client->title_index = -1;
     client->lag_comp = 1.0f;
     client->attach_index = DEFAULT_ATTACHMENT_INDEX;
     client->chall_mode = 0;
@@ -2147,6 +2150,8 @@ int net_add_recorder(const struct ServerTransport *transport, const int fd) {
     client->skins = PLAYER_SKINS_NONE;
     memset(&client->ent_copies, 0, sizeof(client->ent_copies));
     memset(&client->worn_copies, 0, sizeof(client->worn_copies));
+    client->ent_title = -1;
+    client->title_index = -1;
     client->cosmetics = PLAYER_COSMETICS_NONE;
     client->cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
     client->lag_comp = 1.0f;
@@ -2537,6 +2542,11 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             else if (subtype == NET_EXT_KN_SWAP_TEAM) net_handle_swap_team(client, body, body_length); // Tap-to-Play Switch Teams
             else if (subtype == NET_EXT_KN_SKIN_COPY_IDS && body_length >= sizeof(NetSkinCopyIdsPacket)) // the next ENT's copies
                 memcpy(&client->ent_copies, body, sizeof(client->ent_copies));
+            else if (subtype == NET_EXT_KN_LOOK && body_length >= sizeof(NetLookPacket)) { // the next ENT's titleIndex ([34])
+                NetLookPacket look;
+                memcpy(&look, body, sizeof(look));
+                client->ent_title = look.title_index >= 0 && look.title_index < SERVER_TITLE_MAX ? look.title_index : -1;
+            }
             else if (trade_handle_ext(client, subtype, body, body_length)) net_note_activity(client); // the live trade (trade.c)
             else if (subtype == NET_EXT_CAPTCHA_ANSWER) game_captcha_on_answer(client, body, body_length); // "cptR" (game_captcha.c)
             else if (subtype == NET_EXT_CHARGE_CONSENT_RESPONSE) ks_server_charge_response(client, body, body_length); // "chrsp" (ks_server_host.c)
