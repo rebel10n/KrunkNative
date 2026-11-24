@@ -2,7 +2,7 @@
 // The K.P.D replay viewer (client/src/ui/hud_replay.c, doc/v10/replays.md 2.5): Krunker v10.0.7's
 // watchDemo / openDemoLink / the #replayControls bar and its resolve area (deob-10.0.7.js:229590-229845,
 // :230167) over the replay player (demo_play.h). The page's #replayControls markup keeps Krunker's ids;
-// the bar's CSS (ui/css/main.css) and its text are Box Office's.
+// the bar's CSS (ui/css/main.css) and text follow v10.0.7.
 #include <client.h>
 
 // watchDemo(tok, ct): the demo's download from the brain (GET /kpd/demos/<tok>/download, the account's

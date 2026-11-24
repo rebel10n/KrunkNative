@@ -2,7 +2,7 @@
 """A K.P.D replay's verdict, end to end (doc/v10/replays.md): a demo server_bin recorded is uploaded to a live
 kn_brain as the recorder does (the "acct" ops kpd_demo_chunk / kpd_demo_done of a K.P.D call), then a signed-in
 officer's headless client_bin opens it (watchDemo -> GET /kpd/demos/<tok>/download), plays it and gives its
-verdict from the replay bar (VERDICT -> YES -> POST /kpd/demos/<tok>/vote). The vote must land: the brain's
+verdict from the replay bar (RESOLVE -> HACKER? YES -> POST /kpd/demos/<tok>/vote). The vote must land: the brain's
 kpd_demo_votes row, the case's counts in the Demos list, the bar's own answer.
 
   python3 -I client/tests/kpd_replay_vote_e2e.py BUILD_DIR      (repository root)
@@ -157,11 +157,16 @@ def run_client(brain_url, game_port, timeout=240):
     path = os.path.join(WORK, "vote.script")
     with open(path, "w") as f:
         f.write(script.strip() + "\n")
+    after_exit = os.path.join(WORK, "after-exit.script")
+    with open(after_exit, "w") as f:
+        # The clock does not run until the first event is `menu` (a bare quit waits for a spawn, and the
+        # relaunch's hot seek has no server). menu starts it; quit once the page is up.
+        f.write("0 menu\n500 quit\n2000 quit\n8000 quit\n")
     log = os.path.join(WORK, "client.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY") and (not k.startswith("KRUNKNATIVE_") or k == "KRUNKNATIVE_EGL_DEVICE")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_DEBUG": "1",
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH": after_exit, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_DEBUG": "1",
                 "KRUNKNATIVE_BRAIN_URL": brain_url, "KRUNKNATIVE_REPLAY_LOG": "1",
                 "KRUNKNATIVE_EGL_DEVICE": os.environ.get("KRUNKNATIVE_EGL_DEVICE", "mesa"),
                 # nothing reaches production: no server finder, krunker.io's hosts are a dead local port
@@ -170,12 +175,29 @@ def run_client(brain_url, game_port, timeout=240):
     with open(log, "w") as out:
         p = subprocess.Popen([CLIENT, "--mode", "online", "--brain", brain_url, "--finder", "off", "--connect", "127.0.0.1:%d" % game_port],
                              cwd=ROOT, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
-        try:
-            p.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            os.killpg(p.pid, signal.SIGKILL)
-            p.wait()
-            check("client_bin finished its script", False, "timeout, log " + log)
+        deadline = time.time() + timeout
+        reloaded_at = None
+        while p.poll() is None:
+            now = time.time()
+            if now >= deadline:
+                os.killpg(p.pid, signal.SIGKILL)
+                p.wait()
+                check("client_bin finished its script", False, "timeout, log " + log)
+                break
+            try:
+                with open(log, errors="replace") as seen_f:
+                    seen = "[app] reload: restarting" in seen_f.read()
+            except OSError:
+                seen = False
+            if seen and reloaded_at is None:
+                reloaded_at = now
+            # Exit Replay is location.reload(). The new process then hot-seeks and, with no lobby, never
+            # becomes game-ready, so its script clock (and quit) never starts. The reload line is the result.
+            if reloaded_at is not None and now - reloaded_at > 20:
+                os.killpg(p.pid, signal.SIGKILL)
+                p.wait()
+                break
+            time.sleep(0.5)
     with open(log, errors="replace") as f:
         return f.read()
 
@@ -216,14 +238,14 @@ def scenario(brain_port, brain_url, game_port):
     check("watchDemo downloaded and started the replay", re.search(r"\[replay\] demo %s: \d+ records" % TOK, log), "log in " + WORK)
     check("the replay played (its playhead moved)", re.search(r"^\[replay\] \d+ / \d+ ms", log, re.M))
     before, question, after = text(log, "@before") or "", text(log, "@question") or "", text(log, "@after") or ""
-    check("the bar offers VERDICT", "VERDICT" in before, before)
-    check("VERDICT asks the question (YES / NO)", "YES" in question and "NO" in question, question)
+    check("the bar offers RESOLVE", "RESOLVE" in before, before)
+    check("RESOLVE asks HACKER? (YES / NO)", "HACKER?" in question and "YES" in question and "NO" in question, question)
     check("the bar shows the vote's answer: 1Y 0N and the officer's dot", "1Y" in after and "0N" in after, after)
-    check("the suspect button names the anonymised suspect", (text(log, "@suspect") or "").startswith("Suspect: Player_"),
+    check("the suspect button names the anonymised suspect", (text(log, "@suspect") or "").startswith("SUSPECT: Player_"),
           text(log, "@suspect"))
     check("the speed button cycles the speed (1x -> 2x)", text(log, "@speed") == "2x", text(log, "@speed"))
     check("the play button pauses", text(log, "@play") == "play_arrow", text(log, "@play"))
-    check("the exit stops the replay", "[replay] stopped" in log)
+    check("Exit Replay reloads the client", "[app] reload: restarting" in log)
 
     votes = sql("SELECT v.officer_id, v.verdict FROM kpd_demo_votes v JOIN kpd_demos d ON d.id = v.demo_id WHERE d.token = ?", TOK)
     check("the vote landed: kpd_demo_votes (officer, verdict 1)", votes == [(regs[COP], 1)], votes)

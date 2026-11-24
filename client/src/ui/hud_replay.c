@@ -13,9 +13,10 @@
 //                                case: its status only; a failure: the error for 2.5 s; no call token: no vote
 //   openDemoLink (:229818-229833) demoInfo(tok, ct) -> the case popup (map, mode, date, length, suspect,
 //                                status, Watch, copy link); ?demo=<tok>&sus=<ct> opens it at load (:230167)
-// Box Office: the brain is reached over HTTP with the account's session (?token=), the bar's text and CSS
-// are our own; Exit Replay gives back the game the replay replaced instead of reloading the page.
+// Box Office: the brain is reached over HTTP with the account's session (?token=) when one exists;
+// API answers and v10's own text drive the error paths. Natively Exit Replay re-execs the game page.
 #include <hud_replay.h>
+#include <app_mode.h> // app_reload: Exit Replay is v10's location.reload()
 #include <demo_play.h>
 #include <ui_logic.h>
 #include <html_dom.h>
@@ -47,6 +48,7 @@ static struct {
     int dragging;        // the slider is held: its value is not overwritten (:229775)
     int hitboxes;
     int resolve_mode;    // 0 status, 1 the HACKER? question, 2 waiting for the vote, 3 an error shown
+    int round_seen;      // clearPops belongs to start's first onRoundStart only (:229739-229742)
     int error_timer;
     double refollow_at;
     unsigned gen;        // a download / info answer for an older request is dropped
@@ -97,8 +99,12 @@ static void rp_time_text(char *out, const size_t size, const uint32_t ms) { // :
 }
 
 static int rp_session_url(char *out, const size_t n, const char *path) {
+    if (!backend_enabled()) return 0;
     const char *t = account_session_token();
-    if (!backend_enabled() || !t || !t[0]) return 0;
+    if (!t || !t[0]) { // the API, not a client-side sign-in check, answers an anonymous vote (:229628-229653)
+        snprintf(out, n, "%s%s", backend_url(), path);
+        return 1;
+    }
     char enc[512];
     backend_url_encode(enc, sizeof enc, t);
     snprintf(out, n, "%s%s%stoken=%s", backend_url(), path, strchr(path, '?') ? "&" : "?", enc);
@@ -154,7 +160,7 @@ static void rp_case_status(StrBuf *sb, const ReplayCase *c) {
     else if (c->rsl) sb_append(sb, "<span style='color:#fbc02d'>RESOLVED</span>");
     else if (c->opn) {
         sb_appendf(sb, "<span style='color:#7eeb7a'>%dY</span> <span style='color:#eb5656'>%dN</span>", c->yes, c->no);
-        if (c->myv >= 0) sb_append(sb, " <span style='color:#fbc02d' title='Your verdict is in'>&#9679;</span>");
+        if (c->myv >= 0) sb_append(sb, " <span style='color:#fbc02d' title='You voted on this demo'>&#9679;</span>");
     } else sb_append(sb, "<span style='color:#858585'>CLOSED</span>");
 }
 
@@ -170,7 +176,7 @@ static void rp_resolve_render(void) {
             rp_case_status(&sb, c);
             sb_append(&sb, " ");
         }
-        sb_append(&sb, "<span class='replayResolveB' id='replayResolveBtn' onclick='replayResolve()'>VERDICT</span>");
+        sb_append(&sb, "<span class='replayResolveB' id='replayResolveBtn' onclick='replayResolve()'>RESOLVE</span>");
     } else {
         rp_case_status(&sb, c);
     }
@@ -191,7 +197,7 @@ static void rp_resolve_error(const char *message) { // :229655-229658
     if (!e) return;
     StrBuf sb = {0};
     sb_append(&sb, "<span style='color:#eb5656'>");
-    sb_append_esc(&sb, message && message[0] ? message : "Vote failed");
+    sb_append_esc(&sb, message && message[0] ? message : "Vote Failed");
     sb_append(&sb, "</span>");
     char *html = sb_finish(&sb);
     html_dom_set_html(e, html);
@@ -205,7 +211,7 @@ static int h_replay_resolve(void *user, const HtmlEvent *ev, const HtmlArg *args
     (void) user; (void) ev; (void) args; (void) argc;
     const HtmlElem e = html_dom_by_id("replayResolve");
     if (!e || !rv_active()) return 1;
-    html_dom_set_html(e, "Cheating?<span class='replayResolveB' id='replayVoteY' style='color:#eb5656' onclick='replayVote(1)'>YES</span>"
+    html_dom_set_html(e, "HACKER?<span class='replayResolveB' id='replayVoteY' style='color:#eb5656' onclick='replayVote(1)'>YES</span>"
                          "<span class='replayResolveB' id='replayVoteN' style='color:#7eeb7a' onclick='replayVote(0)'>NO</span>"
                          "<span class='replayResolveB' id='replayVoteC' onclick='replayVote(-1)'>&#10005;</span>");
     g_rp.resolve_mode = 1;
@@ -226,7 +232,7 @@ static void rp_vote_done(void *user, const int status, const char *body, const s
         c->yes = rp_num(data, "yes");
         c->no = rp_num(data, "no");
         const cJSON *myv = cJSON_GetObjectItemCaseSensitive(data, "myv");
-        c->myv = cJSON_IsNumber(myv) ? (int) myv->valuedouble : c->myv;
+        c->myv = cJSON_IsNumber(myv) ? (int) myv->valuedouble : -1;
         if (rp_num(data, "banned")) c->ban = 1;
         if (rp_num(data, "resolved")) {
             c->rsl = 1;
@@ -250,13 +256,13 @@ static int h_replay_vote(void *user, const HtmlEvent *ev, const HtmlArg *args, c
         return 1;
     }
     if (!rv_call_token()[0] || !rv_token()[0]) {
-        rp_resolve_error("Open this demo from the Demos list to give a verdict");
+        rp_resolve_error("Open the demo from the list to vote");
         return 1;
     }
     char path[160], url[1024], body[160];
     snprintf(path, sizeof path, "/kpd/demos/%s/vote", rv_token());
     if (!rp_session_url(url, sizeof url, path)) {
-        rp_resolve_error("Sign in to your Box Office account to vote");
+        rp_resolve_error(NULL);
         return 1;
     }
     cJSON *b = cJSON_CreateObject();
@@ -381,10 +387,16 @@ static int l_hitboxes(void *user, const HtmlEvent *ev, const HtmlArg *args, cons
 static int l_exit(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user; (void) ev; (void) args; (void) argc;
     if (!g_rp.client) return 1;
+    app_reload(NULL); // :229804-229806: location.reload()
+#ifdef __EMSCRIPTEN__
+    return 1;
+#else
+    // A native reload normally replaces the process. Keep the old in-place exit only if it could not start.
     demo_play_stop(g_rp.client);
     rp_hide();
     client_set_menu_open(g_rp.client, 1);
     return 1;
+#endif
 }
 
 // The bar's own elements get inline handlers (the page's markup has none: Krunker sets .onclick from its
@@ -427,7 +439,10 @@ void hud_replay_tick(Client *client) {
     }
     if (!g_rp.bound) hud_replay_bind(client);
     if (!g_sc.on && demo_play_take_round_start()) { // onRoundStart (:229724-229731)
-        ui_loadout_clear_pops();
+        if (!g_rp.round_seen) { // start's callback clears once (:229740-229742), later rounds do not
+            ui_loadout_clear_pops();
+            g_rp.round_seen = 1;
+        }
         if (menu_connecting()) menu_connect_stopped(); // no connect is under way: the menu's Escape works (main.c)
         client_set_menu_open(client, 0);
         if (!rp_follow_suspect(client)) spectate_mode(client, 1);
@@ -454,7 +469,7 @@ void hud_replay_tick(Client *client) {
     rp_set_text("replaySpeed", text, g_rp.last_speed, sizeof g_rp.last_speed);
     rp_set_text("replayPlayBtn", rv_playing() ? "pause" : "play_arrow", g_rp.last_play, sizeof g_rp.last_play);
     if (rv_suspect() >= 0) {
-        snprintf(text, sizeof text, "Suspect: Player_%d", rv_suspect());
+        snprintf(text, sizeof text, "SUSPECT: Player_%d", rv_suspect());
         rp_set_text("replaySusBtn", text, g_rp.last_sus, sizeof g_rp.last_sus);
     }
     const uint32_t at = rv_playhead();
@@ -487,7 +502,7 @@ static void rp_download_done(void *user, const int status, const char *body, con
         ui_loadout_response_popup(err[0] ? err : "Invalid Demo File"); // :229714
         return;
     }
-    ui_loading_popup("Loading replay..."); // :229723, closed at onRoundStart
+    ui_loading_popup("Loading Replay..."); // :229725, closed at onRoundStart
     menu_close_window();
 }
 
@@ -501,9 +516,10 @@ void hud_replay_watch(Client *client, const char *tok, const char *ct) {
     snprintf(g_rp.tok, sizeof g_rp.tok, "%s", tok);
     snprintf(g_rp.ct, sizeof g_rp.ct, "%s", ct ? ct : "");
     g_rp.gen++;
+    g_rp.round_seen = 0;
     char path[128];
     snprintf(path, sizeof path, "/kpd/demos/%s/download", tok);
-    ui_loading_popup("Downloading demo..."); // :229697
+    ui_loading_popup("Downloading Demo..."); // :229696
     if (!backend_http_get_auth(path, account_session_token(), rp_download_done, (void *) (uintptr_t) g_rp.gen))
         ui_loadout_response_popup("Demo Download Failed");
 }
@@ -534,7 +550,7 @@ static int rp_case_popup(const cJSON *d) {
     rp_time_text(dur, sizeof dur, (uint32_t) (rp_num(d, "dur") > 0 ? rp_num(d, "dur") : 0));
 
     StrBuf sb = {0};
-    sb_append(&sb, "<div style='font-size:26px;margin-bottom:4px;color:#858585'>K.P.D Case Review</div>"
+    sb_append(&sb, "<div style='font-size:26px;margin-bottom:4px;color:#858585'>KPD Demo Review</div>"
                    "<div style='line-height:1.8;margin-bottom:12px'><div style='font-size:19px'>");
     sb_append(&sb, typ == 1 ? "[ranked] " : typ == 2 ? "[comp] " : typ == 3 ? "[custom] " : "");
     sb_append_esc(&sb, cJSON_IsString(map) && map->valuestring[0] ? map->valuestring : "?");
@@ -554,7 +570,7 @@ static int rp_case_popup(const cJSON *d) {
     rp_case_status(&sb, rc);
     sb_appendf(&sb, "</span></div><div style='white-space:nowrap'><div id='confirmBtn' style='width:142px;display:inline-block;vertical-align:middle' "
                     "onclick=\"watchDemo('%s','%s')\">Watch</div><span class='material-icons' style='font-size:20px;vertical-align:middle;cursor:pointer;"
-                    "color:#fff;margin-left:10px' title='Copy the case link' onclick=\"copyDemoLink(this,'%s','%s')\">content_copy</span></div>",
+                    "color:#fff;margin-left:10px' title='Copy demo link' onclick=\"copyDemoLink(this,'%s','%s')\">content_copy</span></div>",
                t, c, t, c);
     char *html = sb_finish(&sb);
     ui_loadout_clear_pops();
@@ -568,25 +584,36 @@ static void rp_info_done(void *user, const int status, const char *body, const s
     if (gen != g_rp.gen) return;
     cJSON *root = body && length ? cJSON_ParseWithLength(body, length) : NULL;
     const cJSON *d = cJSON_GetObjectItemCaseSensitive(root, "data");
-    // :229821-229823, :229831
-    if (status != 200 || !cJSON_IsObject(d) || !rp_case_popup(d)) ui_loadout_response_popup("Demo not found, or not yours to review");
+    if (status == 200 && cJSON_IsObject(d) && rp_case_popup(d)) {
+        cJSON_Delete(root);
+        return;
+    }
+    // :229821-229833: a resolved API error is its own text; no data is "Demo not found"; a thrown request is the catch text.
+    const cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    const cJSON *message = cJSON_IsObject(error) ? cJSON_GetObjectItemCaseSensitive(error, "message") : error;
+    if (cJSON_IsString(message) && message->valuestring[0]) ui_loadout_response_popup(message->valuestring);
+    else ui_loadout_response_popup(status == 0 || status >= 500 ? "Demo not found or not authorized" : "Demo not found");
     cJSON_Delete(root);
 }
 
 void hud_replay_open_link(Client *client, const char *tok, const char *ct) {
     if (client) g_rp.client = client;
     if (!rp_token_ok(tok) || (ct && ct[0] && !rp_token_ok(ct))) {
-        ui_loadout_response_popup("Demo not found, or not yours to review");
+        ui_loadout_response_popup("Demo not found");
         return;
     }
     snprintf(g_rp.tok, sizeof g_rp.tok, "%s", tok);
     snprintf(g_rp.ct, sizeof g_rp.ct, "%s", ct ? ct : "");
     g_rp.gen++;
-    char path[160];
-    snprintf(path, sizeof path, "/kpd/demos/%s?ct=%s", tok, ct ? ct : "");
+    char path[192], enc[96];
+    snprintf(path, sizeof path, "/kpd/demos/%s", tok);
+    if (ct && ct[0]) { // :27455-27458: ?ct= only when present, URL-encoded
+        backend_url_encode(enc, sizeof enc, ct);
+        snprintf(path + strlen(path), sizeof(path) - strlen(path), "?ct=%s", enc);
+    }
     ui_loading_popup("Loading..."); // :229819
     if (!backend_http_get_auth(path, account_session_token(), rp_info_done, (void *) (uintptr_t) g_rp.gen))
-        ui_loadout_response_popup("Demo not found, or not yours to review");
+        ui_loadout_response_popup("Demo not found or not authorized");
 }
 
 // ---------------------------------------------------------------- --render-scenario

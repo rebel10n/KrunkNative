@@ -99,5 +99,5 @@
     }
   },
   "frames": 3,
-  "note": "A K.P.D replay (doc/v10/replays.md): #replayControls over spectating, the suspect's segments gold on the timeline, an open case's counts and VERDICT (Box Office render: KN's own baseline)."
+  "note": "A K.P.D replay (doc/v10/replays.md): #replayControls over spectating, the suspect's segments gold on the timeline, an open case's counts and RESOLVE (v10.0.7 text; KN regression baseline)."
 }

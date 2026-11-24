@@ -101,5 +101,5 @@
     }
   },
   "frames": 3,
-  "note": "The replay's verdict question (Cheating? YES / NO / cancel), paused at 2x with the hitbox toggle on (KN's own baseline)."
+  "note": "The replay's verdict question (HACKER? YES / NO / cancel), paused at 2x with the hitbox toggle on (v10.0.7 text; KN regression baseline)."
 }

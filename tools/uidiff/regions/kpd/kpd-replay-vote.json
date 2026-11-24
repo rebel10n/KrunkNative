@@ -1,5 +1,5 @@
 {
-  "note": "KN only: the replay's verdict question (Cheating? YES / NO / cancel), paused, 2x, hitboxes on",
+  "note": "KN regression: the replay's verdict question (HACKER? YES / NO / cancel), paused, 2x, hitboxes on",
   "defaults": {
     "fuzz": 12,
     "max_pct": 3.0

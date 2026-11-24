@@ -147,15 +147,16 @@ prints the playhead every second.
 ### 2.5 UI (`client/src/ui/hud_replay.c`)
 
 `#replayControls` of the page (ids as Krunker's), driven from C: play / pause, slider, time, speed,
-suspect follow, hitboxes, the resolve area and exit (leaves the replay back to the menu). `watchDemo`
+suspect follow, hitboxes, the resolve area and exit (`location.reload()`; a native re-exec). `watchDemo`
 downloads and plays; `openDemoLink` (a `?demo=<tok>&sus=<ct>` link, `client_bin --demo-link
-<tok>[:<ct>]`) shows the case popup first. Text and CSS are Box Office's own (VERDICT -> "Cheating?" YES /
-NO / cancel). Votes go to `POST /kpd/demos/<tok>/vote` with the account's session (`?token=`). While a
-replay plays, `hud_votekick_kpd_sus()` is the replay's suspect (isReplay stands in for kpdData: the
-spectator cards, KPD Vision), and the live case's verdict keys / panel are off. Exit Replay gives back
-what the replay replaced (the server it was on, or the offline game) instead of reloading the page. The
-hitbox outlines (`client/src/replay_hitbox.c`) are LineMaterial boxes after the world pass, rebuilt
-every frame.
+<tok>[:<ct>]`) shows the case popup first. The viewer uses v10's own text: RESOLVE -> HACKER? YES / NO /
+cancel, SUSPECT, Downloading Demo / Loading Replay, KPD Demo Review and the API error strings. Votes go to
+`POST /kpd/demos/<tok>/vote` with the account's session (`?token=`) when signed in; the API, not a local
+sign-in check, decides the answer. Demos and Reviewers use `GET /kpd/demos?off&q` and `/kpd/reviewers`
+(the official account's gapi when an official game is active), including the grouped response shape.
+While a replay plays, `hud_votekick_kpd_sus()` is the replay's suspect (isReplay stands in for kpdData: the
+spectator cards, KPD Vision), and the live case's verdict keys / panel are off. The hitbox outlines
+(`client/src/replay_hitbox.c`) are LineMaterial boxes after the world pass, rebuilt every frame.
 
 ## 3. Tests
 
@@ -169,9 +170,9 @@ every frame.
   replayCase, KN baselines); the Demos list is `kpd/kpd-officer-demos`.
 - `client/tests/kpd_replay_vote_e2e.py BUILD`: a live kn_brain plus a recorded Sandstorm demo
   uploaded as a K.P.D case. A headless officer client signs in, opens it with `watchDemo`, leaves its
-  game server for the replay, frees the pointer with Escape and clicks VERDICT and YES on the bar. The
+  game server for the replay, frees the pointer with Escape and clicks RESOLVE and YES on the bar. The
   test checks that the vote landed (`kpd_demo_votes`, the case counts, the Demos list), that the bar
-  shows 1Y 0N, and that the speed, pause and exit controls work.
+  shows 1Y 0N, and that the speed, pause and reload-on-exit controls work.
 - `tools/replay/rt0_identity.sh BASE_BIN NEW_BIN`: the rtMode 0 check of AGENTS.md. It takes
   pinned-camera captures on Sandstorm and Kanji, with the UI and world-only, at a base build and at
   the new one. It runs each build `RUNS` times (default 6) to mask the pixels that differ between
