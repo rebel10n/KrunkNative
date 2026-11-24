@@ -158,6 +158,7 @@ local server are ready):
 |---|---|
 | `name`, `classIndex` | `Client.menu_name` + `menu_update_class_box()`, `menu_set_class_index(i, 1)` |
 | `discord` | `account_links_discord_scenario()`: the Connections tab's already-loaded `getStatus().data`, before the window mounts it |
+| `blur` | after `windowActions` / `windowClicks`, blurs `document.activeElement` for a reference captured without a focus ring |
 | `region` | `menu_set_region_label()` (shown while connected; default `MENU_REGION_NAME`) |
 | `inGame` | `client_set_menu_open(0)` + `client_enter_game()` (ENT -> SPAWN via the local server), then the HUD runs from `client_hud_html_tick()` |
 | `hud` | `hud_ui_set_override()`: replaces the sampled values (weapons looked up by name; `scoped` shows Krunker's reticle only for scope weapons, other weapons just aim: crosshair hidden) |
@@ -865,4 +866,14 @@ clientHeight. It now uses the padding box minus the scrollbar on each axis. `htm
 fitting padded scroller and the exact 20 px range of an overflowing one. The AI panel's four former failures are
 0.000 % against the browser-verified, intentionally updated KN baseline; Account Connections is separately fixed by
 pinning its loaded, unconfigured Discord response (2.148 / 1.502 %, both pass at normal fuzz).
+
+### The login card's autofocus ring (2026-11-24)
+
+v10's login card focuses the Email field when it opens (`v10_login.c` `render_with`). The Chromium capture
+(`doc/ref/krunker-v10.0.2/ranked-guest.png`) has no focus ring. `state.blur` blurs `document.activeElement`
+after the window's actions, and the Email field is now a region of `ranked-guest`, `login-header`,
+`login-account` and `login-kio` (fuzz 12, max 1.5; a ring is several percent of that rect). The whole
+`ranked-guest` card stays skipped: with the ring gone it is still 1.166 % at fuzz 6 and 0.548 % at fuzz 12,
+the gradient bar's side-pixel coverage and the Login button's outer pixel. Those two pieces are already
+scored by `login-header` and `login-account`. The threshold was not raised.
 

@@ -17,7 +17,8 @@
     "mapFile": "maps/311_kanji.json",
     "gameName": "",
     "anim_time": 0.8,
-    "window": 5
+    "window": 5,
+    "blur": true
   },
   "frames": 3,
   "note": "Krunker v10.0.2: showWindow(5) as a guest (the comp menu's account button, Store / Market 'Register to craft!', LOGIN REQUIRED cards, logout): windows[4].gen pushes loginOrRegister's modal and closes the window (v10_login_guest_window), never v7's 'Register or Login' form with its text-sized .accBtn Register / Login buttons. Reference: v10's capture of the modal (doc/ref/krunker-v10.0.2/ranked-guest.png)"

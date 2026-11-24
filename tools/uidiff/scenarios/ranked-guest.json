@@ -21,7 +21,8 @@
       [
         "openRankedMenu"
       ]
-    ]
+    ],
+    "blur": true
   },
   "frames": 3,
   "note": "Krunker v10.0.2: a guest clicks Ranked (openRankedMenu: no rankedMenuModal for guests, v10's loginOrRegister() modal instead) (doc/ref/krunker-v10.0.2/ranked-guest.png: captured from the offline v10 sandbox, ~/.cache/kn-wt/v10-stage/v10-capture states/ranked): ranked_ui.c + v10_login.c on ui/v10"

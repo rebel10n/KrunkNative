@@ -1,5 +1,5 @@
 {
-  "note": "the header's Login or Register: v10's loginOrRegister() modal (v10_login.c) against v10's own capture of it (ranked-guest.png). The Email field is left out: the client focuses it, the capture did not",
+  "note": "the header's Login or Register: v10's loginOrRegister() modal (v10_login.c) against v10's own capture of it (ranked-guest.png). state.blur drops the autofocus ring, so the Email field is scored",
   "defaults": {
     "fuzz": 12,
     "max_pct": 3.0
@@ -48,6 +48,14 @@
       ],
       "kind": "text",
       "max_pct": 6.0
+    },
+    {
+      "name": "email-field",
+      "rect": [428, 373, 424, 46],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 1.5,
+      "note": "the Email input with state.blur; the Chromium capture has no autofocus ring"
     }
   ]
 }

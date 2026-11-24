@@ -21,7 +21,8 @@
       [
         "loginOrRegister"
       ]
-    ]
+    ],
+    "blur": true
   },
   "frames": 3,
   "note": "Krunker v10.0.2: a guest clicks the header's Login or Register (#signedOutHeaderBar .ph-login-wrap, _52517: loginOrRegister()), v10_login.c's modal on its Login card. The reference is v10's own capture of that modal (doc/ref/krunker-v10.0.2/ranked-guest.png: Ranked opens the same loginOrRegister()). Guards the full-size Login button (.io-button { all: unset } + max-width: 300px, content-box: 334 px unscaled)"

@@ -331,7 +331,7 @@ static void warn_unknown_keys(void) {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "anim_seek", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "mobile", "page", "pageQuery", "pageActions",
-        "clientChrome", "settingsView", "windowActions", "spinActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
+        "clientChrome", "settingsView", "windowActions", "windowClicks", "blur", "spinActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
         "officialClasses", // the class list an official krunker.io game sent (game_config_apply, ui_scenario_apply)
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
         "discord", // the Connections tab's loaded getStatus().data (account_links_discord_scenario)
@@ -956,6 +956,11 @@ static void apply_window_actions(Client *client) {
         if (e && engine_get()) events_click(engine_events(engine_get()), e);
         else fprintf(stderr, "[scenario] windowClicks: no match for '%s'\n", sel->valuestring);
         run_frames(client, 2);
+    }
+    // state.blur: the reference captured the same popup with document.activeElement blurred.
+    if (st_bool("blur", 0)) {
+        const HtmlElem active = html_dom_active_element();
+        if (active) html_dom_blur(active);
     }
 }
 

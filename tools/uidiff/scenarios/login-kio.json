@@ -22,7 +22,8 @@
         "loginOrRegister"
       ]
     ],
-    "officialSession": true
+    "officialSession": true,
+    "blur": true
   },
   "frames": 3,
   "note": "Krunker v10.0.2's one account UI in an official krunker.io game (backend_ui.h: krunker.io is the active backend, state.officialSession): loginOrRegister() is the same v10 modal (v10_login.c), signing in to krunker.io; there is no separate krunker.io account modal. Reference: v10's own capture of the modal (doc/ref/krunker-v10.0.2/ranked-guest.png)"
