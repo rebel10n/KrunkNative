@@ -357,6 +357,13 @@ async def scenario(names):
     check(st == 400 and r["error"]["code"] == "PLAYERS_SEARCH_INVALID", "one character: PLAYERS_SEARCH_INVALID")
     st, r = await C.gapi("GET", "/players/search?q=%s&limit=20" % urllib.parse.quote("é"))
     check(st == 400 and r["error"]["code"] == "PLAYERS_SEARCH_INVALID", "one accented letter is still one character: %s" % r)
+    await A.send(["sp", "é"])
+    f = await A.recv_until(lambda fr: fr[0] == "spR")
+    check(f and f[1] is None, "a hub search of one character finds nothing")
+    await A.send(["sp", "  " + an[:6] + "  "])
+    f = await A.recv_until(lambda fr: fr[0] == "spR")
+    names = [x.get("player_name") for x in f[1]] if f and isinstance(f[1], list) else []
+    check(an in names, "a padded hub search is trimmed and finds the name: %s" % names)
     st, r = await C.gapi("GET", "/players/search?q=%s&limit=20" % urllib.parse.quote("  " + an + "  "))
     check(st == 200 and any(x["player_name"] == an for x in r["data"]["results"]), "a padded name is trimmed before the search")
     st, r = await C.gapi("GET", "/players/nobody_here_zz")

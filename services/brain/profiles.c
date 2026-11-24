@@ -303,7 +303,8 @@ void sh_search(SocialSession *s, const cJSON *f) {
     if (n >= sizeof q) n = sizeof q - 1;
     if (raw && n) memcpy(q, raw, n);
     q[n] = 0;
-    if (!q[0] || brain_utf16_prefix(q, 64) < strlen(q)) {
+    /* trimmed, then two characters, the same as the profile search (errors.profiles.searchInvalid) */
+    if (!q[0] || brain_utf16_prefix(q, 1) == strlen(q) || brain_utf16_prefix(q, 64) < strlen(q)) {
         social_send_n(s, "spR", 1, cJSON_CreateNull());
         return;
     }
