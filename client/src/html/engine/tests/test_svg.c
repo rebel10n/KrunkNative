@@ -394,6 +394,30 @@ static void test_fx_space(const char *root) {
     }
     svg_image_destroy(s);
 
+    /* the same shadow named in the style attribute (Inkscape's `style="...;filter:url(#f)"`, Strike's
+     * plus-sign.svg / minus-sign.svg), its flood an rgb() colour: Chrome draws it; it used to be ignored */
+    static const char styled[] =
+        "<svg width=\"40\" height=\"40\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\">"
+        "<defs><filter id=\"f\" x=\"-1\" y=\"-1\" width=\"3\" height=\"3\">"
+        "<feFlood flood-color=\"rgb(255,0,0)\" flood-opacity=\"1\" result=\"flood\"/>"
+        "<feComposite in=\"flood\" in2=\"SourceGraphic\" operator=\"in\" result=\"c\"/>"
+        "<feGaussianBlur in=\"c\" stdDeviation=\"0\" result=\"b\"/><feOffset dx=\"-2\" dy=\"2\" result=\"o\"/>"
+        "<feComposite in=\"SourceGraphic\" in2=\"o\" operator=\"over\"/></filter></defs>"
+        "<g transform=\"scale(2)\"><rect x=\"4\" y=\"4\" width=\"8\" height=\"8\" fill=\"#ffffff\""
+        " style=\"stroke:none; filter : url(#f)\"/></g></svg>";
+    s = svg_image_create((const unsigned char *) styled, sizeof styled - 1);
+    px = s ? svg_image_rasterize(s, 40, 40) : NULL;
+    CHECK(px != NULL);
+    if (px) {
+#define AT(x, y) (px + ((y) * 40 + (x)) * 4)
+        CHECK(AT(16, 16)[0] == 255 && AT(16, 16)[1] == 255 && AT(16, 16)[3] == 255); /* the source on top */
+        CHECK(AT(6, 26)[0] > 230 && AT(6, 26)[1] < 30 && AT(6, 26)[3] > 200);        /* the red shadow 4 px down-left */
+        CHECK(AT(26, 6)[3] == 0);                                                     /* nothing up-right */
+#undef AT
+        free(px);
+    }
+    svg_image_destroy(s);
+
     /* Krunker Strike's outlined ticket: white body, the black outside outline (a mask in a <g> scaled
      * 4.2) and a drop shadow down-left */
     char path[1024];

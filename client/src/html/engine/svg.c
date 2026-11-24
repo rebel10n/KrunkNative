@@ -519,10 +519,41 @@ static int svg_tag_val_is(const SvgTag *t, const char *name, const char *want) {
     return v && len == strlen(want) && !memcmp(v, want, len);
 }
 
-/* "url(#id)" -> id; 0 when the attribute is absent or not a local reference. */
+/* A presentation property: its declaration in the style attribute (the last one; a declaration
+ * wins over the attribute, as in CSS), else the attribute. Inkscape writes filter: url(#id) there. */
+static const char *svg_tag_prop(const SvgTag *t, const char *name, size_t *len) {
+    size_t sl = 0;
+    const char *st = svg_tag_attr(t, "style", &sl);
+    const size_t n = strlen(name);
+    const char *found = NULL;
+    size_t flen = 0;
+    for (const char *p = st, *e = st ? st + sl : NULL; p && p < e;) {
+        const char *semi = memchr(p, ';', (size_t) (e - p)), *de = semi ? semi : e;
+        const char *colon = memchr(p, ':', (size_t) (de - p));
+        if (colon) {
+            const char *k = p, *ke = colon, *v = colon + 1, *ve = de;
+            while (k < ke && svg_space(*k)) k++;
+            while (ke > k && svg_space(ke[-1])) ke--;
+            while (v < ve && svg_space(*v)) v++;
+            while (ve > v && svg_space(ve[-1])) ve--;
+            if ((size_t) (ke - k) == n && !memcmp(k, name, n)) {
+                found = v;
+                flen = (size_t) (ve - v);
+            }
+        }
+        p = de + 1;
+    }
+    if (found) {
+        *len = flen;
+        return found;
+    }
+    return svg_tag_attr(t, name, len);
+}
+
+/* "url(#id)" -> id; 0 when the property is absent or not a local reference. */
 static int svg_tag_url(const SvgTag *t, const char *name, char *id, const size_t size) {
     size_t len = 0;
-    const char *v = svg_tag_attr(t, name, &len);
+    const char *v = svg_tag_prop(t, name, &len);
     if (!v) return 0;
     const char *e = v + len;
     while (v < e && svg_space(*v)) v++;
@@ -549,12 +580,20 @@ static void svg_tag_id(const SvgTag *t, char *id, const size_t size) {
     }
 }
 
-/* flood-color / flood-opacity: #rgb, #rrggbb or black / white. */
+/* flood-color / flood-opacity (attribute or style): #rgb, #rrggbb, rgb(r, g, b) (Inkscape's) or
+ * black / white. */
 static int svg_tag_flood(const SvgTag *t, float rgba[4]) {
     size_t len = 0;
-    const char *v = svg_tag_attr(t, "flood-color", &len);
+    const char *v = svg_tag_prop(t, "flood-color", &len);
     float c[3] = {0, 0, 0};
-    if (v && len >= 4 && v[0] == '#') {
+    char buf[64];
+    int rgb[3];
+    if (v && len > 4 && len < sizeof buf && !memcmp(v, "rgb(", 4)) {
+        memcpy(buf, v, len);
+        buf[len] = 0;
+        if (sscanf(buf, "rgb(%d ,%d ,%d", &rgb[0], &rgb[1], &rgb[2]) == 3)
+            for (int i = 0; i < 3; i++) c[i] = (float) (rgb[i] < 0 ? 0 : rgb[i] > 255 ? 255 : rgb[i]) / 255.0f;
+    } else if (v && len >= 4 && v[0] == '#') {
         char hex[7] = {0};
         if (len == 4) for (int i = 0; i < 3; i++) hex[2 * i] = hex[2 * i + 1] = v[1 + i];
         else if (len == 7) memcpy(hex, v + 1, 6);
@@ -566,7 +605,15 @@ static int svg_tag_flood(const SvgTag *t, float rgba[4]) {
     rgba[0] = c[0];
     rgba[1] = c[1];
     rgba[2] = c[2];
-    rgba[3] = svg_tag_num(t, "flood-opacity", 1.0f);
+    const char *o = svg_tag_prop(t, "flood-opacity", &len);
+    rgba[3] = 1.0f;
+    if (o && len < sizeof buf) {
+        memcpy(buf, o, len);
+        buf[len] = 0;
+        char *e = NULL;
+        const float a = strtof(buf, &e);
+        if (e != buf) rgba[3] = a;
+    }
     return rgba[3] > 0.0f;
 }
 
