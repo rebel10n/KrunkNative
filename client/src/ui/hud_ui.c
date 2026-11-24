@@ -1430,7 +1430,6 @@ static void hud_slot_nametag(char *out, const size_t n, const Player *me, const 
     }
     if (me) ui_loadout_copy_name(store, hud_slot_copy(me, store), out, n);
 }
-}
 
 static void hud_loadout(const Player *me, HudUiExtra *extra) {
     const Game *game = me->game;

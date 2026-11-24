@@ -1646,6 +1646,10 @@ else ()
             add_test(NAME weap_nametag_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/weap_nametag_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(weap_nametag_e2e PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # open_sales_e2e: openSales opens v10.0.7's item page, not a sales URL (deob-10.0.7.js:223623-223650)
+            add_test(NAME open_sales_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/open_sales_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(open_sales_e2e PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # chat_actions_e2e: a chat line's v10 actions ([Join Queue], NET_EXT_KN_CHAT_ACTIONS) in the rendered document
             add_test(NAME chat_actions_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chat_actions_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
