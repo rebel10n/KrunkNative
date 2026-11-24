@@ -3372,7 +3372,9 @@ static char g_compose_text[2048], g_giveaway_amount[32];
 
 static void sb_compose(StrBuf *sb, View *v) {
     const double amt = atof(g_giveaway_amount);
-    const long long fee = (long long) ceil(0.1 * amt), total = (long long) amt + fee;
+    /* the label is the number plus the ceil of a tenth (deob compose). "10.4" is 12.4, not 12. */
+    char total_s[48];
+    js_number_text(total_s, sizeof total_s, js_giveaway_total(g_giveaway_amount));
     const char *t = g_compose_text;
     while (*t == ' ' || *t == '\n') t++;
     const int can = !v->submitting && *t && !(v->giveaway && amt < 10);
@@ -3387,8 +3389,8 @@ static void sb_compose(StrBuf *sb, View *v) {
         sb_appendf(sb, "<div class=\"compose-giveaway svelte-qxxay9\"><label class=\"compose-giveaway-label svelte-qxxay9\" for=\"giveaway-kr\">KR amount</label> "
                        "<input id=\"giveaway-kr\" class=\"compose-input-num svelte-qxxay9\" type=\"number\" placeholder=\"0\" min=\"10\" value=\"%s\" oninput=\"v10sInput('amount',this.value)\"> "
                        "<div class=\"compose-giveaway-hint svelte-qxxay9\">Minimum 10 KR.</div> <div class=\"compose-fee svelte-qxxay9\">A 10% fee applies. You will be charged "
-                       "<strong class=\"compose-fee-total svelte-qxxay9\">%lld</strong> KR total.</div></div> ",
-                   g_giveaway_amount, total);
+                       "<strong class=\"compose-fee-total svelte-qxxay9\">%s</strong> KR total.</div></div> ",
+                   g_giveaway_amount, total_s);
     if (v->compose_error[0]) {
         sb_append(sb, "<div class=\"compose-error svelte-qxxay9\">");
         sb_append_esc(sb, v->compose_error);

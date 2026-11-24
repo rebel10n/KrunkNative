@@ -34,6 +34,29 @@ static inline double js_gift_fee(double amount) {
     return ceil(amount * 0.1);
 }
 
+/* A KR giveaway's total (deob-10.0.7.js compose): Number(text) || 0, plus
+   Math.ceil(0.1 * amount). The label is that sum, so "10.4" reads 12.4.
+   js_number_text is that number plus '' (ToString), not toLocaleString. */
+static inline double js_giveaway_total(const char *s) {
+    double amt = s && *s ? atof(s) : 0;
+    if (amt != amt) return 0;
+    if (!isfinite(amt)) return amt;
+    return amt + ceil(amt * 0.1);
+}
+
+static inline void js_number_text(char *out, size_t n, double v) {
+    if (!out || !n) return;
+    if (v != v) {
+        snprintf(out, n, "NaN");
+        return;
+    }
+    if (!isfinite(v)) {
+        snprintf(out, n, "%s", signbit(v) ? "-Infinity" : "Infinity");
+        return;
+    }
+    snprintf(out, n, "%.15g", v);
+}
+
 /* Number.toLocaleString('en-US') for a gift-sized number. */
 static inline void js_locale_en(char *out, size_t n, double v) {
     if (!out || !n) return;

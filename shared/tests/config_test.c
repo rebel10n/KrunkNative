@@ -297,6 +297,12 @@ static void test_recruit_fields(void) {
           "an integer gift fee matches the ceil, and the total is grouped (%s)", shown);
     js_locale_en(shown, sizeof shown, 1000.5 + js_gift_fee(1000.5));
     CHECK(js_gift_fee(1000.5) == 101 && !strcmp(shown, "1,101.5"), "a fractional total keeps its fraction (%s)", shown);
+    js_number_text(shown, sizeof shown, js_giveaway_total("10.4"));
+    CHECK(!strcmp(shown, "12.4"), "a giveaway of 10.4 shows 12.4 (%s)", shown);
+    js_number_text(shown, sizeof shown, js_giveaway_total("1e2"));
+    CHECK(!strcmp(shown, "110"), "a giveaway of 1e2 totals 110 (%s)", shown);
+    js_number_text(shown, sizeof shown, js_giveaway_total("1000"));
+    CHECK(!strcmp(shown, "1100") && js_giveaway_total("15") == 17, "a whole giveaway total is not grouped (%s)", shown);
 }
 
 static void test_inputs_and_merge(void) {
