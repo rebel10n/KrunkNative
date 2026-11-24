@@ -23,8 +23,11 @@
 // Quick Sell is the market's own view (v10_market.c v10_market_wallet_sell): a stack sells by its
 // store index, a copy by its instance id. Paint and Style open the same pickers as the market grid.
 //
-// Not built: the filter bar (search, rarity / weapon / type / wear / season, sort, "Group by wear")
-// and the expanded-stack collapse (in-group / stack-collapse-fab). The grid keeps inventory order.
+// The filter bar is the inventory filter (deob-10.0.7.js:150777, the wallet's options at :169833):
+// search, season, sort (name by default), the five checkboxes, and the rarity / weapon / cosmetic /
+// wear sets. Group by wear is the persisted store s_groupInventoryByWear (default off). On, copies of
+// one item and wear tier collapse into one stack; a click expands them and the last shows the collapse
+// control (:169426-169450, :169861-169904).
 #include <v10_wallet.h>
 #include <v10_ui.h>
 #include <kio_inventory.h>
@@ -38,6 +41,9 @@
 #include <i18n.h>
 #include <html_ui.h>
 #include "../viewer/viewer_store.h"
+#include <kio_market.h>        // kio_market_wear_tier
+#include <market_trade_list.h> // market_text_contains, market_paintable_match
+#include <ruleset.h>           // rules_weapon, rules_weapon_count
 #include <stdint.h> // intptr_t: a note's id as the timer's user
 #include <string.h>
 #include <stdio.h>
@@ -250,7 +256,7 @@ static void wallet_actions(StrBuf *sb, const MarketGroup *g, const int gi, const
 
 // one row of the inventory: a stack (copy -1, with its count) or one copy. Its lock and, in select
 // mode, its pick name the ids (gi = the group, copy = the copy or -1 for the stack).
-static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, const int copy) {
+static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, const int copy, const int in_group, const int group_last, const char *stack_key, const int stack_n) {
     const MarketGroup *g = &groups[gi];
     const int stack = copy < 0;
     const int locked = inv_locked(g, copy);
@@ -258,8 +264,8 @@ static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, c
     const int reason = W_select ? row_reason(g, copy) : MARKET_KEEP_NONE;
     char onclick[64];
     snprintf(onclick, sizeof(onclick), "knV10WalletItem(%d)", g->item);
-    sb_appendf(sb, "<div class=\"wallet-item svelte-1wcm5z8%s%s%s%s\"", stack && g->stack_max > 1 ? " is-stack" : "", locked ? " is-locked" : "",
-               on ? " bulk-selected svelte-1wcm5z8" : "", reason != MARKET_KEEP_NONE ? " bulk-dim svelte-1wcm5z8" : "");
+    sb_appendf(sb, "<div class=\"wallet-item svelte-1wcm5z8%s%s%s%s%s\"", stack && g->stack_max > 1 ? " is-stack" : "", locked ? " is-locked" : "",
+               on ? " bulk-selected svelte-1wcm5z8" : "", reason != MARKET_KEEP_NONE ? " bulk-dim svelte-1wcm5z8" : "", in_group ? " in-group" : "");
     if (market_keep_reason_name(reason)) { // its keep reason on hover (wallet.bulk.keep.reason.*, deob-10.0.4.js:147624)
         char key[64];
         snprintf(key, sizeof(key), "wallet.bulk.keep.reason.%s", market_keep_reason_name(reason));
@@ -274,6 +280,14 @@ static void official_tile(StrBuf *sb, const MarketGroup *groups, const int gi, c
         sb_appendf(sb, "<button type=\"button\" class=\"wallet-pick%s\" onclick=\"knV10WalletPick(%d,%d)\"><i class=\"material-icons\">%s</i></button>",
                    on ? " is-on" : "", gi, copy, on ? "check_box" : "check_box_outline_blank");
     if (stack && g->stack_max > 1) sb_appendf(sb, "<div class=\"stack-badge svelte-1wcm5z8\" aria-hidden=\"true\">\xc3\x97%d</div>", g->stack_max);
+    if (group_last && stack_key && stack_key[0]) {
+        const ViewerSkin *k = viewer_skin(g->item);
+        sb_appendf(sb, "<button type=\"button\" class=\"stack-collapse-fab svelte-1wcm5z8\" onclick=\"knV10WalletStack('%s')\" aria-label=\"Collapse ", stack_key);
+        sb_append_esc(sb, k && k->name ? k->name : "group");
+        sb_appendf(sb, "\" title=\"Collapse ");
+        sb_append_esc(sb, k && k->name ? k->name : "group");
+        sb_appendf(sb, " (%d)\"><i class=\"material-icons svelte-1wcm5z8\">chevron_left</i></button>", stack_n);
+    }
     sb_append(sb, "</div>");
 }
 
@@ -390,35 +404,310 @@ static void official_bulkbar(StrBuf *sb) {
     sb_append(sb, "</div></div>");
 }
 
+// ---------------------------------------------------------------- the inventory filter (deob-10.0.7.js:150777, wallet options :169833)
+
+#define WALLET_SEASONS 10
+typedef struct {
+    char search[64];
+    int season, expanded, ftab;
+    char sort[12];
+    int only_missing, hide_non_trade, only_paintable, only_painted, group_wear;
+    unsigned char rar[8], wep[64], typ[19], wear[5];
+} WFilter;
+static WFilter WF;
+#define WALLET_OPEN_MAX 48
+static char W_open[WALLET_OPEN_MAX][16];
+static int W_nopen;
+
+static int set_count(const unsigned char *set, const int from, const int to) {
+    int n = 0;
+    for (int i = from; i < to; i++) n += set[i] != 0;
+    return n;
+}
+static int weapons_all(void) {
+    const int n = (int) rules_weapon_count();
+    for (int i = 0; i < n && i < 64; i++) {
+        const Weapon *w = rules_weapon(i);
+        if (w && !w->melee && !WF.wep[i]) return 0;
+    }
+    return 1;
+}
+static int weapons_none(void) {
+    const int n = (int) rules_weapon_count();
+    for (int i = 0; i < n && i < 64; i++) {
+        const Weapon *w = rules_weapon(i);
+        if (w && !w->melee && WF.wep[i]) return 0;
+    }
+    return 1;
+}
+
+static void group_wear_load(void) {
+    char buf[16];
+    WF.group_wear = html_storage_get("s_groupInventoryByWear", buf, sizeof(buf)) >= 0 && !strcmp(buf, "true");
+}
+static void group_wear_save(void) {
+    html_storage_set("s_groupInventoryByWear", WF.group_wear ? "true" : "false");
+}
+
+static void filter_reset(void) {
+    const int group = WF.group_wear;
+    memset(&WF, 0, sizeof(WF));
+    snprintf(WF.sort, sizeof(WF.sort), "name");
+    for (int i = 0; i < 7; i++) WF.rar[i] = 1; // every rarity but NFT
+    for (int i = 0; i < 64; i++) WF.wep[i] = 1;
+    for (int i = 1; i <= 18; i++) WF.typ[i] = 1;
+    for (int i = 0; i < 5; i++) WF.wear[i] = 1;
+    WF.group_wear = group; // Reset does not clear the persisted Group by wear store
+    W_nopen = 0;
+    W.shown = WALLET_PAGE;
+}
+
+static int filter_active(void) {
+    if (WF.search[0] || WF.season || WF.only_missing || WF.hide_non_trade || WF.only_paintable || WF.only_painted) return 1;
+    if (set_count(WF.rar, 0, 7) != 7 || !weapons_all() || set_count(WF.typ, 1, 19) != 18) return 1;
+    if (set_count(WF.wear, 0, 5) != 5) return 1;
+    return strcmp(WF.sort, "name") != 0;
+}
+
+static int unit_painted(const MarketGroup *g, const int copy) {
+    return g && copy >= 0 && copy < g->n_instances && g->paints && g->paints[copy];
+}
+static int unit_wear(const MarketGroup *g, const int copy) {
+    if (!g || copy < 0 || !g->metas || g->metas[copy].wear < 0) return 4; // No Wear
+    const int t = kio_market_wear_tier(g->metas[copy].wear);
+    return t < 0 ? 4 : t;
+}
+
+// A store skin against the sets (the inventory row adds painted / wear). Unowned missing rows have no wear.
+static int filter_skin(const ViewerSkin *s, const int wear, const int painted) {
+    if (!s) return 0;
+    if (WF.search[0] && !market_text_contains(s->name, WF.search)) return 0;
+    if (WF.season && (s->seas ? s->seas : 1) != WF.season) return 0;
+    if (WF.hide_non_trade && !(s->flags2 & VS2_TRADABLE)) return 0;
+    if (!market_paintable_match(s, WF.only_paintable)) return 0;
+    if (WF.only_painted && !painted) return 0;
+    if (s->rarity >= 0 && s->rarity < 8 && set_count(WF.rar, 0, 8) && !WF.rar[s->rarity]) return 0;
+    if (s->weapon >= 1) {
+        if (s->weapon - 1 < 64 && !weapons_none() && !WF.wep[s->weapon - 1]) return 0;
+    } else if (s->type >= 1 && s->type <= 18) {
+        if (set_count(WF.typ, 1, 19) && !WF.typ[s->type]) return 0;
+    }
+    if (set_count(WF.wear, 0, 5) && !WF.wear[wear]) return 0;
+    return 1;
+}
+
+typedef struct {
+    int gi, copy, index, wear;
+    int kind; // 0 a tile, 1 a collapsed wear stack, 2 an expanded member
+    int nstack, last;
+    char key[16];
+} WUnit;
+
+static int owned_index(const MarketGroup *groups, const int n, const int index) {
+    for (int i = 0; i < n; i++)
+        if (groups[i].item == index) return 1;
+    return 0;
+}
+
+static int cmp_units(const void *pa, const void *pb) {
+    const WUnit *a = pa, *b = pb;
+    const ViewerSkin *sa = viewer_skin(a->index), *sb = viewer_skin(b->index);
+    int d = 0;
+    if (!strcmp(WF.sort, "rarity")) d = (sb ? sb->rarity : 0) - (sa ? sa->rarity : 0);
+    else if (!strcmp(WF.sort, "season")) d = ((sb && sb->seas) ? sb->seas : 1) - ((sa && sa->seas) ? sa->seas : 1);
+    else if (!strcmp(WF.sort, "type")) d = (sa ? sa->type : 0) - (sb ? sb->type : 0);
+    else d = strcmp(sa && sa->name ? sa->name : "", sb && sb->name ? sb->name : "");
+    return d ? d : a->index - b->index;
+}
+
+static int stack_open(const char *key) {
+    for (int i = 0; i < W_nopen; i++)
+        if (!strcmp(W_open[i], key)) return 1;
+    return 0;
+}
+
+// The rows the grid draws: filtered, sorted, then grouped by index:wear when that store is on.
+static int wallet_rows(const MarketGroup *groups, const int ng, WUnit **out) {
+    int cap = 8;
+    for (int gi = 0; gi < ng; gi++) cap += 1 + groups[gi].n_instances;
+    if (WF.only_missing) cap += g_viewer_skin_count;
+    WUnit *flat = calloc((size_t) (cap > 8 ? cap : 8), sizeof(WUnit));
+    int n = 0;
+    if (!flat) { *out = NULL; return 0; }
+    if (WF.only_missing) {
+        for (int i = 0; i < g_viewer_skin_count; i++) {
+            const ViewerSkin *s = viewer_skin(i);
+            if (!s || owned_index(groups, ng, i) || !filter_skin(s, 4, 0)) continue;
+            if (n < cap) flat[n++] = (WUnit) {.gi = -1, .copy = -2, .index = i, .wear = 4};
+        }
+    } else {
+        for (int gi = 0; gi < ng; gi++) {
+            const MarketGroup *g = &groups[gi];
+            const ViewerSkin *s = viewer_skin(g->item);
+            if (g->stack_id && filter_skin(s, 4, 0) && n < cap)
+                flat[n++] = (WUnit) {.gi = gi, .copy = -1, .index = g->item, .wear = 4};
+            for (int c = 0; c < g->n_instances && n < cap; c++) {
+                const int wear = unit_wear(g, c);
+                if (!filter_skin(s, wear, unit_painted(g, c))) continue;
+                flat[n++] = (WUnit) {.gi = gi, .copy = c, .index = g->item, .wear = wear};
+            }
+        }
+    }
+    if (n > 1) qsort(flat, (size_t) n, sizeof(WUnit), cmp_units);
+    if (!WF.group_wear) { *out = flat; return n; }
+    WUnit *view = calloc((size_t) n + 1, sizeof(WUnit));
+    int vn = 0;
+    if (!view) { *out = flat; return n; }
+    unsigned char *used = calloc((size_t) n, 1);
+    if (!used) { free(view); *out = flat; return n; }
+    for (int i = 0; i < n; i++) {
+        if (used[i]) continue;
+        used[i] = 1;
+        if (flat[i].copy < 0) { view[vn++] = flat[i]; continue; } // a stack, or an unowned row: not a wear group
+        int mem[256], nm = 0;
+        mem[nm++] = i;
+        for (int k = i + 1; k < n && nm < 256; k++) {
+            if (used[k] || flat[k].copy < 0) continue;
+            if (flat[k].index == flat[i].index && flat[k].wear == flat[i].wear) {
+                used[k] = 1;
+                mem[nm++] = k;
+            }
+        }
+        char key[16];
+        snprintf(key, sizeof(key), "%d:%d", flat[i].index, flat[i].wear);
+        if (nm > 1 && !stack_open(key)) {
+            WUnit row = flat[mem[0]];
+            row.kind = 1;
+            row.nstack = nm;
+            snprintf(row.key, sizeof(row.key), "%s", key);
+            view[vn++] = row;
+        } else if (nm > 1) {
+            for (int m = 0; m < nm; m++) {
+                WUnit row = flat[mem[m]];
+                row.kind = 2;
+                row.nstack = nm;
+                row.last = m == nm - 1;
+                snprintf(row.key, sizeof(row.key), "%s", key);
+                view[vn++] = row;
+            }
+        } else view[vn++] = flat[i];
+    }
+    free(used);
+    free(flat);
+    *out = view;
+    return vn;
+}
+
+static void filter_header(StrBuf *sb, const int count) {
+    sb_appendf(sb, "<div class=\"inventory-filter svelte-ga3en0\" id=\"knV10WalletFilter\"><div class=\"filter-header svelte-ga3en0%s\" role=\"button\" tabindex=\"0\" onclick=\"knV10WalletF('head')\">"
+                   "<h3 class=\"svelte-ga3en0\">", WF.expanded ? " expanded" : "");
+    sb_appendf(sb, "Inventory (%d items)</h3> <div class=\"filter-controls svelte-ga3en0\" onclick=\"knV10WalletF('stop')\">", count);
+    if (filter_active()) sb_append(sb, "<button class=\"reset-btn svelte-ga3en0\" onclick=\"knV10WalletF('reset')\">Reset Filters</button> ");
+    sb_appendf(sb, "<button class=\"expand-btn svelte-ga3en0\" onclick=\"knV10WalletF('head')\"><i class=\"material-icons svelte-ga3en0\">%s</i></button></div></div>",
+               WF.expanded ? "expand_less" : "expand_more");
+    if (!WF.expanded) return;
+    sb_append(sb, "<div class=\"filter-content svelte-ga3en0\"><div class=\"filter-row svelte-ga3en0\"><input type=\"search\" placeholder=\"Search items...\" class=\"search-input svelte-ga3en0\" id=\"knV10WalletSearch\" value=\"");
+    sb_append_esc(sb, WF.search);
+    sb_append(sb, "\" oninput=\"knV10WalletF('search',this.value)\"> <select class=\"season-select svelte-ga3en0\" onchange=\"knV10WalletF('season',this.value)\">");
+    sb_appendf(sb, "<option value=\"0\"%s>All Seasons</option>", WF.season == 0 ? " selected" : "");
+    for (int s = 1; s <= WALLET_SEASONS; s++) sb_appendf(sb, "<option value=\"%d\"%s>Season %d</option>", s, WF.season == s ? " selected" : "", s);
+    sb_append(sb, "</select> <select class=\"sort-select svelte-ga3en0\" onchange=\"knV10WalletF('sort',this.value)\">");
+    static const char *const sorts[][2] = {{"name", "Sort by Name"}, {"rarity", "Sort by Rarity"}, {"season", "Sort by Season"}, {"type", "Sort by Type"}};
+    for (int i = 0; i < 4; i++) sb_appendf(sb, "<option value=\"%s\"%s>%s</option>", sorts[i][0], !strcmp(WF.sort, sorts[i][0]) ? " selected" : "", sorts[i][1]);
+    sb_append(sb, "</select></div> <div class=\"filter-row svelte-ga3en0\">");
+    static const char *const boxes[5] = {"Only Show Missing", "Hide Non-Tradable", "Show Only Paintable", "Only Painted", "Group by Wear"};
+    const int on[5] = {WF.only_missing, WF.hide_non_trade, WF.only_paintable, WF.only_painted, WF.group_wear};
+    for (int i = 0; i < 5; i++)
+        sb_appendf(sb, "<label class=\"filter-checkbox svelte-ga3en0\"><input type=\"checkbox\" class=\"svelte-ga3en0\"%s onchange=\"knV10WalletF('chk',%d)\"> <span class=\"svelte-ga3en0\">%s</span></label> ",
+                   on[i] ? " checked" : "", i, boxes[i]);
+    sb_append(sb, "</div> <div class=\"filter-tabs svelte-ga3en0\">");
+    static const char *const ftabs[4] = {"Rarities", "Weapons", "Cosmetics", "Wear"};
+    for (int i = 0; i < 4; i++)
+        sb_appendf(sb, "<button class=\"filter-tab svelte-ga3en0%s\" onclick=\"knV10WalletF('tab',%d)\">%s</button> ", WF.ftab == i ? " active" : "", i, ftabs[i]);
+    sb_append(sb, "<button class=\"toggle-all-btn svelte-ga3en0\" onclick=\"knV10WalletF('all')\">Toggle All</button></div> <div class=\"filter-panel svelte-ga3en0\"><div class=\"filter-grid svelte-ga3en0\">");
+    if (WF.ftab == 0) {
+        for (int r = 0; r < 7 && r < g_viewer_rarity_count; r++)
+            sb_appendf(sb, "<div class=\"filter-item-wrapper svelte-ga3en0\"><label class=\"filter-item rarity-item svelte-ga3en0\"><input type=\"checkbox\" class=\"svelte-ga3en0\"%s onchange=\"knV10WalletF('set',0,%d)\"> "
+                           "<div class=\"rarity-color svelte-ga3en0\" style=\"background-color: %s\"></div> <span class=\"svelte-ga3en0\">%s</span></label> "
+                           "<button class=\"only-btn svelte-ga3en0\" onclick=\"knV10WalletF('only',0,%d)\">only</button></div>",
+                       WF.rar[r] ? " checked" : "", r, g_viewer_rarities[r].color ? g_viewer_rarities[r].color : "#fff", g_viewer_rarities[r].name ? g_viewer_rarities[r].name : "", r);
+    } else if (WF.ftab == 1) {
+        const int nw = (int) rules_weapon_count();
+        for (int w = 0; w < nw && w < 64; w++) {
+            const Weapon *wp = rules_weapon(w);
+            if (!wp || wp->melee) continue;
+            sb_appendf(sb, "<div class=\"filter-item-wrapper svelte-ga3en0\"><label class=\"filter-item svelte-ga3en0\"><input type=\"checkbox\" class=\"svelte-ga3en0\"%s onchange=\"knV10WalletF('set',1,%d)\"> <span class=\"svelte-ga3en0\">",
+                       WF.wep[w] ? " checked" : "", w);
+            sb_append_esc(sb, wp->name ? wp->name : "");
+            sb_appendf(sb, "</span></label> <button class=\"only-btn svelte-ga3en0\" onclick=\"knV10WalletF('only',1,%d)\">only</button></div>", w);
+        }
+    } else if (WF.ftab == 2) {
+        static const char *const types[19] = {
+            "", "Hats", "Body", "Melee", "Sprays", "Dyes", "Waist", "Faces", "Shoes", "Pets", "Collectibles", "Wrist", "Charms",
+            "Tickets", "Back", "Head", "Playercards", "Emoji", "Paints"};
+        for (int t = 1; t <= 18; t++)
+            sb_appendf(sb, "<div class=\"filter-item-wrapper svelte-ga3en0\"><label class=\"filter-item svelte-ga3en0\"><input type=\"checkbox\" class=\"svelte-ga3en0\"%s onchange=\"knV10WalletF('set',2,%d)\"> "
+                           "<span class=\"svelte-ga3en0\">%s</span></label> <button class=\"only-btn svelte-ga3en0\" onclick=\"knV10WalletF('only',2,%d)\">only</button></div>",
+                       WF.typ[t] ? " checked" : "", t, types[t], t);
+    } else {
+        static const char *const wears[5] = {"Flawless", "Tested", "Trashed", "Wrecked", "No Wear"};
+        for (int w = 0; w < 5; w++)
+            sb_appendf(sb, "<div class=\"filter-item-wrapper svelte-ga3en0\"><label class=\"filter-item svelte-ga3en0\"><input type=\"checkbox\" class=\"svelte-ga3en0\"%s onchange=\"knV10WalletF('set',3,%d)\"> "
+                           "<span class=\"svelte-ga3en0\">%s</span></label> <button class=\"only-btn svelte-ga3en0\" onclick=\"knV10WalletF('only',3,%d)\">only</button></div>",
+                       WF.wear[w] ? " checked" : "", w, wears[w], w);
+    }
+    sb_append(sb, "</div></div></div>");
+}
+
+static void collapsed_stack(StrBuf *sb, const WUnit *row) {
+    char onclick[48];
+    snprintf(onclick, sizeof(onclick), "knV10WalletStack('%s')", row->key);
+    sb_append(sb, "<div class=\"wallet-item svelte-1wcm5z8 is-stack\">");
+    v10_market_card(sb, row->index, 128, 128, "top-center", onclick, NULL);
+    if (W_select)
+        sb_appendf(sb, "<button type=\"button\" class=\"bulk-check bulk-check-btn svelte-1wcm5z8\" onclick=\"knV10WalletStackPick('%s')\"><i class=\"material-icons svelte-1wcm5z8\">check_box_outline_blank</i></button>", row->key);
+    sb_appendf(sb, "<div class=\"stack-badge svelte-1wcm5z8\" aria-hidden=\"true\">\xc3\x97%d</div></div>", row->nstack);
+}
+
 static void official_grid(StrBuf *sb) {
     int n = 0;
     const MarketGroup *groups = inv_groups(&n);
+    WUnit *rows = NULL;
+    const int nr = wallet_rows(groups, n, &rows);
+    int titled = 0; // a wear group counts as one row, expanded or not (v10's filteredItems, not the expanded list)
+    for (int i = 0; i < nr; i++)
+        if (rows[i].kind != 2 || rows[i].last) titled++;
     official_toolbar(sb);
+    filter_header(sb, titled);
     sb_append(sb, "<div class=\"items-grid svelte-1wcm5z8\" id=\"knV10WalletGrid\">");
     int drawn = 0;
-    for (int gi = 0; groups && gi < n; gi++) {
-        if (groups[gi].stack_id) {
-            if (drawn < W.shown) official_tile(sb, groups, gi, -1);
-            drawn++;
-        }
-        for (int c = 0; c < groups[gi].n_instances; c++) {
-            if (drawn < W.shown) official_tile(sb, groups, gi, c);
-            drawn++;
-        }
+    for (int i = 0; i < nr; i++) {
+        if (drawn >= W.shown) break;
+        const WUnit *u = &rows[i];
+        if (u->kind == 1) collapsed_stack(sb, u);
+        else if (u->gi < 0) {
+            char onclick[64];
+            snprintf(onclick, sizeof(onclick), "knV10WalletItem(%d)", u->index);
+            sb_append(sb, "<div class=\"wallet-item svelte-1wcm5z8\">");
+            v10_market_card(sb, u->index, 128, 128, "top-center", onclick, NULL);
+            sb_append(sb, "</div>");
+        } else official_tile(sb, groups, u->gi, u->copy, u->kind == 2, u->last, u->key, u->nstack);
+        drawn++;
     }
-    if (drawn > W.shown) {
+    if (nr > W.shown) {
         sb_append(sb, "<div class=\"wallet-items-sentinel svelte-1wcm5z8\"><button type=\"button\" class=\"load-more-btn svelte-zhgogl\" id=\"knV10WalletMore\" onclick=\"knV10WalletMore()\">");
         sb_append_esc(sb, I18N("kn.wallet.loadMore", "Load More"));
         sb_append(sb, "</button></div>");
     }
-    if (!drawn) {
+    if (!nr) {
         sb_append(sb, "<div class=\"empty-state svelte-1wcm5z8\" id=\"knV10WalletEmpty\"><p class=\"svelte-1wcm5z8\">");
-        if (inv_ready()) sb_append_esc(sb, I18N("kn.wallet.empty", "No items match your current filters."));
+        if (inv_ready() || filter_active()) sb_append_esc(sb, I18N("kn.wallet.empty", "No items match your current filters."));
         else sb_append_esc(sb, W_inv_err[0] ? W_inv_err : inv_gate_text());
         sb_append(sb, "</p></div>");
     }
     sb_append(sb, "</div>");
     official_bulkbar(sb);
+    free(rows);
 }
 
 static void grid(StrBuf *sb, const AccountInfo *a) {
@@ -553,6 +842,8 @@ static void open_modal(void) {
     if (W.open) return;
     W.open = 1;
     W.shown = WALLET_PAGE;
+    group_wear_load();
+    filter_reset();
     W.account_id = a->id;
     W.backend = (int) account_backend();
     remember(a);
@@ -753,6 +1044,132 @@ int v10_wallet_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "knV10WalletMore")) {
         W.shown += WALLET_PAGE;
+        refresh();
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletF")) {
+        const char *op = args && argc > 0 && args[0].str ? args[0].str : "";
+        if (!strcmp(op, "stop")) {
+            html_ui_stop_propagation();
+            return 1;
+        }
+        if (!strcmp(op, "head")) {
+            html_ui_stop_propagation();
+            WF.expanded = !WF.expanded;
+        } else if (!strcmp(op, "search")) {
+            const char *v = argc > 1 && args[1].str ? args[1].str : ev && ev->value ? ev->value : "";
+            snprintf(WF.search, sizeof(WF.search), "%s", v);
+            W.shown = WALLET_PAGE;
+        } else if (!strcmp(op, "season")) {
+            WF.season = arg_int(args, argc, 1);
+            W.shown = WALLET_PAGE;
+        } else if (!strcmp(op, "sort")) {
+            const char *v = argc > 1 && args[1].str ? args[1].str : "name";
+            snprintf(WF.sort, sizeof(WF.sort), "%s", v);
+            W.shown = WALLET_PAGE;
+        } else if (!strcmp(op, "reset")) {
+            const int expanded = WF.expanded;
+            filter_reset();
+            WF.expanded = expanded;
+        } else if (!strcmp(op, "chk")) {
+            int *flags[5] = {&WF.only_missing, &WF.hide_non_trade, &WF.only_paintable, &WF.only_painted, &WF.group_wear};
+            const int i = arg_int(args, argc, 1);
+            if (i >= 0 && i < 5) *flags[i] = !*flags[i];
+            if (i == 4) group_wear_save();
+            W.shown = WALLET_PAGE;
+        } else if (!strcmp(op, "tab")) {
+            WF.ftab = arg_int(args, argc, 1);
+        } else if (!strcmp(op, "set") || !strcmp(op, "only")) {
+            const int only = op[0] == 'o';
+            const int a0 = arg_int(args, argc, 1), a1 = arg_int(args, argc, 2);
+            if (a0 == 0 && a1 >= 0 && a1 < 8) {
+                if (only) memset(WF.rar, 0, sizeof(WF.rar));
+                WF.rar[a1] = only ? 1 : !WF.rar[a1];
+            } else if (a0 == 1 && a1 >= 0 && a1 < 64) {
+                if (only) { memset(WF.wep, 0, sizeof(WF.wep)); memset(WF.typ, 0, sizeof(WF.typ)); }
+                WF.wep[a1] = only ? 1 : !WF.wep[a1];
+            } else if (a0 == 2 && a1 >= 1 && a1 <= 18) {
+                if (only) { memset(WF.typ, 0, sizeof(WF.typ)); memset(WF.wep, 0, sizeof(WF.wep)); }
+                WF.typ[a1] = only ? 1 : !WF.typ[a1];
+            } else if (a0 == 3 && a1 >= 0 && a1 < 5) {
+                if (only) memset(WF.wear, 0, sizeof(WF.wear));
+                WF.wear[a1] = only ? 1 : !WF.wear[a1];
+            }
+            W.shown = WALLET_PAGE;
+        } else if (!strcmp(op, "all")) {
+            if (WF.ftab == 0) {
+                const int all = set_count(WF.rar, 0, 7) == 7;
+                for (int i = 0; i < 7; i++) WF.rar[i] = !all;
+            } else if (WF.ftab == 1) {
+                const int all = weapons_all();
+                const int nw = (int) rules_weapon_count();
+                for (int i = 0; i < nw && i < 64; i++) {
+                    const Weapon *w = rules_weapon(i);
+                    if (w && !w->melee) WF.wep[i] = !all;
+                }
+            } else if (WF.ftab == 2) {
+                const int all = set_count(WF.typ, 1, 19) == 18;
+                for (int i = 1; i <= 18; i++) WF.typ[i] = !all;
+            } else {
+                const int all = set_count(WF.wear, 0, 5) == 5;
+                for (int i = 0; i < 5; i++) WF.wear[i] = !all;
+            }
+            W.shown = WALLET_PAGE;
+        }
+        refresh();
+        return 1;
+    }
+    if (!strcmp(name, "knV10WalletStack") || !strcmp(name, "knV10WalletStackPick")) {
+        const char *key = args && argc > 0 && args[0].str ? args[0].str : "";
+        if (!strcmp(name, "knV10WalletStack")) {
+            int found = -1;
+            for (int i = 0; i < W_nopen; i++)
+                if (!strcmp(W_open[i], key)) found = i;
+            if (found >= 0) {
+                memmove(&W_open[found], &W_open[found + 1], sizeof(W_open[0]) * (size_t) (W_nopen - found - 1));
+                W_nopen--;
+            } else if (W_nopen < WALLET_OPEN_MAX && key[0] && strlen(key) < sizeof(W_open[0])) {
+                const int index = atoi(key);
+                const char *colon = strchr(key, ':');
+                const int wear = colon ? atoi(colon + 1) : 4;
+                int ng = 0, nmem = 0;
+                const MarketGroup *groups = inv_groups(&ng);
+                for (int gi = 0; groups && gi < ng; gi++)
+                    for (int c = 0; c < groups[gi].n_instances; c++)
+                        if (groups[gi].item == index && unit_wear(&groups[gi], c) == wear &&
+                            filter_skin(viewer_skin(index), wear, unit_painted(&groups[gi], c)))
+                            nmem++;
+                snprintf(W_open[W_nopen], sizeof(W_open[0]), "%s", key);
+                W_nopen++;
+                W.shown += nmem; // the page grows by the stack, so the members are on it (deob-10.0.7.js:169873)
+            }
+        } else {
+            const int index = atoi(key);
+            const char *colon = strchr(key, ':');
+            const int wear = colon ? atoi(colon + 1) : 4;
+            int ng = 0, any_off = 0, nm = 0;
+            const MarketGroup *groups = inv_groups(&ng);
+            int gi_m[256], copy_m[256];
+            for (int gi = 0; groups && gi < ng && nm < 256; gi++) {
+                if (groups[gi].item != index) continue;
+                for (int c = 0; c < groups[gi].n_instances && nm < 256; c++) {
+                    if (unit_wear(&groups[gi], c) != wear) continue;
+                    if (!filter_skin(viewer_skin(index), wear, unit_painted(&groups[gi], c))) continue;
+                    gi_m[nm] = gi;
+                    copy_m[nm] = c;
+                    if (!picked_row(&groups[gi], c) && row_reason(&groups[gi], c) == MARKET_KEEP_NONE) any_off = 1;
+                    nm++;
+                }
+            }
+            for (int i = 0; i < nm; i++) {
+                const MarketGroup *g = &groups[gi_m[i]];
+                const int on = picked_row(g, copy_m[i]);
+                if (any_off) {
+                    if (!on && row_reason(g, copy_m[i]) == MARKET_KEEP_NONE)
+                        market_picks_toggle(&W_picks, inv_locks(), g->instances[copy_m[i]], g->item, 0);
+                } else if (on) market_picks_toggle(&W_picks, inv_locks(), g->instances[copy_m[i]], g->item, 0);
+            }
+        }
         refresh();
         return 1;
     }
