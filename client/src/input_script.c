@@ -1367,10 +1367,18 @@ static void script_run(Client *client, const ScriptEvent *e) {
                     hud_modes_flag_info(team));
         }
     } else if (!strcmp(e->cmd, "type")) {
-        // type <text>: one char callback per code point (ASCII), as typing it
+        // type <text>: one char callback per code point, as typing it (UTF-8 text is decoded: "漢", "😀")
         GLFWcharfun cb = glfwSetCharCallback(client->window, NULL);
         glfwSetCharCallback(client->window, cb);
-        for (const char *c = e->arg; cb && *c; c++) cb(client->window, (unsigned char) *c);
+        for (const unsigned char *c = (const unsigned char *) e->arg; cb && *c;) {
+            const int len = *c >= 0xF0 ? 4 : *c >= 0xE0 ? 3 : *c >= 0xC0 ? 2 : 1;
+            unsigned int cp = len == 1 ? *c : *c & (0x3Fu >> (len - 1));
+            int k = 1;
+            for (; k < len && (c[k] & 0xC0) == 0x80; k++) cp = (cp << 6) | (c[k] & 0x3Fu);
+            if (k < len) cp = *c, k = 1; // a broken sequence: its first byte alone, as before
+            cb(client->window, cp);
+            c += k;
+        }
     } else if (!strcmp(e->cmd, "netchat")) {
         // netchat <kind> <text>: a server chat line as the server would send it, through the client's
         // event handler (chat_switch_e2e.py). 0 a human player's line (uid 2, a guest: no PLAYER_INFO);
