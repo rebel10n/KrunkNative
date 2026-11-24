@@ -55,6 +55,7 @@
 #include <hud_modes.h>
 #include <net_ext.h> // state.voteKick: NetVoteKickStatePacket
 #include <hud_replay.h> // state.replayBar / replayCase: the K.P.D replay viewer
+#include <skin_meta.h> // state.skinMeta: the local player's worn copy (weapNametag)
 #include <nametags.h> // state.kpdCase: the suspect is a player that sees an enemy (nametags_can_see)
 #include <modes.h>
 #include <ui_interact.h> // state.interact
@@ -1209,6 +1210,31 @@ static void apply_timed(Client *client, const double capture_ms) {
     }
 }
 
+// state.skinMeta: [{skin, wear, serial, name}] on the local player, the worn copies NET_EXT_KN_SKIN_META
+// delivers in a match (the HUD's .weapNametag reads them by store index).
+static void scenario_skin_meta(const int uid, const cJSON *rows) {
+    int skins[12];
+    float wears[12];
+    int serials[12];
+    const char *names[12];
+    int n = 0;
+    const cJSON *row = NULL;
+    cJSON_ArrayForEach(row, rows) {
+        if (n >= 12 || !cJSON_IsObject(row)) continue;
+        const cJSON *skin = cJSON_GetObjectItemCaseSensitive(row, "skin");
+        if (!cJSON_IsNumber(skin)) continue;
+        const cJSON *wear = cJSON_GetObjectItemCaseSensitive(row, "wear");
+        const cJSON *serial = cJSON_GetObjectItemCaseSensitive(row, "serial");
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+        skins[n] = (int) skin->valuedouble;
+        wears[n] = cJSON_IsNumber(wear) ? (float) wear->valuedouble : -1.0f;
+        serials[n] = cJSON_IsNumber(serial) ? (int) serial->valuedouble : 0;
+        names[n] = cJSON_IsString(name) ? name->valuestring : NULL;
+        n++;
+    }
+    if (n) skin_meta_set(uid, n, skins, wears, serials, names);
+}
+
 // state.page ("hub" | "editor" | "viewer") + state.pageQuery: show that page (app_mode.h)
 // like `client_bin --hub "<query>"`; state.pageActions: handler names dispatched once the
 // page is up (e.g. "openSettings", "loginPopup"), or calls with literal arguments
@@ -1315,6 +1341,7 @@ static int ui_scenario_apply(Client *client) {
         ui_interact_scenario(st_str("interact")); // the prompt from the next HUD tick on
         apply_charge();
         run_frames(client, 2); // HUD visible + first value write (session edge seeds chat)
+        if (client->me && cJSON_IsArray(st("skinMeta"))) scenario_skin_meta(client->me->uid, st("skinMeta"));
         apply_chat();
     }
 

@@ -476,10 +476,40 @@ static int top_rarity(const UiWheel *w) {
     return last;
 }
 
+// openSales(index, element) (:223623-223650). The instance exists only when the element carries one of
+// data-wear-float / data-serial / data-paint / data-paint-shader / data-seed (a nametag alone does not).
+static int sales_attr(const HtmlElem el, const char *name, char *buf, const size_t n) {
+    return el && html_dom_get_attr(el, name, buf, n) >= 0 && buf[0];
+}
+
+static cJSON *sales_instance(const HtmlElem el) {
+    char wear[32], serial[32], paint[80], shader[32], tag[48], seed[32];
+    const int has_wear = sales_attr(el, "data-wear-float", wear, sizeof wear);
+    const int has_serial = sales_attr(el, "data-serial", serial, sizeof serial);
+    const int has_paint = sales_attr(el, "data-paint", paint, sizeof paint);
+    const int has_shader = sales_attr(el, "data-paint-shader", shader, sizeof shader);
+    const int has_tag = sales_attr(el, "data-nametag", tag, sizeof tag);
+    const int has_seed = sales_attr(el, "data-seed", seed, sizeof seed);
+    if (!has_wear && !has_serial && !has_paint && !has_shader && !has_seed) return NULL;
+    cJSON *o = cJSON_CreateObject();
+    if (!o) return NULL;
+    if (has_wear) cJSON_AddNumberToObject(o, "wear", strtod(wear, NULL));
+    else cJSON_AddNullToObject(o, "wear");
+    if (has_serial) cJSON_AddNumberToObject(o, "serial", strtol(serial, NULL, 10));
+    else cJSON_AddNullToObject(o, "serial");
+    if (has_paint) cJSON_AddStringToObject(o, "paint", paint);
+    else cJSON_AddNullToObject(o, "paint");
+    if (has_shader) cJSON_AddNumberToObject(o, "paintShader", strtol(shader, NULL, 10));
+    else cJSON_AddNullToObject(o, "paintShader");
+    if (has_tag) cJSON_AddStringToObject(o, "nametag", tag);
+    else cJSON_AddNullToObject(o, "nametag");
+    if (has_seed) cJSON_AddNumberToObject(o, "seed", strtol(seed, NULL, 10));
+    else cJSON_AddNullToObject(o, "seed");
+    return o;
+}
+
 static void open_item_sales(const int skin) {
-    char url[96];
-    snprintf(url, sizeof(url), "/social.html?p=itemsales&i=%d", skin);
-    if (!app_route_url_target(url, 1)) ui_open_external(url);
+    v10_market_open_item(skin, NULL); // the item itself (instance null)
 }
 
 static void spin_button_click(void);
@@ -2307,13 +2337,18 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         spin_button_click();
         return 0;
     }
+    if (!strcmp(name, "openSales")) { // openSales(index, element): the item page, signed in or not (:223623)
+        if (argc > 0 && args[0].kind == HTML_ARG_NUM) {
+            const HtmlElem el = argc > 1 && args[1].kind == HTML_ARG_THIS ? (HtmlElem) args[1].num : 0;
+            cJSON *inst = sales_instance(el);
+            v10_market_open_item((int) args[0].num, inst);
+            cJSON_Delete(inst);
+        }
+        return 1;
+    }
     if (!backend_enabled() || !active_account()) return -1;
     if (!strcmp(name, "knStoreMusicStop")) { // the music player's Stop
         eterno_music(0);
-        return 1;
-    }
-    if (!strcmp(name, "openSales")) { // openURL("/social.html?p=itemsales&i=" + i)
-        if (argc > 0 && args[0].kind == HTML_ARG_NUM) open_item_sales((int) args[0].num);
         return 1;
     }
     if (!strcmp(name, "knSpinRespin")) { // spinAgainBtn: prizeWheel(i, skin, multi, true, true)

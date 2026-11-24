@@ -58,6 +58,7 @@ void hud_ui_hit(Client*, int kill);
 #include <hud_map.h> // part 2a: minimap layout
 #include <render_settings.h>
 #include "../viewer/viewer_store.h" // store.skins: the melee skin icon
+#include <skin_meta.h> // a worn copy's name tag: .weapNametag (deob-10.0.7.js:176440)
 #include <streamer.h>
 #include <spectate.h>
 #include <ui_mobile.h>
@@ -410,14 +411,14 @@ static const char *hud_weapon_key(const Weapon *w, char *out, const size_t size)
 
 // #weapHolder.innerHTML (players.js swapWeapon, isYou): one .weapItem per slot, the held one
 // at opacity 1, holstered ones at 0.5; inside .weapItemInner the key name (slots > 0), the
-// label (the worn skin's name in its rarity colour, else the weapon name in #fff), the per-weapon
-// kill streak (hidden at 0) and the icon. Only #weapItem_N's opacity changes on a swap.
-// v10's label span (deob-10.0.7.js:176440): .weapNametag "\"name\"" when the slot's m.name is set
-// (iïîìîîï, :24335-24337), else class weapSkin (+ whiteShad on rarity 5), color = rarities[rarity || 0].color,
-// text = skin.name || weapon.name. No rainbow class.
+// label (the worn copy's name in .weapNametag quotes when m.name is set, else the worn skin's name in its
+// rarity colour, else the weapon name in #fff), the per-weapon kill streak (hidden at 0) and the icon.
+// Only #weapItem_N's opacity changes on a swap.
+// v10's label (:176440): m.name -> <span class='weapNametag'>"name"</span>; else class weapSkin
+// (+ whiteShad on rarity 5), style color = rarities[rarity || 0].color, text = skin.name || weapon.name.
 static void hud_weapon_rack_html(const Weapon *const *loadout, const ViewerSkin *const *skins,
-                                 const char nametag[][HUD_NAMETAG_LEN], const int count, const int base, const int index,
-                                 const int can_throw, const int melee_icon, char *out, const size_t size) {
+                                 const char nametag[][HUD_NAMETAG_LEN], const int count, const int base, const int index, const int can_throw, const int melee_icon,
+                                 char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
 
@@ -433,10 +434,10 @@ static void hud_weapon_rack_html(const Weapon *const *loadout, const ViewerSkin 
             hb_append_escaped(out, size, &len, hud_weapon_key(w, key, sizeof(key)));
             hb_append(out, size, &len, "</div>");
         }
-        if (nametag && nametag[i][0]) {
+        if (nametag && nametag[i][0]) { // iïîìîîï(skin).name (:176428, :176440); the shared </span> closes it
             hb_append(out, size, &len, "<span class='weapNametag'>\"");
             hb_append_escaped(out, size, &len, nametag[i]);
-            hb_append(out, size, &len, "\"</span>");
+            hb_append(out, size, &len, "\"");
         } else if (skin && skin->name) {
             const int rarity = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
             const char *color = g_viewer_rarities[rarity].color ? g_viewer_rarities[rarity].color : "#fff";
@@ -1417,6 +1418,20 @@ static int hud_slot_copy(const Player *me, const int store) {
     return 0;
 }
 
+// The match's NET_EXT_KN_SKIN_META name, else the local account's copy. Spectators have the
+// extension and not the other player's account.
+static void hud_slot_nametag(char *out, const size_t n, const Player *me, const int store) {
+    if (!out || n < 2) return;
+    out[0] = 0;
+    SkinCopyMeta meta;
+    if (me && store >= 0 && skin_meta_of(me->uid, store, &meta) && meta.name[0]) {
+        snprintf(out, n, "%s", meta.name);
+        return;
+    }
+    if (me) ui_loadout_copy_name(store, hud_slot_copy(me, store), out, n);
+}
+}
+
 static void hud_loadout(const Player *me, HudUiExtra *extra) {
     const Game *game = me->game;
     const size_t weapon_count = game->weapon_count ? game->weapon_count : rules_weapon_count();
@@ -1434,8 +1449,7 @@ static void hud_loadout(const Player *me, HudUiExtra *extra) {
         const int id = me->loadout ? me->loadout[i] : -1;
         const Weapon *weapon = id >= 0 && (size_t) id < weapon_count ? weapons[id] : NULL;
         extra->skin[extra->loadout_size] = hud_slot_skin(me, i, weapon);
-        const int store = hud_slot_store(me, i, weapon);
-        ui_loadout_copy_name(store, hud_slot_copy(me, store), extra->nametag[extra->loadout_size], HUD_NAMETAG_LEN);
+        hud_slot_nametag(extra->nametag[extra->loadout_size], HUD_NAMETAG_LEN, me, hud_slot_store(me, i, weapon));
         extra->loadout[extra->loadout_size++] = weapon;
     }
 }
@@ -4482,9 +4496,11 @@ static void hud_apply_override(const Client *client, HtmlHudState *next, HudUiEx
             const cJSON *name = cJSON_GetObjectItemCaseSensitive(slot, "name");
             const cJSON *skin = cJSON_GetObjectItemCaseSensitive(slot, "skin"); // scenario: the worn store skin's index
             const cJSON *tag = cJSON_GetObjectItemCaseSensitive(slot, "nametag"); // scenario: the worn copy's m.name
-            extra->skin[extra->loadout_size] = cJSON_IsNumber(skin) ? viewer_skin(skin->valueint) : NULL;
+            const int store = cJSON_IsNumber(skin) ? (int) skin->valueint : -1;
+            extra->skin[extra->loadout_size] = store >= 0 ? viewer_skin(store) : NULL;
             if (cJSON_IsString(tag) && tag->valuestring && tag->valuestring[0])
                 snprintf(extra->nametag[extra->loadout_size], HUD_NAMETAG_LEN, "%s", tag->valuestring);
+            else if (client->me) hud_slot_nametag(extra->nametag[extra->loadout_size], HUD_NAMETAG_LEN, client->me, store);
             extra->loadout[extra->loadout_size++] = hud_weapon_by_name(&client->game, cJSON_IsString(name) ? name->valuestring : NULL);
         }
         // Object Manager scenarios: the slots from loadoutBase on are extra weapons; without it the

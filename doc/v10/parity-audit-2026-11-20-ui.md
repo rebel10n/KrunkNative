@@ -158,7 +158,7 @@ handler by handler. Every gap is fixed unless its row says otherwise; the differ
 
 | Area | Gaps | Main fixes | Left open | Tests |
 | --- | --- | --- | --- | --- |
-| Item copies and the end table | 11 | endGame's skin reward in the end table's reward cell (`.skinReward`, openSales; EXT 0x81D0); a worn copy's wear, serial and name tag to every client (EXT 0x81D1, the slot's named copy first; `skin_meta_of`); name tags on copies (migration 0402) kept through listings and trades; `/items/:id/instances` with the Mints and Wear tabs; the Market's card wear line, listing spans, the copy overlay and the `wears=` filter; a styled copy loses its style when it moves (:195123-195291, :226765-226770, :24335, :109727-109935, :110688-110790, :130983-130991, :136679-136700, :223620-223650) | the Store's openSales (menu agent). The HUD .weapNametag landed with the menu merge | `market_copies_e2e`, `kill_pools_server_e2e.py`, `player_rank_flag_e2e`, `brain_v10_api_market`, `brain_schema_parity`, `brain_economy`, `brain_live_trade` |
+| Item copies and the end table | 11 | endGame's skin reward in the end table's reward cell (`.skinReward`, openSales; EXT 0x81D0); a worn copy's wear, serial and name tag to every client (EXT 0x81D1, the slot's named copy first; `skin_meta_of`); name tags on copies (migration 0402) kept through listings and trades; `/items/:id/instances` with the Mints and Wear tabs; the Market's card wear line, listing spans, the copy overlay and the `wears=` filter; a styled copy loses its style when it moves (:195123-195291, :226765-226770, :24335, :109727-109935, :110688-110790, :130983-130991, :136679-136700, :223620-223650) | the loadout and item tooltips' copy attributes | `market_copies_e2e`, `kill_pools_server_e2e.py`, `player_rank_flag_e2e`, `brain_v10_api_market`, `brain_schema_parity`, `brain_economy`, `brain_live_trade`, `weap_nametag_e2e.py`, `open_sales_e2e.py` |
 | Challenges | 3 | a real challenge completed mid-match end to end; the mid-match UPDATE_CHALLENGES_PROGRESS after each event's chgC (`challenge_progress_reported`, :180731-180741, :180925-180934, :225206-225215); a mid-match challenge's Junk into the Rewards tab (:225219) | official daily BPP values (none exist locally) | `challenge_mid_match_e2e`, `brain_progress_sqlite` / `_mysql`, `season_test`, `chal_card_e2e`, `krunker_challenges_e2e.py` |
 | Account | 3 | skin makers (`player_skinmaker`, :115136) and the krunker.io account's `tw_twitchname` / `player_skinmaker` (setData [23] / [42]) reach getSkins; a Twitch link or unlink updates the streamer items at once | none | `v10_customize_e2e.py` |
 | Map editor | 27 | entities and archetypes; Publish Game and Publish Asset as v10 sends them (`uploadM`, `plm`, migration 0403 `map_mobile`); multiplayer co-editing (windows 16 / 17, `#mp-chat`); the inspector, T-key picker and AI Rarity Chances; settings, history, resets, view resolution and object visuals; Tools and Quick GUI as v10 binds them, v10's own quirks included (E10:6610-20982, IDX:6124-15193, CFG:4406-9215) | `publish_ui_e2e`'s Burg template (`assets/maps/burg_new.json` is in no checkout) | `panels_e2e`, `inspector_check`, `objects_e2e`, `windows_check`, `tools_check`, `logic_parity`, `io_e2e`, `entities_e2e`, `mp_e2e`, `publish_e2e`, `asset_upload_test`, `brain_editor_rooms`, `editor_serialize_test` |
@@ -243,3 +243,15 @@ Tests: `kpd_phone_test` (grouped HTTP lists, errors, group / guest flags, copy f
 unfeatured and featured / rest structures, thumbnail order and proxy hosts), `native_auth_e2e` (the
 premium hack flag), `double_xp_e2e`, `v10_endscreen_e2e`, and the three replay uidiff scenarios. The
 replay scenarios' KN regression baselines were re-rendered for the intended v10 text.
+
+## The worn copy on the HUD and in openSales
+
+- The weapon rack's label is `.weapNametag` `"name"` when the worn copy has `m.name` (:176440), from
+  `skin_meta_of` (and `state.skinMeta` in a scenario). Otherwise it stays `.weapSkin`.
+- `openSales(index, element)` opens the item page for that element (:223623-223650), signed in or not.
+  The instance is built from `data-wear-float`, `data-serial`, `data-paint`, `data-paint-shader`,
+  `data-nametag` and `data-seed`, and only when one of wear, serial, paint, shader or seed is set.
+
+Tests: `weap_nametag_e2e.py`, `open_sales_e2e.py`. Still open from the menu list: the loadout and item
+tooltips' copy attributes, the guest hosting Security Challenge, `classPreviewCanvas` while a map loads,
+and `loading_switch_e2e`'s old "offline: playing map N" string.
