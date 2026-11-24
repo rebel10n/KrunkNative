@@ -69,20 +69,33 @@ static void post_done(SocialSession *s, kn_db_result *res, void *extra) {
     else social_send_n(s, "psr", 1, cJSON_CreateNumber(1));
 }
 
-/* ["ps", {txt, typ, lnk, lnk2}] -> ["psr", 1] | ["psr", null, err] */
+/* ["ps", {txt, typ, lnk, lnk2}] -> ["psr", 1] | ["psr", null, err]
+ * #postInput has no maxlength. The hub Post button is the compose box (deob-10.0.7.js:141204, :141216):
+ * trim, then at most 500 characters, never a cut in the middle of a letter. */
 void sh_post(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) {
         social_send_n(s, "psr", 2, cJSON_CreateNull(), cJSON_CreateString("Login required."));
         return;
     }
     const cJSON *body = fa(f, 1);
-    const char *txt = kn_json_str(body, "txt", NULL);
-    if (!txt || !*txt) {
+    const char *raw = kn_json_str(body, "txt", NULL);
+    while (raw && *raw && isspace((unsigned char) *raw)) raw++;
+    size_t n = raw ? strlen(raw) : 0;
+    while (n && isspace((unsigned char) raw[n - 1])) n--;
+    char trimmed[4096];
+    if (n >= sizeof trimmed) n = sizeof trimmed - 1;
+    if (raw && n) memcpy(trimmed, raw, n);
+    trimmed[n] = 0;
+    if (!trimmed[0]) {
         social_send_n(s, "psr", 2, cJSON_CreateNull(), cJSON_CreateString("Empty post."));
         return;
     }
+    int max = g_acct.post_max_len > 0 ? g_acct.post_max_len : 500;
+    if (max > 500) max = 500;
+    const size_t cut = brain_utf16_prefix(trimmed, (size_t) max);
     char text[4096];
-    snprintf(text, sizeof text, "%.*s", g_acct.post_max_len > 0 && g_acct.post_max_len < 4000 ? g_acct.post_max_len : 1024, txt);
+    memcpy(text, trimmed, cut);
+    text[cut] = 0;
     char me[24], typ[24];
     const int64_t type = kn_json_int(body, "typ", 0);
     Ctx *c = ctx_new("ps", 0, 0);

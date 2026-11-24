@@ -7761,18 +7761,24 @@ static void hub_post_giveaway(const char *text) {
 
 H(h_make_post) {
     UNUSED;
-    char text[1024] = "";
+    /* #postInput has no maxlength. Trim here so a blank box is not sent; the server keeps 500 characters. */
+    char text[4096] = "";
     const HtmlElem input = el("postInput");
     if (input) html_dom_get_value(input, text, sizeof(text));
-    if (!text[0] || g_hub.posting || !g_hub.logged_in) return 1;
+    char *p = text;
+    while (*p && isspace((unsigned char) *p)) p++;
+    size_t n = strlen(p);
+    while (n && isspace((unsigned char) p[n - 1])) n--;
+    p[n] = 0;
+    if (!p[0] || g_hub.posting || !g_hub.logged_in) return 1;
     if (g_hub.giveaway) {
-        hub_post_giveaway(text);
+        hub_post_giveaway(p);
         return 1;
     }
     g_hub.posting = 1;
     set_html("postButton", "<div class='lds-rings'><div></div><div></div><div></div><div></div></div>");
     cJSON *body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "txt", text);
+    cJSON_AddStringToObject(body, "txt", p);
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("ps"));
     cJSON_AddItemToArray(f, body);

@@ -434,6 +434,21 @@ async def scenario(names):
     check(st == 200 and got["data"]["post"]["txt"] == "é" * 500,
           "a post of accented letters stops at 500 characters, not 500 bytes (deob-10.0.7.js:141216): %s" % (len((got.get("data") or {}).get("post", {}).get("txt") or "")))
     q("DELETE FROM feed_posts WHERE id IN (?, ?, ?)", pad, long_id, acc_id)
+    # #postInput has no maxlength. The hub Post button (["ps", {txt}]) trims, then keeps 500 characters.
+    before = q("SELECT COALESCE(MAX(id), 0) FROM feed_posts")[0][0]
+    await A.send(["ps", {"txt": "   "}])
+    f = await A.recv_until(lambda fr: fr[0] == "psr")
+    check(f and f[1] is None and f[2] == "Empty post.", "a blank hub post is refused")
+    await A.send(["ps", {"txt": "  hub padded  "}])
+    f = await A.recv_until(lambda fr: fr[0] == "psr")
+    row = q("SELECT body FROM feed_posts WHERE author_id = ? ORDER BY id DESC LIMIT 1", a_id)
+    check(f and f[1] == 1 and row and row[0][0] == "hub padded", "a hub post is stored trimmed")
+    await A.send(["ps", {"txt": "  " + ("é" * 600) + "  "}])
+    f = await A.recv_until(lambda fr: fr[0] == "psr")
+    row = q("SELECT body FROM feed_posts WHERE author_id = ? ORDER BY id DESC LIMIT 1", a_id)
+    check(f and f[1] == 1 and row and row[0][0] == "é" * 500,
+          "a hub post keeps 500 characters, not 500 bytes (got %d)" % (len(row[0][0]) if row else 0))
+    q("DELETE FROM feed_posts WHERE id > ?", before)
     st, r = await B.gapi("GET", "/social/feed?tab=hot")
     check(st == 200 and r["data"]["posts"][0]["pid"] == pid and r["data"]["posts"][0]["dlk"] == 1, "hot tab: the liked post first")
 
