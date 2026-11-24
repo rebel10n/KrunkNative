@@ -1674,6 +1674,10 @@ else ()
             add_test(NAME death_rainbow_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/death_rainbow_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(death_rainbow_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # hub_text_e2e: a hub reply, KR gift note and report keep their 500 UTF-8 characters end to end (kn_brain)
+            add_test(NAME hub_text_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/hub_text_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(hub_text_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # chat_actions_e2e: a chat line's v10 actions ([Join Queue], NET_EXT_KN_CHAT_ACTIONS) in the rendered document
             add_test(NAME chat_actions_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chat_actions_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
