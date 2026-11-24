@@ -338,12 +338,12 @@ static int h_double_xp(void *user, const HtmlEvent *ev, const HtmlArg *args, con
     return 1;
 }
 
-// The Return click. v10's backToOrigin() reloads the page at the origin (the menu, no seek). The nearest KrunkNative
-// action is the console's disconnect (servers_ui_disconnect: the page to "/", no auto-seek), which reports
-// "Disconnected" on the menu where v10's reload shows nothing; a silent leave needs ui_console.c's stop_net.
+// The Return click. v10's backToOrigin() reloads the origin (deob-10.0.7.js:275828), which seeks a game
+// and shows no "Disconnected" screen. That is the menu's backToOrigin: Quick Match, or Play on the
+// offline map when there is no matchmaker.
 static int h_return_to_krunker(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user; (void) ev; (void) args; (void) argc;
-    servers_ui_disconnect();
+    if (!servers_ui_quick_match()) menu_play();
     return 1;
 }
 
