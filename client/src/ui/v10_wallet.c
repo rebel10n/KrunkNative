@@ -27,7 +27,7 @@
 //     KrunkNative has no paint or style editor, and no instance ids to paint)
 //   - the filter bar (_45793: search, rarity / weapon / type / wear / season filters, sort, the
 //     "Group by wear" and paintable options) is not built; the grid keeps the account's order
-//   - the item tap opens the Catalog's item page, not v10's item popup (_35204)
+//   - the item tap opens v10's item popup (viewItem), not the Catalog page
 //   - Quick Sell is offered on every owned tile: the market's view says "Destroy Item" where the
 //     item has no KR value (its inventory row decides, as the market's own grid)
 #include <v10_wallet.h>
@@ -676,7 +676,6 @@ static int arg_int(const HtmlArg *args, const int argc, const int i) {
 }
 
 int v10_wallet_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    (void) ev;
     if (!name) return -1;
     if (!strcmp(name, "knV10Wallet")) { // the header's Wallet item (_52516)
         open_modal();
@@ -690,7 +689,9 @@ int v10_wallet_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "knV10WalletItem")) {
-        v10_market_wallet_item(arg_int(args, argc, 0));
+        // v10's inventory tile opens the item popup (viewItem), not the Catalog's item page
+        const HtmlArg item = {.kind = HTML_ARG_NUM, .num = arg_int(args, argc, 0)};
+        html_ui_dispatch("viewItem", ev, &item, 1);
         return 1;
     }
     if (!strcmp(name, "knV10WalletSell")) {
