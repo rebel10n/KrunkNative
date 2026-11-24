@@ -879,3 +879,11 @@ after the window's actions, and the Email field is now a region of `ranked-guest
 the gradient bar's side-pixel coverage and the Login button's outer pixel. Those two pieces are already
 scored by `login-header` and `login-account`. The threshold was not raised.
 
+### The paused sandbox menu (2026-11-24)
+
+`ingame-pause-esc`'s reference is the offline sandbox page (Skin Manager, no login bar). The scenario rendered
+the live guest menu, so `menu-left` was 13.8 % and skipped. `state.sandbox` is the capture's `connectToSandbox`
+chrome. The header is then 0.638 % at fuzz 12 (the live menu stays 12.4 %); max 2.0, the same text fuzz as the
+scenario's other rows. `menu-right` stays skipped: the sandbox page has no play buttons, so it cannot say
+whether a match hides them.
+

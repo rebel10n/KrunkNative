@@ -17,6 +17,7 @@
     "name": "Local User",
     "region": "...",
     "anim_time": 0.8,
+    "sandbox": true,
     "hud": {
       "health": 100,
       "maxHealth": 100,
@@ -69,5 +70,5 @@
     ]
   },
   "frames": 3,
-  "note": "In game, pointer lock released (Esc): the menu over the game (v10: #instructions CLICK TO PLAY, the class preview, no play buttons while in a match). Reference: the offline v10 sandbox (capture-v10.js ingame-pause-esc)."
+  "note": "In game, pointer lock released (Esc): the menu over the game (v10: #instructions CLICK TO PLAY, the class preview, no play buttons while in a match). Reference: the offline v10 sandbox (capture-v10.js ingame-pause-esc), so state.sandbox: Skin Manager, no login bar (v10_menu.c sandbox_apply)."
 }

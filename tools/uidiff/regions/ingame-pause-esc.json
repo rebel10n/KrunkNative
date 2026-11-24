@@ -43,8 +43,9 @@
       "name": "menu-left",
       "rect": [0, 0, 360, 210],
       "kind": "text",
-      "skip": true,
-      "note": "the sandbox page (custom map) shows Skin Manager and no login bar: not the live menu's (main-menu)"
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "the sandbox header the reference shows (Notifications / Settings / More Krunker, Skin Manager, no login bar). state.sandbox. The live menu is 12% here"
     },
     {
       "name": "menu-right",
