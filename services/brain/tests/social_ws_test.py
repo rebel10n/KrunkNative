@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import struct
@@ -936,6 +937,18 @@ def main():
                 con.commit()
             finally:
                 con.close()
+        SQL_EXEC = _sql
+    elif driver == "mysql":
+        # a hub post needs level 10. Postgres and sqlite raise player_score above; MariaDB did not,
+        # so the post was refused and the feed read crashed on an empty list.
+        tool = shutil.which("mariadb") or shutil.which("mysql")
+
+        def _sql(text, _tool=tool, _cfg=dbcfg):
+            env = dict(os.environ, MYSQL_PWD=str(_cfg.get("password", "")))
+            subprocess.run([_tool, "--no-defaults", "--protocol=TCP", "-h", str(_cfg["host"]),
+                            "-P", str(_cfg["port"]), "-u", str(_cfg["user"]), str(_cfg["name"]), "-e", text],
+                           env=env, check=True, capture_output=True, text=True)
+
         SQL_EXEC = _sql
 
     secret = "test-secret-" + str(os.getpid())
