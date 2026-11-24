@@ -482,7 +482,13 @@ static void report_done(SocialSession *s, kn_db_result *res, void *extra) {
 }
 
 /* the report window (deob-10.0.7.js:111768-111774, :111805): trim, then 10 to 500 characters
- * (the textarea's maxlength). out receives the trimmed text. */
+ * (the textarea's maxlength). The map and mod prompts (deob-10.0.7.js:107523-107526, :108337-108340)
+ * send "Map: " / "Mod: " + the name + " - " + the reason, and a publish name is 500 characters, so
+ * that whole line is kept up to 1008 characters. out receives the trimmed text. */
+static int creation_report(const char *s) {
+    return !strncmp(s, "Map: ", 5) || !strncmp(s, "Mod: ", 5);
+}
+
 const char *profile_report_prepare(const char *in, char *out, size_t cap) {
     const char *s = in ? in : "";
     while (*s && isspace((unsigned char) *s)) s++;
@@ -492,7 +498,8 @@ const char *profile_report_prepare(const char *in, char *out, size_t cap) {
     memcpy(out, s, n);
     out[n] = 0;
     if (brain_utf16_prefix(out, 9) == n) return "Please provide at least 10 characters of detail.";
-    if (brain_utf16_prefix(out, 500) < n) return "Invalid report.";
+    if (brain_utf16_prefix(out, 500) < n && !(creation_report(out) && brain_utf16_prefix(out, 1008) == n))
+        return "Invalid report.";
     return NULL;
 }
 
@@ -501,7 +508,7 @@ const char *profile_report_prepare(const char *in, char *out, size_t cap) {
  * name, or past 20 reports an hour). Returns 0 when the request was refused before the query. */
 int profile_report_submit(SocialSession *s, const char *name, const cJSON *reason, const char *details, SocialDbFn fn,
                           void *extra) {
-    char trimmed[2048];
+    char trimmed[4096];
     const char *why = profile_report_reason(reason);
     if (!name || !why || profile_report_prepare(details, trimmed, sizeof trimmed)) return -1;
     char me[24];

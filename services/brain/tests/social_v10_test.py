@@ -455,6 +455,16 @@ async def scenario(names):
           "gapi report under 10 characters (deob-10.0.7.js:111769): %s" % r)
     st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": "z" * 501})
     check(st == 400 and r["error"]["code"] == "PLAYERS_REPORT_INVALID", "gapi report past 500 characters: %s" % r)
+    # the mod prompt (deob-10.0.7.js:108338-108340): "Mod: " + name + " - " + reason, and a publish name is 500
+    mod_report = "Mod: " + ("é" * 500) + " - " + "0123456789"
+    st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": mod_report})
+    check(st == 200 and r["data"] == {}, "a mod report keeps a 500-character name and the reason")
+    st, r = await C.gapi("GET", "/players/%s/reports" % an)
+    check(st == 200 and r["data"] and r["data"][0]["rp_text"] == mod_report,
+          "the stored mod report is the whole line (%d)" % len((r.get("data") or [{}])[0].get("rp_text") or ""))
+    q("DELETE FROM reports WHERE details = ?", mod_report)
+    st, r = await B.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": "Mod: " + ("n" * 1000) + " - " + "0123456789"})
+    check(st == 400 and r["error"]["code"] == "PLAYERS_REPORT_INVALID", "a mod report past the name and the reason is refused: %s" % r)
     st, r = await A.gapi("POST", "/players/%s/report" % an, {"reason": 0, "text": "reporting myself"})
     check(st == 400 and r["error"]["code"] == "PLAYERS_REPORT_FAILED", "a self report is refused (PLAYERS_REPORT_FAILED)")
     st, r = await C.gapi("GET", "/players/%s/reports" % an)

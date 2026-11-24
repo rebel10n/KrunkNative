@@ -878,7 +878,7 @@ static void report_filed_done(SocialSession *s, kn_db_result *res, void *extra) 
 static void players_report(SocialSession *s, const GapiReq *r, const char *name) {
     if (!need_login(s, r)) return;
     const cJSON *reason = cJSON_GetObjectItemCaseSensitive(r->body, "reason");
-    char text[2048];
+    char text[4096];
     const char *bad = profile_report_prepare(kn_json_str(r->body, "text", ""), text, sizeof text);
     if (!profile_report_reason(reason) || bad) {
         gapi_error(s, r->rid, 400, "PLAYERS_REPORT_INVALID", bad && profile_report_reason(reason) ? bad : "Invalid report.");

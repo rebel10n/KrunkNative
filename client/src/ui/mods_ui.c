@@ -1325,22 +1325,42 @@ static void view_uncopy(void *user) {
     view_render();
 }
 
+// JS string length (deob-10.0.7.js:108338 trim().length): a 4-byte sequence is two units.
+static size_t utf16_units(const char *s) {
+    size_t n = 0;
+    const unsigned char *p = (const unsigned char *) s;
+    while (*p) {
+        if (*p < 0x80) { p++; n++; }
+        else if ((*p & 0xE0) == 0xC0 && p[1]) { p += 2; n++; }
+        else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) { p += 3; n++; }
+        else if ((*p & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) { p += 4; n += 2; }
+        else { p++; n++; }
+    }
+    return n;
+}
+
 static void view_reported(const int accepted, const char *text, void *user) {
     (void) user;
     if (!accepted || !text || !V.mod) return;
-    char reason[300];
-    snprintf(reason, sizeof reason, "%s", text);
+    char *reason = strdup(text);
+    if (!reason) return;
     char *s = reason;
-    while (*s == ' ' || *s == '\t' || *s == '\n') s++;
-    for (size_t n = strlen(s); n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\n');) s[--n] = 0;
-    if (strlen(s) < 10) return; // min 10 chars
-    char info[480];
-    snprintf(info, sizeof info, "Mod: %s - %s", jstr(V.mod, "name", "mod_name"), s);
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') s++;
+    for (size_t n = strlen(s); n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\n' || s[n - 1] == '\r');) s[--n] = 0;
+    // deob-10.0.7.js:108338-108340: trim().length of at least 10, then "Mod: " + name + " - " + reason, uncut
+    if (utf16_units(s) < 10) { free(reason); return; }
+    const char *name = jstr(V.mod, "name", "mod_name");
+    const size_t need = strlen("Mod: ") + strlen(name) + strlen(" - ") + strlen(s) + 1;
+    char *info = malloc(need);
+    if (!info) { free(reason); return; }
+    snprintf(info, need, "Mod: %s - %s", name, s);
+    free(reason);
     cJSON *f = cJSON_CreateArray(); // players.reportPlayer(creator, 0, info): kn_brain's rpt
     cJSON_AddItemToArray(f, cJSON_CreateString("rpt"));
     cJSON_AddItemToArray(f, cJSON_CreateString(jstr(V.mod, "creator_name", "creatorname")));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
     cJSON_AddItemToArray(f, cJSON_CreateString(info));
+    free(info);
     const int sent = backend_social_send(f);
     cJSON_Delete(f);
     ui_alert(sent ? "Report submitted." : "Failed to submit report");
