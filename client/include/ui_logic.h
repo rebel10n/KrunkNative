@@ -538,7 +538,6 @@ int  ui_scenario_active(void);
 int  ui_scenario_client_chrome(void);            // state.clientChrome: Exit item + Client tab (ui_client_settings.c)
 void ui_scenario_window_size(int *w, int *h);    // the scenario `size`
 const char *ui_scenario_map_path(void);          // map JSON for state.mapName, NULL = default rotation
-const char *ui_scenario_player_name(void);       // state.name before the offline JOIN, NULL = the stored default
 int  ui_scenario_run(Client*);                   // frames + state + PNG; process exit status
 void ui_scenario_end(void);                      // remove the temporary storage dir
 void ui_scenario_draw_background(void);          // after the frame's glClear, instead of the world

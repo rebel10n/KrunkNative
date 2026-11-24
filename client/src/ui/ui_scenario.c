@@ -598,10 +598,6 @@ void ui_scenario_window_size(int *w, int *h) {
 }
 
 const char *ui_scenario_map_path(void) { return g_sc.map_path[0] ? g_sc.map_path : NULL; }
-const char *ui_scenario_player_name(void) {
-    const char *name = st_str("name");
-    return name && name[0] ? name : NULL;
-}
 
 int ui_scenario_draws_preview(void) { return g_sc.preview; }
 int ui_scenario_draws_nametags(void) { return g_sc.active && st_bool("nametags", 0); }
@@ -1107,6 +1103,10 @@ static void apply_killcard(Client *client) {
         // v7 death screen: weaponIcon / myLevel and the life's stats [timeAlive ms, shots, "acc%", kills, score]
         card.weapon_icon = obj_str(kc, "weaponIcon");
         card.my_level = (int) obj_num(kc, "myLevel", 0);
+        // The browser sandbox's local name differs from the standalone server's Guest_N. A synthetic card may pin
+        // the real player fixture's name; live packets never take this path.
+        const char *my_name = obj_str(kc, "myName");
+        if (my_name && my_name[0] && client->me) snprintf(client->me->name, sizeof(client->me->name), "%s", my_name);
         // part 2a: the killer's player card stat ["KDR", "2.50"], banners (store.skins indices of
         // player cards: Game.store.skins[playerCardIndex].thumbnail) and the report prompt
         const cJSON *pc = cJSON_GetObjectItemCaseSensitive(kc, "pcStat");
@@ -1661,7 +1661,6 @@ int ui_scenario_active(void) { return 0; }
 int ui_scenario_client_chrome(void) { return 0; }
 void ui_scenario_window_size(int *w, int *h) { (void) w; (void) h; }
 const char *ui_scenario_map_path(void) { return NULL; }
-const char *ui_scenario_player_name(void) { return NULL; }
 int ui_scenario_run(Client *client) { (void) client; return 1; }
 void ui_scenario_end(void) {}
 void ui_scenario_draw_background(void) {}

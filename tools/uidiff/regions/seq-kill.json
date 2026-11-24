@@ -11,7 +11,7 @@
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#killFeed rows (gone at 4 s): state.name joins as Local User and the bot command pins name=Bot, as in the Chromium sandbox"
+      "note": "#killFeed rows (gone at 4 s): the local player is You in both sandboxes and the bot command pins name=Bot"
     },
     {
       "name": "popup",

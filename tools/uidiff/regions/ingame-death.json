@@ -27,8 +27,7 @@
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "class images + lvl, Bot VS Local User; the scenario now joins with state.name, so the old Guest_1 name mismatch is fixed",
-      "skip": true
+      "note": "class images + lvl, Bot VS Local User; killcard.myName pins the browser sandbox's local name in the synthetic player fixture"
     },
     {
       "name": "death-time",
