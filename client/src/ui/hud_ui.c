@@ -1528,8 +1528,19 @@ static HtmlElem hud_ensure_part(HtmlElem *cache, const char *id, const char *arm
 }
 
 // #knCrosshair; its layers are (re)built by hud_crosshair_build() from the settings.
+// It is a child of #uiBase, not #inGameUI: v10 draws it on the overlay canvas, which stays up when
+// ESC opens the menu (the HUD holders hide). A child of #inGameUI would hide with that parent.
 static HtmlElem hud_ensure_crosshair(void) {
-    return hud_ensure_part(&g_hud_ui.crosshair, "knCrosshair", NULL, NULL);
+    if (g_hud_ui.crosshair) return g_hud_ui.crosshair;
+    HtmlElem el = html_dom_by_id("knCrosshair");
+    if (!el) {
+        const HtmlElem host = html_dom_by_id("uiBase");
+        if (!host) return 0;
+        el = html_dom_create("div", "knCrosshair");
+        html_dom_append(host, el);
+    }
+    g_hud_ui.crosshair = el;
+    return el;
 }
 
 static HtmlElem hud_ensure_hitmarker(void) {
@@ -1818,6 +1829,30 @@ static void hud_render_crosshair(const HudUiExtra *extra, const int reloading) {
         html_dom_set_display(ch, shown ? "block" : "none");
         ui->cross_shown = shown;
     }
+    // Playing: full white. ESC pause (hud_pause_crosshair) halves this afterwards. v10's overlay
+    // crosshair under the open menu reads ~128 before the class vignette (the pause capture's bars
+    // are 120 on the same vignette that leaves a full-white bar at 224).
+    html_dom_set_style(ch, "opacity", "1");
+}
+
+static void hud_apply_override(const Client *client, HtmlHudState *next, HudUiExtra *extra, int *ping, int *reloading);
+
+// ESC pause: the HUD holders hide, the overlay crosshair stays (v10's #game-overlay / #aimRecticle).
+static void hud_pause_crosshair(Client *client) {
+    HudUiExtra extra = g_hud_ui.extra;
+    const Player *me = client ? client->me : NULL;
+    if (me) {
+        extra.spread = (int) lroundf(hud_spread(me));
+        extra.aim_pct = (int) lroundf(CLAMP(me->aim_val, 0.0f, 1.0f) * 100.0f);
+        extra.throw_cross = 0;
+        extra.scoreboard = 0;
+    }
+    int ping = 0, reloading = 0;
+    HtmlHudState dummy;
+    memset(&dummy, 0, sizeof dummy);
+    if (client && g_hud_override.hud) hud_apply_override(client, &dummy, &extra, &ping, &reloading);
+    hud_render_crosshair(&extra, reloading);
+    if (g_hud_ui.crosshair) html_dom_set_style(g_hud_ui.crosshair, "opacity", "0.5");
 }
 
 // #knCrosshair down (the overlay canvas skips it); hud_render_crosshair shows it again.
@@ -5285,10 +5320,12 @@ void client_hud_html_tick(Client *client, const float now_f) {
     }
     if (ui->visible != 1 || !hud_in_game(client)) {
         // Dead (kill() -> toggleAim(player, 0), the overlay canvas hidden with the death
-        // card), menu or no player: no crosshair, scope or sight reticle. A respawn or
-        // closing the menu rewrites them (valid = 0 below).
+        // card) or no player: no crosshair. ESC pause hides the HUD holders but v10 keeps the
+        // overlay crosshair (#aimDot / #aimRecticle). A respawn rewrites them (valid = 0 below).
+        const int pause = html_ui_is_menu_open() && hud_in_game(client) && !ui->dead && !ui->ended;
         if (hud->scoped || hud->aim_dot) hud_reset_aim(client);
-        hud_hide_crosshair();
+        if (pause) hud_pause_crosshair(client);
+        else hud_hide_crosshair();
         // the hit marker too: its fade (hud_hit_step) only runs while playing, so a marker from
         // the last hits before the death stayed on the death screen, frozen at its opacity
         if (ui->hit_active) hud_hide_hit();
