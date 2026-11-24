@@ -190,7 +190,8 @@ ported every gap except these (doc/v10/parity-audit-2026-11-20-ui.md, "Round 11"
 | Account | Discord linking through Krunker's OAuth app; the result on the game socket | Box Office's own Discord app (`discord.c`); `dlnkR` on the social socket | Krunker's app and host are not ours |
 | Report Player | REST `POST /players/{name}/report` | the social socket's `rpt` frame, same fields and outcome | `v10_social.c`, kn_brain |
 | Scoreboard / end table | `rankedRank` and `flagIndex` ride in ADD_PLAYERS [46] / [26] | a KrunkNative EXT, `NET_EXT_KN_PLAYER_RANK_FLAG` (0x81B0), right after each PLAYER_INFO | KrunkNative's PLAYER_INFO keeps its size for older clients; `server/src/accounts.c` |
-| Scoreboard / end table | Hide player names (KN setting) | blanks the other rows' flag, rank, clan and icons too | KrunkNative's masking; `hud_ui.c` |
+| Scoreboard | `titleIndex` rides in ENTER_GAME [34] and ADD_PLAYERS [52] (:215052, :176753) | the client sends it to our server in `NET_EXT_KN_LOOK` before the ENT; the server sends `NET_EXT_KN_PLAYER_TITLE` (0x81B1) right after the rank / flag, and only a title the account owns (kn_brain's account `titles`, player_titles), else -1 | v10.0.7's own server code (the ownership check) is not in the bundle; Box Office checks it so a client cannot wear any title; `server/src/accounts.c` |
+| Scoreboard / end table | Hide player names (KN setting) | blanks the other rows' flag, rank, title, clan and icons too | KrunkNative's masking; `hud_ui.c` |
 
 ## Round 12: differences kept in the v10.0.7 sweep (2026-11-23)
 
