@@ -10,6 +10,7 @@
  *                 pays the clans' cuts by their loot configs (players' KR, the clan bank)
  *   P_TURF_LOOT_SET (clan, account, json) -> the stored config (owner or role 2 only)
  */
+#include "brain.h"
 #include "db_procs.h"
 
 #include <math.h>
@@ -812,8 +813,11 @@ static kn_db_result *run_recruit_set(kn_dbconn *c, int n, const char *const *p) 
     const char *err = NULL;
     if (region[0] && !in_list(region, k_rec_regions, sizeof k_rec_regions / sizeof *k_rec_regions)) err = "Unknown region";
     else if (lang[0] && !in_list(lang, k_rec_langs, sizeof k_rec_langs / sizeof *k_rec_langs)) err = "Unknown language";
-    else if (strlen(jstr(in, "description")) > 2000) err = "Description is too long (2000 characters max)";
-    else if (strlen(jstr(in, "looking_for")) > 500) err = "\"Looking for\" is too long (500 characters max)";
+    /* the boxes count JS characters (maxlength), not bytes: description 2000, Looking For 500 */
+    else if (brain_utf16_prefix(jstr(in, "description"), 2000) < strlen(jstr(in, "description")))
+        err = "Description is too long (2000 characters max)";
+    else if (brain_utf16_prefix(jstr(in, "looking_for"), 500) < strlen(jstr(in, "looking_for")))
+        err = "\"Looking for\" is too long (500 characters max)";
     /* the form (deob-10.0.7.js:96872-96873): a level is a whole number 0..200, a K/D is 0..99.99 */
     else if (!(min_level >= 0 && min_level <= 200 && floor(min_level) == min_level))
         err = "Level must be a whole number between 0 and 200";
