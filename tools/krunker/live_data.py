@@ -174,7 +174,11 @@ def diff_display(live, kn):
             out.append(f'product {pid} {lp[pid]["name"]!r}: in krunker.io\'s display, not in KN\'s migrations')
             continue
         if pid not in lp:
-            out.append(f'product {pid} {kn[pid][0]["name"]!r}: in KN\'s migrations, gone from krunker.io\'s display')
+            # Box Office's own catalogue rows (a kn.* price, such as the 50 KR Paint Ticket) are not
+            # on krunker.io's display. A krunker.io product that left the display still differs.
+            ref = str(kn[pid][0].get("price_ref") or "")
+            if not ref.startswith("kn."):
+                out.append(f'product {pid} {kn[pid][0]["name"]!r}: in KN\'s migrations, gone from krunker.io\'s display')
             continue
         (row, cont), p, n = kn[pid], lp[pid], nodes.get(pid)
         pr = p['prices'][0]
