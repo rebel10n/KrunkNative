@@ -253,7 +253,7 @@ static kn_db_result *run_gift(kn_dbconn *c, int n, const char *const *p) {
     int64_t funds = 0;
     db_add_funds_ex(&x, sender, -(amount + fee), "gift-out", I64S(to), to, fee, &funds);
     db_add_funds_ex(&x, to, amount, "gift-in", P(0), sender, 0, NULL);
-    char *msg = utf8_left(P(8), 300);
+    char *msg = utf8_left(P(8), 500); /* the gift note's textarea (deob-10.0.7.js:111703) */
     dbx_exec(&x, SQL(.any = "INSERT INTO mail (account_id, sender, subject, body, kr)"
                             " SELECT $1, a.username, 'KR Gift', $3, 0 FROM accounts a WHERE a.id = $2"),
              KN_DB_ARGS(I64S(to), P(0), msg ? msg : ""));
@@ -1304,7 +1304,7 @@ static kn_db_result *run_trade_create(kn_dbconn *c, int n, const char *const *p)
     }
     const int64_t fee = (me.premium ? 0 : (PI(10) > 0 ? PI(10) : 0)) + (skr * gift_pct + 99) / 100;
     if (me.funds < fee + skr) return econ_refuse(&x, "Not enough KR");
-    char *msg = utf8_left(P(7), 200);
+    char *msg = utf8_left(P(7), 500); /* the offer's textarea (deob-10.0.7.js:111332) */
     const int64_t ttl = PI(14) > 0 ? PI(14) : 0;
     const int64_t trade = dbx_insert_id(&x,
         SQL(.pg = "INSERT INTO trades (sender_id, receiver_id, message, sender_kr, receiver_kr, escrow, expires_at)"

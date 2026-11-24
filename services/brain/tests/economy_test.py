@@ -368,6 +368,13 @@ async def scenario(url, db):
         r = await a.call(("gir", "po"), "kr", names["bob"], 50, "", op())
         check(po_text(r) == "Player can not receive gifts", "a trade-locked receiver gets no gifts")
         set_player(db, B, notrade=0)
+        note = "g" * 500
+        r = await a.call(("gir", "po"), "kr", names["bob"], 10, note, op())
+        check(r[0] == "gir" and db.q("SELECT body FROM mail WHERE account_id = $1 AND subject = 'KR Gift' ORDER BY id DESC LIMIT 1", B)[0][0] == note,
+              "a 500-character gift note is kept (deob-10.0.7.js:111703)")
+        r = await a.call(("gir", "po"), "kr", names["bob"], 10, "h" * 600, op())
+        check(r[0] == "gir" and db.q("SELECT body FROM mail WHERE account_id = $1 AND subject = 'KR Gift' ORDER BY id DESC LIMIT 1", B)[0][0] == "h" * 500,
+              "a gift note past 500 characters is cut there")
 
         # ---- market
         give(db, C, 4, 3)    # Moon Dragon, legendary
@@ -562,6 +569,16 @@ async def scenario(url, db):
         offer = next((o for o in page[3][0] if o["trid"] == trid), None)
         check(offer and offer["sksell"] == "2," and offer["skbuy"] == "4," and offer["krsell"] == 300 and offer["dte"] > 0,
               "trades tab row: %r" % offer)
+        give(db, A, 1, 1)
+        note = "m" * 500
+        r = await a.call(("trR", "po"), "ctr", C, [{"i": 1, "c": 1}], [], note, op())
+        check(r[0] == "trR" and db.q("SELECT message FROM trades WHERE id = $1", r[1]["trid"])[0][0] == note,
+              "a 500-character offer message is kept (deob-10.0.7.js:111332)")
+        await a.call(("trR", "po"), "trC", r[1]["trid"], op())
+        r = await a.call(("trR", "po"), "ctr", C, [{"i": 1, "c": 1}], [], "n" * 600, op())
+        check(r[0] == "trR" and db.q("SELECT message FROM trades WHERE id = $1", r[1]["trid"])[0][0] == "n" * 500,
+              "an offer message past 500 characters is cut there")
+        await a.call(("trR", "po"), "trC", r[1]["trid"], op())
         # the same item cannot go in a second offer or listing
         r = await a.call(("trR", "po"), "ctr", C, [{"i": 2, "c": 2}], [], "", op())
         check(po_text(r) == "Item not owned", "escrowed item cannot be offered twice: %r" % (r,))
