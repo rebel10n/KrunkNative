@@ -507,9 +507,16 @@ static void comment_done(SocialSession *s, kn_db_result *res, void *extra) {
 
 static void social_comment(SocialSession *s, const GapiReq *r, int64_t id) {
     if (!need_login(s, r)) return;
-    const char *text = kn_json_str(r->body, "text", "");
-    while (*text == ' ' || *text == '\n' || *text == '\t') text++;
-    if (!*text) {
+    /* the reply box (deob-10.0.7.js:107297, maxlength 500): trim, then at most 500 characters */
+    const char *raw = kn_json_str(r->body, "text", "");
+    while (*raw && isspace((unsigned char) *raw)) raw++;
+    size_t n = strlen(raw);
+    while (n && isspace((unsigned char) raw[n - 1])) n--;
+    char text[2048];
+    if (n >= sizeof text) n = sizeof text - 1;
+    memcpy(text, raw, n);
+    text[n] = 0;
+    if (!text[0]) {
         gapi_error(s, r->rid, 400, "SOCIAL_COMMENT_TEXT_REQUIRED", "Comment text required");
         return;
     }
@@ -518,8 +525,9 @@ static void social_comment(SocialSession *s, const GapiReq *r, int64_t id) {
         return;
     }
     char body[2048], me[24], pid[24];
-    const int max = g_acct.comment_max_len > 0 && g_acct.comment_max_len < 2000 ? g_acct.comment_max_len : 500;
-    /* the cap counts UTF-16 units, as the reply box's maxlength 500 does (deob-10.0.3.js:120813), not bytes */
+    int max = g_acct.comment_max_len > 0 && g_acct.comment_max_len < 2000 ? g_acct.comment_max_len : 500;
+    if (max > 500) max = 500;
+    /* the cap counts UTF-16 units, as the reply box's maxlength does, not bytes */
     const size_t len = brain_utf16_prefix(text, (size_t) max);
     snprintf(body, sizeof body, "%.*s", (int) len, text);
     social_query(s,

@@ -377,6 +377,16 @@ async def scenario(names):
     st, r = await A.gapi("GET", "/social/post/%d" % pid)
     check(st == 200 and r["data"]["post"]["vot"] == 1 and r["data"]["post"]["cnt"] == 1 and r["data"]["post"]["dlk"] == 0
           and r["data"]["comments"][0]["txt"] == "nice" and r["data"]["comments"][0]["pln"] == bn, "post detail: 1 like, B's comment")
+    st, r = await B.gapi("POST", "/social/post/%d/comment" % pid, {"text": "   "})
+    check(st == 400 and r["error"]["code"] == "SOCIAL_COMMENT_TEXT_REQUIRED", "a blank comment is refused (deob-10.0.7.js:107297)")
+    st, r = await B.gapi("POST", "/social/post/%d/comment" % pid, {"text": "  also this  "})
+    check(st == 200, "a padded comment is accepted")
+    st, r = await B.gapi("POST", "/social/post/%d/comment" % pid, {"text": "c" * 600})
+    check(st == 200, "a long comment is accepted")
+    st, got = await A.gapi("GET", "/social/post/%d" % pid)
+    notes = [c["txt"] for c in (got.get("data") or {}).get("comments") or []]
+    check(st == 200 and notes == ["nice", "also this", "c" * 500],
+          "a comment is trimmed and stops at 500 characters (deob-10.0.7.js:107297, maxlength 500): %s" % [len(x) for x in notes])
     st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "   "})
     check(st == 400 and r["error"]["code"] == "SOCIAL_POST_TEXT_REQUIRED", "a blank post is refused (deob-10.0.7.js:141204)")
     st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "  padded post  "})

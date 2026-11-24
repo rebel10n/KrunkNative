@@ -104,15 +104,25 @@ void sh_comment(SocialSession *s, const cJSON *f) {
         social_send_n(s, "psr", 3, cJSON_CreateNull(), cJSON_CreateString("Login required."), cJSON_CreateNumber(2));
         return;
     }
-    const char *txt = kn_json_str(fa(f, 2), "txt", NULL);
-    if (!txt || !*txt) {
+    /* the reply box (deob-10.0.7.js:107297): trim, then the maxlength of 500 */
+    const char *raw = kn_json_str(fa(f, 2), "txt", NULL);
+    while (raw && *raw && isspace((unsigned char) *raw)) raw++;
+    size_t n = raw ? strlen(raw) : 0;
+    while (n && isspace((unsigned char) raw[n - 1])) n--;
+    char trimmed[2048];
+    if (n >= sizeof trimmed) n = sizeof trimmed - 1;
+    if (raw && n) memcpy(trimmed, raw, n);
+    trimmed[n] = 0;
+    if (!trimmed[0]) {
         social_send_n(s, "psr", 3, cJSON_CreateNull(), cJSON_CreateString("Empty comment."), cJSON_CreateNumber(2));
         return;
     }
     char text[2048], me[24], pid[24];
-    /* the cap counts UTF-16 units (v10.0.3's reply box maxlength 500, deob-10.0.3.js:120813), never a cut code point */
-    const size_t cut = brain_utf16_prefix(txt, (size_t) (g_acct.comment_max_len > 0 && g_acct.comment_max_len < 2000 ? g_acct.comment_max_len : 500));
-    snprintf(text, sizeof text, "%.*s", (int) cut, txt);
+    int max = g_acct.comment_max_len > 0 && g_acct.comment_max_len < 2000 ? g_acct.comment_max_len : 500;
+    if (max > 500) max = 500;
+    /* the cap counts UTF-16 units, as the reply box's maxlength does, never a cut code point */
+    const size_t cut = brain_utf16_prefix(trimmed, (size_t) max);
+    snprintf(text, sizeof text, "%.*s", (int) cut, trimmed);
     social_query(s,
                  SQL(.any = "INSERT INTO feed_comments (post_id, author_id, body) SELECT id, $1, $3 FROM feed_posts "
                             "WHERE id = $2 AND deleted_at IS NULL"),
