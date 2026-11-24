@@ -1705,6 +1705,11 @@ else ()
             add_test(NAME copy_pick_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/copy_pick_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(copy_pick_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # shadow_casters_e2e: shadowsDynamic's player casters, with highResShad the full models' arms and guns
+            # (deob-10.0.7.js:206820, :174143, :207421), never our first-person viewmodel (client/tests/shadow_casters_e2e.py)
+            add_test(NAME shadow_casters_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/shadow_casters_e2e.py
+                     ${CMAKE_BINARY_DIR} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set_tests_properties(shadow_casters_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;e2e")
             # market_copies_e2e: v10.0.7's item copies in the Market & Trading popup (name tag, wear and serial on the
             # cards and listing rows, the copy overlay, the Mints / Wear tabs) in the rendered document (client/tests/market_copies_e2e.py)
             add_test(NAME market_copies_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/market_copies_e2e.py

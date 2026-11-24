@@ -29,6 +29,7 @@
 #include <class_camera.h> // class_camera_player_third_person: a full (third-person) model
 #include <player_class_model.h> // player_class_model_replaces_body
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -473,11 +474,37 @@ static void shadow_color_cube_casters(const ColorCube *cube) {
 // :174143 the weapon loadMesh's `shadows: highResShad`, castShadow = shadows :207421). The melee, the sight, the flap and
 // the charm load without `shadows` and do not cast. The first-person viewmodel is on layer 1 (:174260-174262), which the
 // sun's shadow camera does not see (it takes the camera's layer 0 mask, :69767-69768): its arms and weapon never cast.
-static void shadow_arms_casters(const Player *player, const PlayerMesh *pm) {
+// The last frame's player casters, per player (shadow_player_casters_describe, input_script's `shadows` probe): the
+// meshes shadow_draw_caster draws (visible, with geometry), split into the default body, the arms and the guns.
+#define SHADOW_PROBE_PLAYERS 64
+typedef struct {
+    int uid, body, arms, guns;
+} ShadowPlayerProbe;
+static ShadowPlayerProbe g_probe[SHADOW_PROBE_PLAYERS];
+static int g_probe_count;
+
+static int shadow_drawable_since(const size_t from) {
+    int n = 0;
+    for (size_t i = from; i < g_dynamic_count; i++) n += g_dynamic_casters[i]->visible && g_dynamic_casters[i]->geometry;
+    return n;
+}
+
+void shadow_player_casters_describe(char *out, const size_t size) {
+    if (!out || !size) return;
+    size_t o = 0;
+    out[0] = 0;
+    for (int i = 0; i < g_probe_count && o + 48 < size; i++) {
+        const ShadowPlayerProbe *p = &g_probe[i];
+        o += (size_t) snprintf(out + o, size - o, " %d:body=%d,arms=%d,guns=%d", p->uid, p->body, p->arms, p->guns);
+    }
+}
+
+static void shadow_arms_casters(const Player *player, const PlayerMesh *pm, ShadowPlayerProbe *probe) {
     if (!pm->arms || !player->loadout || !player->game) return;
     for (int slot = 0; slot < (int) player->loadout_size; slot++) {
         const PlayerArms *arms = pm->arms[slot];
         if (!arms) continue;
+        const size_t arms_from = g_dynamic_count;
         for (int side = 0; side < 2; side++) {
             const PlayerArmMesh *arm = side ? arms->left : arms->right;
             if (!arm) continue;
@@ -485,29 +512,36 @@ static void shadow_arms_casters(const Player *player, const PlayerMesh *pm) {
             if (arm->joint) shadow_dynamic_caster(arm->joint);
             shadow_color_cube_casters(arm->lower);
         }
+        if (probe) probe->arms += shadow_drawable_since(arms_from);
         const Weapon *weapon = player_slot_weapon(player, slot);
         if (!weapon || weapon->melee || !weapon->src) continue; // `weapon.src`: the gun's loadMesh (:174118)
         Mesh *guns[2] = {arms->weapon_right, arms->weapon_left};
+        const size_t guns_from = g_dynamic_count;
         for (int j = 0; j < 2; j++) {
             // a hasAnim skin's GLTF carrier (an empty mesh) and KrunkNative's procedural hose stay out
             if (guns[j] && guns[j] != arms->hose && !arms->weapon_models[j]) shadow_dynamic_caster(guns[j]);
         }
+        if (probe) probe->guns += shadow_drawable_since(guns_from);
     }
 }
 
 void shadow_player_casters(const Client *client) {
     const ClientRenderSettings *settings = client_render_settings();
+    g_probe_count = 0;
     if (!shadow.enabled || !settings->dynamic_shadows || !settings->shadows || !client) return;
     for (size_t i = 0; i < client->game.player_count; i++) {
         const Player *player = client->game.players[i];
         const PlayerMesh *pm = player && player->active ? player->mesh : NULL;
         if (!pm) continue;
+        ShadowPlayerProbe *probe = g_probe_count < SHADOW_PROBE_PLAYERS ? &g_probe[g_probe_count++] : NULL;
+        if (probe) *probe = (ShadowPlayerProbe) {player->uid, 0, 0, 0};
         // a class model or a Prop Hunt prop stands in for the body, arms and weapons: those stay out of the scene
         // (scene_add_player_mesh), so they do not cast either
         if ((pm->class_model && player_class_model_replaces_body(pm->class_model)) || pm->prop) continue;
         // generateMeshes' full model (deob-10.0.7.js:173703): another player, or ours in a third-person camera
         const int full_model = !pm->render_you || pm->kn_third_person || class_camera_player_third_person(player);
-        if (settings->high_res_shadows && full_model) shadow_arms_casters(player, pm);
+        if (settings->high_res_shadows && full_model) shadow_arms_casters(player, pm, probe);
+        const size_t body_from = g_dynamic_count;
         shadow_color_cube_casters(pm->head);
         shadow_color_cube_casters(pm->body);
         for (int k = 0; k < 2; k++) {
@@ -518,6 +552,7 @@ void shadow_player_casters(const Client *client) {
             shadow_dynamic_caster(leg->joint);
             shadow_color_cube_casters(leg->lower);
         }
+        if (probe) probe->body = shadow_drawable_since(body_from);
     }
 }
 

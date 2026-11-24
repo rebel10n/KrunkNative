@@ -28,6 +28,9 @@ void shadow_dynamic_caster(Mesh *mesh);
 // shadowsDynamic: every active player's head, body and leg meshes as this frame's casters (no-op when off); with
 // highResShad also the arms and gun meshes of a full (third-person) model
 void shadow_player_casters(const Client *client);
+// input_script's `shadows` probe: the last shadow_player_casters' drawable casters of each active player,
+// " <uid>:body=N,arms=N,guns=N" (empty when shadowsDynamic is off or the map has no sun shadow)
+void shadow_player_casters_describe(char *out, size_t size);
 // Renders the shadow map if it is out of date (every frame with shadowsDynamic). Restores framebuffer, viewport,
 // program, VAO, cull/depth/blend state.
 void shadow_update(void);

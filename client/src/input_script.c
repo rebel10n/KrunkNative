@@ -134,6 +134,9 @@
 //                                "[input_script] poses t=100 fps=1 world=3 0*:has=0x20 hold=0.000 l=x,y,z r=x,y,z
 //                                merged=x,y,z ..." (fps / world: attachTo objects the viewmodel / world pass draws;
 //                                l / r: the held slot's arm pivots' rotations; player_pose_render.c)
+//   100 shadows @label           log the last frame's shadowsDynamic player casters: "[input_script] shadows t=100 @label
+//                                5:body=12,arms=8,guns=1 ..." (drawable meshes: the default body, the arms, the guns;
+//                                shadow.c, client/tests/shadow_casters_e2e.py)
 //   100 players                  log every player of the session: "[input_script] players t=100 n=2 5:Name@x,y,z
 //                                9:Guest@x,y,z*" (* us, - inactive)
 //   100 models @label            log every player's model (v10.0.3 class models, player_class_model.h): "[input_script]
@@ -260,6 +263,7 @@
 #include <gamepad.h>      // `gpad`
 #include <entities.h>       // `script`: entities / runtime blocks
 #include <player_pose_render.h> // `poses`: the player poses on the models
+#include <shadow.h>       // `shadows`: the players' shadow casters
 #include <ks_client.h>         // `poses`: the attached script objects per pass
 #include <ui_mobile.h>  // `touch`: the phone touch controls
 #include <ai.h>           // `world`: the AI list
@@ -1063,6 +1067,11 @@ static void script_run(Client *client, const ScriptEvent *e) {
         int fps = 0, world = 0;
         ks_scene_attached_layers(&fps, &world);
         fprintf(stderr, "[input_script] poses t=%.0f fps=%d world=%d%s\n", g_script.time, fps, world, line);
+    } else if (!strcmp(e->cmd, "shadows")) {
+        // shadows @label: each active player's casters in the last shadowsDynamic map (shadow_player_casters_describe)
+        char line[4096];
+        shadow_player_casters_describe(line, sizeof(line));
+        fprintf(stderr, "[input_script] shadows t=%.0f %s me=%d%s\n", g_script.time, e->arg, client->me ? client->me->uid : -1, line);
     } else if (!strcmp(e->cmd, "models")) {
         // models @label: each player's model, "uid:body=..,mdl=..,asset=..,clip=.." (player_class_model_describe)
         char line[4096];
