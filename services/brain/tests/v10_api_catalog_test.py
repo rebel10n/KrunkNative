@@ -509,6 +509,11 @@ def section_maps(c):
     kept = sql("SELECT min(version), max(version), count(*) FROM map_versions WHERE map_id = ?", (map1,))
     check("[93] the newest 20 versions are kept (7..26 after 20 more writes): %r" % (kept,), kept == [(7, 26, 20)])
     http(p, "POST", "/maps/%d/leaderboard" % map1, {"type": 1, "custom_type": "", "order": 0}, token=tok_a)
+    st, body = http(p, "POST", "/maps/%d/leaderboard" % map1, {"type": 0, "custom_type": "Hello World!xyz", "order": 1}, token=tok_a)
+    check("[96] a custom type is trimmed to [A-Za-z0-9_] and 10 characters (deob-10.0.7.js:107493)",
+          st == 200 and dig(body, "data", "custom_type") == "HelloWorld" and dig(body, "data", "leaderboard_type") == "HelloWorld"
+          and (lb_object(map1) or {}).get("ldc") == "HelloWorld",
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
     # rows 97-98: the map's key/value data per player (ks_storage; consumer v10.js 106987 reads data, mk, kv)
     sql("INSERT INTO ks_storage (account_id, map_id, skey, svalue, scope) VALUES (?, ?, 'coins', '5', 0)", (b, map1))

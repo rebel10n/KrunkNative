@@ -280,6 +280,9 @@ async def scenario(port):
     lb_row = [x for x in get(base, "/api/search?type=map&val=" + urllib.parse.quote(lb_name.lower()) + "&source=community")["data"]
               if x.get("map_name") == lb_name]
     check(lb_row and lb_row[0].get("map_updatecounter") == 2, "the update republishes the map (updatecounter 2)")
+    r = await alice_sock.call("upMp", "ulb", lb_id, 0, "Hello World!xyz", 0)
+    check(r == ["upMp", "Leaderboard Updated!"] and leaderboards(lb_id)[0].get("ldc") == "HelloWorld",
+          "ulb keeps [A-Za-z0-9_] and 10 characters (deob-10.0.7.js:107493): %r" % leaderboards(lb_id))
     r = await alice_sock.call("upMp", "ulb", lb_id, 0, "", 0)
     check(r == ["upMp", "Leaderboard Updated!"], "ulb back to Score / ASC: %r" % (r,))
     lbs = leaderboards(lb_id)

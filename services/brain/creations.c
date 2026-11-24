@@ -883,8 +883,20 @@ void sh_update_map_lb(SocialSession *s, const cJSON *f) {
     }
     u->type = fa_int(f, 2, 0);
     u->order = fa_int(f, 4, 0);
-    const char *cust = fa_str(f, 3);
-    snprintf(u->cust, sizeof u->cust, "%s", cust ? cust : "");
+    /* the game's Funds tab sends trim + [A-Za-z0-9_] + 10 characters (deob-10.0.7.js:107493) */
+    {
+        const char *in = fa_str(f, 3);
+        size_t n = 0, i, len;
+        if (!in) in = "";
+        while (*in && isspace((unsigned char) *in)) in++;
+        len = strlen(in);
+        while (len && isspace((unsigned char) in[len - 1])) len--;
+        for (i = 0; i < len && n + 1 < sizeof u->cust && n < 10; i++) {
+            const unsigned char c = (unsigned char) in[i];
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') u->cust[n++] = (char) c;
+        }
+        u->cust[n] = 0;
+    }
     acct_itoa(u->map_id, fa_int(f, 1, 0));
     char me[24];
     social_query(s,

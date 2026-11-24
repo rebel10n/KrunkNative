@@ -44,6 +44,7 @@
  */
 #include "v10_catalog.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -442,6 +443,21 @@ static void lb_set_number(cJSON *o, const char *key, int64_t v) {
     if (v) cJSON_AddNumberToObject(o, key, (double) v);
 }
 
+/* deob-10.0.7.js:107493: trim, drop anything but [A-Za-z0-9_], then 10 characters */
+static void lb_custom_key(char *out, size_t cap, const char *in) {
+    size_t n = 0, i, len;
+    if (!out || !cap) return;
+    if (!in) { out[0] = 0; return; }
+    while (*in && isspace((unsigned char) *in)) in++;
+    len = strlen(in);
+    while (len && isspace((unsigned char) in[len - 1])) len--;
+    for (i = 0; i < len && n + 1 < cap && n < 10; i++) {
+        const unsigned char c = (unsigned char) in[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') out[n++] = (char) c;
+    }
+    out[n] = 0;
+}
+
 /* (me, map, type 0|1, order 0|1, custom) -> {leaderboard_type, order, custom_type}: the LEADERBOARD
  * objects of the map's data get ldt / ldc / ldo as creations.c's ulb writes them; the map republishes */
 static kn_db_result *run_map_lb(kn_dbconn *c, int n, const char *const *p) {
@@ -455,7 +471,8 @@ static kn_db_result *run_map_lb(kn_dbconn *c, int n, const char *const *p) {
     cJSON *map = cJSON_Parse(text);
     free(text);
     const int64_t type = PI(2), order = PI(3);
-    const char *custom = P(4) ? P(4) : "";
+    char custom[16];
+    lb_custom_key(custom, sizeof custom, P(4));
     int found = 0;
     cJSON *objs = map ? cJSON_GetObjectItemCaseSensitive(map, "objects") : NULL;
     cJSON *o;
