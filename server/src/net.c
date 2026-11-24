@@ -1527,6 +1527,19 @@ void net_kick_client(const int id, const char *message, const char *code) {
     net_chat_disconnect(NULL, id, message, code);
 }
 
+// Kick Spec (v10 ADMIN_ACTIONS 2, a null id): every spectator connection, not the sender and not the
+// hidden demo recorder. The close is deferred, so the spectator list stays put for this pass.
+void net_kick_spectators(const int except_id, const char *message, const char *code) {
+    int ids[NET_MAX_SPECTATORS];
+    int n = 0;
+    for (int i = 0; i < g_spectator_count && n < NET_MAX_SPECTATORS; i++) {
+        ClientConnection *c = net_client_by_id(g_spectators[i].id);
+        if (!c || c->recorder || c->id == except_id) continue;
+        ids[n++] = c->id;
+    }
+    for (int i = 0; i < n; i++) net_kick_client(ids[i], message, code);
+}
+
 // A live sign-out / account switch (accounts.c) took rights away (lost: 1 when DEV or the host went):
 // the cheats they allowed go too, and a third-person camera they granted (silent when off)
 unsigned int net_revoke_lost_cheats(ClientConnection *client, const int lost) {

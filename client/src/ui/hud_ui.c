@@ -839,7 +839,8 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
 // punish popup) for DEV / the host, which run the server's own chat commands (/kill, /tp, /bring,
 // /kick, /ban). A K.P.D officer's case (hud_votekick.c kpdData) puts the suspect first in a red
 // row. In a canTrade mode (Trade) every row starts with Trade Player (requestTrade -> "strd", the live
-// trade: trade_ui.c). Not ported: FREEZE, Kick Spec and the bots popup (no server action behind them yet).
+// trade: trade_ui.c). Kick Spec (the local row, host or canGlobalKick) is punishPlayer(null, 2).
+// Not ported: FREEZE and the bots popup (no server action behind them yet).
 static char g_plist_search[64]; // windows[22].playerSearch
 
 typedef struct {
@@ -1078,6 +1079,8 @@ static char *hud_plist_rows(void) {
         hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
         sb_append(&sb, "</td><td class='pListActions'>");
         if (spectate_active()) sb_append(&sb, "<span onmouseenter='playTick()' title='Clear Focus' class='punishButton kick' onclick='clearFocus()'>Clear Focus</span>");
+        if (kick || is_host) // Fd || canGlobalKick: punishPlayer(null, 2) (deob-10.0.7.js:264659)
+            sb_append(&sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPlayer(null, 2)'>Kick Spec</span>");
         if (dev && me) sb_appendf(&sb, "<span onmouseenter='playTick()' class='punishButton kill' onclick='punishPlayer(\"%d\", 3)'>Kill</span>", me->uid);
         if (dev) sb_append(&sb, "<span onmouseenter='playTick()' class='punishButton tpall' onclick='punishPlayer(null, 9)'>TPAll</span>");
         sb_append(&sb, "</td></tr>");
@@ -5462,6 +5465,10 @@ void client_hud_html_tick(Client *client, const float now_f) {
 // punishPlayer(id, action) as the list sends it: the server's chat command for the action (kick
 // "/kick", ban "/ban", kill, tp2 / tpme / bring, "/bring all" for 9); the server checks the rights
 static void plist_punish_send(const int uid, const int action) {
+    if (action == 2) { // Kick Spec: ADMIN_ACTIONS 2 with a null id (the host or canGlobalKick, deob-10.0.7.js:268431)
+        if (menu_ui()->client) hud_votekick_admin_action(menu_ui()->client, 0, 2);
+        return;
+    }
     if (action == 0 || action == 1 || action == 7 || action == 8) { // Kick / Ban / Disconnect / Transfer Host: v10 ADMIN_ACTIONS (the server checks the right)
         if (menu_ui()->client) hud_votekick_admin_action(menu_ui()->client, uid, action);
         return;

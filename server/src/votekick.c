@@ -515,7 +515,17 @@ void votekick_handle_admin(ClientConnection *client, const uint8_t *body, const 
     if (!client || length < sizeof(NetAdminActionPacket)) return;
     NetAdminActionPacket req;
     memcpy(&req, body, sizeof(req));
-    if (req.action != 0 && req.action != 1 && req.action != 7 && req.action != 8) return; // kill / tp / bring stay chat commands
+    if (req.action != 0 && req.action != 1 && req.action != 2 && req.action != 7 && req.action != 8) return; // kill / tp / bring stay chat commands
+    if (req.action == 2) { // Kick Spec: punishPlayer(null, 2), host or canGlobalKick (deob-10.0.7.js:264659, :268431)
+        const int host = accounts_is_custom_host(client);
+        const int mod = vk_is_account(client) && (client->acct.flags & NET_PLAYER_INFO_MOD);
+        if (!host && !mod && !net_client_is_dev(client)) {
+            vk_chat_to(client, "Only the host can kick spectators");
+            return;
+        }
+        net_kick_spectators(client->id, "Kicked by host", "004002");
+        return;
+    }
     if (req.action == 7) {
         ClientConnection *target = vk_by_id((int) req.uid);
         if (!net_client_is_dev(client)) vk_chat_to(client, "Only DEV accounts can disconnect from the player list");

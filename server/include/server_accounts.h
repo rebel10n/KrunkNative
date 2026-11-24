@@ -145,6 +145,7 @@ void accounts_refresh_skin_styles(const ClientConnection *client);
 
 // net.c exports used here
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)
+void net_kick_spectators(int except_id, const char *message, const char *code); // Kick Spec: every spectator but except_id and the demo recorder
 // The player list's K.P.D call (server_votekick.h): records it in kn_brain (op kpd_call) and answers
 // the caller; tab 1..3 asks for an officer's list (kpd_calls / kpd_log). target NULL for the lists.
 // The K.P.D call type of a call from `client` in this lobby (v10 typ: 0 public, 1 ranked, 2 comp, 3 custom)

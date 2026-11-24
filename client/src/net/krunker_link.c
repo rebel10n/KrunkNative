@@ -3780,6 +3780,10 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
                 // The server checks the sender's right.
                 NetAdminActionPacket a;
                 memcpy(&a, body, sizeof(a));
+                if (a.action == 2) { // Kick Spec: ADMIN_ACTIONS [2, null, extraBan] (deob-10.0.7.js:268431)
+                    const KrunkerValue spec[] = {KRUNKER_V_NUM(2), KRUNKER_V_NIL, KRUNKER_V_BOOL(0)};
+                    return send_c2s(l, KRUNKER_C2S_ADMIN_ACTIONS, spec, 3);
+                }
                 const KrunkerLinkPlayer *p = a.action <= 1 || a.action == 8 ? player(l, a.uid, 0) : NULL;
                 if (!p || !p->id[0]) return 0;
                 const KrunkerValue args[] = {KRUNKER_V_NUM(a.action), KRUNKER_V_STR(p->id), KRUNKER_V_BOOL(0)};
