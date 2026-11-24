@@ -375,6 +375,12 @@ async def scenario(url, db):
         r = await a.call(("gir", "po"), "kr", names["bob"], 10, "h" * 600, op())
         check(r[0] == "gir" and db.q("SELECT body FROM mail WHERE account_id = $1 AND subject = 'KR Gift' ORDER BY id DESC LIMIT 1", B)[0][0] == "h" * 500,
               "a gift note past 500 characters is cut there")
+        r = await a.call(("gir", "po"), "kr", names["bob"], 10, "  padded note  ", op())
+        check(r[0] == "gir" and db.q("SELECT body FROM mail WHERE account_id = $1 AND subject = 'KR Gift' ORDER BY id DESC LIMIT 1", B)[0][0] == "padded note",
+              "a gift note is trimmed (deob-10.0.7.js:111688)")
+        r = await a.call(("gir", "po"), "kr", names["bob"], 10, "   ", op())
+        blank = db.q("SELECT body FROM mail WHERE account_id = $1 AND subject = 'KR Gift' ORDER BY id DESC LIMIT 1", B)[0][0]
+        check(r[0] == "gir" and not blank, "a blank gift note is stored empty (%r)" % (blank,))
 
         # ---- market
         give(db, C, 4, 3)    # Moon Dragon, legendary

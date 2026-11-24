@@ -31,6 +31,7 @@
  */
 #include "db_procs.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -253,7 +254,18 @@ static kn_db_result *run_gift(kn_dbconn *c, int n, const char *const *p) {
     int64_t funds = 0;
     db_add_funds_ex(&x, sender, -(amount + fee), "gift-out", I64S(to), to, fee, &funds);
     db_add_funds_ex(&x, to, amount, "gift-in", P(0), sender, 0, NULL);
-    char *msg = utf8_left(P(8), 500); /* the gift note's textarea (deob-10.0.7.js:111703) */
+    /* the gift window trims, then the textarea stops at 500 (deob-10.0.7.js:111688, :111703) */
+    const char *raw = nz(P(8));
+    while (*raw && isspace((unsigned char) *raw)) raw++;
+    size_t nlen = strlen(raw);
+    while (nlen && isspace((unsigned char) raw[nlen - 1])) nlen--;
+    char *slice = NULL;
+    if (nlen && (slice = malloc(nlen + 1))) {
+        memcpy(slice, raw, nlen);
+        slice[nlen] = 0;
+    }
+    char *msg = utf8_left(slice ? slice : "", 500);
+    free(slice);
     dbx_exec(&x, SQL(.any = "INSERT INTO mail (account_id, sender, subject, body, kr)"
                             " SELECT $1, a.username, 'KR Gift', $3, 0 FROM accounts a WHERE a.id = $2"),
              KN_DB_ARGS(I64S(to), P(0), msg ? msg : ""));
