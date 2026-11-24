@@ -102,10 +102,9 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
   assert.strictEqual(T.encodeChat("   "), null);
 }
 
-// ---- loadout slots in the ENTER_GAME array (v10.0.3 selectSkin / getMyLoadout): an owned copy is the
-// string "<copyId>#<skinIndex>" (the copy's paint lives on that copy), and a metadata slot is {i, m}
-// (m.paint is the copy's paint). Both keep their store index in the ENT (the native ENT has no paint field);
-// a {i, m} slot's paint is carried to our own spawn's add record instead (the check after the SPAWN tests).
+// ---- loadout slots in the ENTER_GAME array (deob-10.0.7.js:215052, :24362-24383): an owned copy is the
+// string "<copyId>#<skinIndex>". Both sides of the '#' use parseInt; the ENT keeps the store index and
+// NET_EXT_KN_SKIN_COPY_IDS carries the copy. A metadata slot {i, m} keeps its index and its m.paint for our spawn.
 {
   const en: unknown[] = new Array(T.EN_LENGTH).fill(0);
   en[T.EN.CLASS] = 2;
@@ -114,6 +113,12 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
   en[T.EN.SKINS] = ["812#4211", { i: 12, m: { paint: "#dc3c3c" } }];
   en[T.EN.MELEE] = "813#7446";
   en[T.EN.HAT] = "814#3";
+  en[T.EN.WAIST] = "0#8";
+  en[T.EN.FACE] = "abc#xyz";
+  en[T.EN.DYE] = "#6";
+  en[T.EN.HEAD] = " 4012#34x";
+  en[T.EN.CHARMS] = ["9#30", "10#30"];
+  en[T.EN.PLAYER_CARD] = "77#35";
   en[T.EN.LAG_COMP] = 0.5;
   en[T.EN.ATTACH] = -1;
   const ent = T.encodeEnter(en)!;
@@ -121,7 +126,34 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
   assert.strictEqual(ent.readInt32LE(EV.ENT_SPRAY_SIZE + 4), 12, "secondary: a {i, m} slot keeps its store index");
   assert.strictEqual(ent.readInt32LE(EV.ENT_SPRAY_SIZE + 8), 7446, "melee: an owned copy keeps its store index");
   assert.strictEqual(ent.readInt32LE(16), 3, "hat: an owned copy keeps its store index");
-  // a plain index and -1 (none) are unchanged
+  assert.strictEqual(ent.readInt32LE(24), 8, "waist: copy id 0 still keeps its index");
+  assert.strictEqual(ent.readInt32LE(28), -1, "face: an invalid parseInt index is no item");
+  assert.strictEqual(ent.readInt32LE(32), 6, "dye: an empty copy id still keeps its index");
+  const v7 = EV.ENT_LAG_COMP_SIZE + 6;
+  assert.strictEqual(ent.readInt32LE(v7), 34, "head: parseInt permits leading whitespace and trailing junk");
+  assert.strictEqual(ent.readInt32LE(v7 + 20), 30);
+  assert.strictEqual(ent.readInt32LE(v7 + 24), 30, "two charm slots may hold different copies of one item");
+  assert.strictEqual(ent.readInt32LE(v7 + 28), 35);
+
+  const ids = T.encodeSkinCopyIds(en)!;
+  const skin = (slot: number) => ids.readInt32LE(2 + slot * 4);
+  const copy = (slot: number) => ids.readInt32LE(2 + (T.SKIN_COPY_SLOTS + slot) * 4);
+  assert.strictEqual(ids.length, T.SKIN_COPY_IDS_SIZE);
+  assert.strictEqual(ids.readUInt16LE(0), T.EXT_SKIN_COPY_IDS);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.PRIMARY), copy(T.SKIN_COPY_SLOT.PRIMARY)], [4211, 812]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.SECONDARY), copy(T.SKIN_COPY_SLOT.SECONDARY)], [12, 0]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.MELEE), copy(T.SKIN_COPY_SLOT.MELEE)], [7446, 813]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.HAT), copy(T.SKIN_COPY_SLOT.HAT)], [3, 814]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.WAIST), copy(T.SKIN_COPY_SLOT.WAIST)], [8, 0]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.FACE), copy(T.SKIN_COPY_SLOT.FACE)], [-1, 0]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.DYE), copy(T.SKIN_COPY_SLOT.DYE)], [6, 0]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.HEAD), copy(T.SKIN_COPY_SLOT.HEAD)], [34, 4012]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.CHARM1), copy(T.SKIN_COPY_SLOT.CHARM1)], [30, 9]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.CHARM2), copy(T.SKIN_COPY_SLOT.CHARM2)], [30, 10]);
+  assert.deepStrictEqual([skin(T.SKIN_COPY_SLOT.CARD), copy(T.SKIN_COPY_SLOT.CARD)], [35, 77]);
+  assert.strictEqual(T.encodeSkinCopyIds([1, 2]), null);
+
+  // a plain index and -1 (none) are unchanged, and a plain loadout still sends all-zero copy ids
   const plain: unknown[] = new Array(T.EN_LENGTH).fill(0);
   plain[T.EN.SKINS] = [11, -1];
   plain[T.EN.MELEE] = -1;
@@ -129,6 +161,9 @@ function nativeFrame(type: number, payload: Buffer): Buffer {
   assert.strictEqual(pe.readInt32LE(EV.ENT_SPRAY_SIZE), 11);
   assert.strictEqual(pe.readInt32LE(EV.ENT_SPRAY_SIZE + 4), -1);
   assert.strictEqual(pe.readInt32LE(EV.ENT_SPRAY_SIZE + 8), -1);
+  const plainIds = T.encodeSkinCopyIds(plain)!;
+  assert.strictEqual(plainIds.readInt32LE(2), 11);
+  assert.ok(Array.from({ length: T.SKIN_COPY_SLOTS }, (_, i) => plainIds.readInt32LE(2 + (T.SKIN_COPY_SLOTS + i) * 4)).every((id) => id === 0));
 }
 
 // ---- MODE_STATE (40): the joiner's mode snapshot, and OBJECT_STATE (100): the join's object list.
@@ -1162,12 +1197,12 @@ async function main(): Promise<void> {
   native.write(nativeFrame(60, Buffer.from([3, 1])));
   await waitFor(() => v10Proxy.untranslatedSeen.get("CHEAT"), "stop at CHEAT borders");
 
-  // 5. ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet
+  // 5. ENTER_GAME -> EXT 0x81C0 + ENT: an owned copy's slot keeps both its index and its copy id
   const en: unknown[] = new Array(T.EN_LENGTH).fill(-1);
   en[T.EN.CLASS] = 4;
   en[T.EN.SECONDARY] = -1;
   en[T.EN.SPRAY] = -1;
-  en[T.EN.SKINS] = [-1, -1];
+  en[T.EN.SKINS] = ["321#11", -1];
   en[T.EN.MELEE] = -1;
   en[T.EN.LAG_COMP] = 1;
   en[T.EN.ATTACH] = -1;
@@ -1179,6 +1214,14 @@ async function main(): Promise<void> {
   const ent = await waitFor(() => nativeFrames.find((f) => f.type === T.NATIVE.ENT), "ENT");
   assert.deepStrictEqual(ent.payload, T.encodeEnter(en));
   assert.strictEqual(ent.payload.readInt32LE(0), 4);
+  assert.strictEqual(ent.payload.readInt32LE(EV.ENT_SPRAY_SIZE), 11);
+  const entAt = nativeFrames.indexOf(ent);
+  const copyIds = nativeFrames[entAt - 1];
+  assert.strictEqual(copyIds.type, T.NATIVE_MORE.EXT, "the copy ids immediately precede ENT");
+  assert.deepStrictEqual(copyIds.payload, T.encodeSkinCopyIds(en));
+  assert.strictEqual(copyIds.payload.readUInt16LE(0), T.EXT_SKIN_COPY_IDS);
+  assert.strictEqual(copyIds.payload.readInt32LE(2 + T.SKIN_COPY_SLOT.PRIMARY * 4), 11);
+  assert.strictEqual(copyIds.payload.readInt32LE(2 + (T.SKIN_COPY_SLOTS + T.SKIN_COPY_SLOT.PRIMARY) * 4), 321);
 
   // 6. chat -> CHAT_SEND
   sendV10("ct", "hello there");
@@ -1208,7 +1251,7 @@ async function main(): Promise<void> {
   v10Proxy.closeAllSessions(true);
   bridge.close();
   nativeServer.close();
-  console.info("v10Proxy test: ok (connect, LOAD->HELLO, the chunked map INIT, gv, asnd/rsnd, s/sso, t, ENTER_GAME->ENT, chat, PING->PONG, then the stop)");
+  console.info("v10Proxy test: ok (connect, LOAD->HELLO, the chunked map INIT, gv, asnd/rsnd, s/sso, t, ENTER_GAME->EXT copy ids+ENT, chat, PING->PONG, then the stop)");
   process.exit(0);
 }
 

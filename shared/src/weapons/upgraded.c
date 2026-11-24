@@ -6,8 +6,8 @@
 // Each entry is its base weapon plus the gameplay fields below (checked against v10.0.3's table,
 // shared/tests/data/v10/upgradeWeapons.json, by weapons_v10_test). Upgrades drop minRec and
 // canUpgrade (and the Alien Blaster's noComp, the Grappler's customOnly). The cosmetic altSkin is client-side (its
-// remodel viewer_weapon_alt_skin, its video skin_video_alt_skin). Not ported: the muzID / charm changes, magReserve
-// (finiteAmmo modes), and the Cupids Blaster's funcOnHit.
+// remodel viewer_weapon_alt_skin, its video skin_video_alt_skin). Not ported: the muzID / charm changes and the Cupids
+// Blaster's funcOnHit.
 
 static Weapon g_upgraded[WEAPON_COUNT];
 static int g_upgraded_ready;
@@ -15,6 +15,13 @@ static int g_upgraded_ready;
 static const vec2 k_charge_rifle_spread[] = { // cSpread [[-0.27, 0.02, 0.03, -0.31, 0.3, -0.01], [-0.17, -0.22, -0.3, 0.31, 0.32, 0.28]]
     {-0.27f, 0.02f}, {0.03f, -0.31f}, {0.3f, -0.01f},
     {-0.17f, -0.22f}, {-0.3f, 0.31f}, {0.32f, 0.28f},
+};
+
+// magReserve of every upgrade (deob-10.0.7.js:177550-180402; -1: none, getReserveMags 1): a krumMachine upgrade's
+// reserve is the upgraded ammo x these mags (giveWeapon with upgraded, :175867-175882; updateLoadout takes
+// getWeapon's upgraded entry, :171822). Most upgrades carry more mags than their base (AWP Blaster 10, Sniper 5).
+static const signed char k_mag_reserve[WEAPON_COUNT] = {
+    10, 7, 7, 7, 5, 12, 4, 8, 8, 6, 7, 6, -1, 20, 5, 20, 6, -1, 5, -1, -1, 6, 20, -1, 12, 0, 0, 6, 30,
 };
 
 static void burst(Weapon *w, const unsigned int count, const float rate) {
@@ -44,6 +51,8 @@ static void build(void) {
         w->sound = "weapon_upgraded"; // every upgraded weapon shares one shot sound
         w->min_rec = 0;
         w->can_upgrade = 0;
+        w->mag_reserve = k_mag_reserve[i] > 0 ? k_mag_reserve[i] : 0;
+        w->no_mag_reserve = k_mag_reserve[i] == 0;
     }
     Weapon *w;
     g_upgraded[11].no_comp = 0;     // the Alien Blaster's noComp goes; the other noComp / customOnly stay

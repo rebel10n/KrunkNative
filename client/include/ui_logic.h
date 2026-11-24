@@ -836,6 +836,9 @@ cJSON *ui_loadout_copy_meta(int index, int copy_id, const char *key);
 double ui_loadout_copy_wear(int index, int copy_id);
 int ui_loadout_copy_seed(int index, int copy_id);
 int ui_loadout_copy_style(int index, int copy_id);
+// The copy's name tag (m.name, deob-10.0.7.js:176440): only the copy `copy_id` names (a slot's "<copyId>#<index>").
+// A plain index has no m on the slot, so none. 1 and the name in `out` when that copy has one, else 0 and out empty.
+int ui_loadout_copy_name(int index, int copy_id, char *out, size_t n);
 // The copy ids of the last look built for an ENT (ui_loadout_look(.., for_ent=1, ..)): the local player's model reads its
 // copies from it while in a game, as the server does (NET_EXT_KN_SKIN_COPY_IDS).
 const NetSkinCopyIdsPacket *ui_loadout_ent_copies(void);

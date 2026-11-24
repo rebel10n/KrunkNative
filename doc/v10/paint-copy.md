@@ -293,7 +293,10 @@ KrunkNative:
 The v10 bridge (`net-bridge/v10Translate.ts`, `v10Proxy.ts`) keeps the paint of our own loadout's `{i, m}` slots
 (`loadoutPaintOf`, `EV.loadoutPaint`) and puts it on our own spawn's add record (`buildPlayerAdd`, weapon slots [12] and
 [19]): `{i, m}` instead of the plain index. The native ENT carries only indices; the copies ride in
-`NET_EXT_KN_SKIN_COPY_IDS` (above), which the bridge does not read yet.
+`NET_EXT_KN_SKIN_COPY_IDS` (above). Both bridges (the C `server/bridge/v10_bridge.c` built by `make`, and the TypeScript
+`net-bridge/v10Proxy.ts`) read an official client's `"<copyId>#<index>"` slots as v10.0.7's server splits them
+(`iïiíiïí`, :24362-24380: `parseInt` of each side of the `#`): the ENT gets the index and
+`NET_EXT_KN_SKIN_COPY_IDS` goes right before every ENT with the copy each slot names, as a native client sends it.
 The native SKINS packet carries each worn skin's paint from patch 6 (below): the server fills it from the owner's painted
 copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a native client shows another player's paint.
 
@@ -317,8 +320,9 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   deob:150226), not in the Loadout chooser; the native button is on the chooser's card, where the owned badge is. A
   krunker.io account gets no button (nothing is sent to krunker.io for a paint, `v10_gapi` refuses writes there).
   The clan banner (`clan_ui.c`, `POST /clans/{id}/banner-color`) is a separate clan route.
-- A copy id in a loadout (`"<copyId>#<index>"`) keeps only the index in the bridge (`v10_translate.c` ignores
-  `NET_EXT_KN_SKIN_COPY_IDS`). A native client gets the copy each slot names from the server (Loadout copies, above); a
+- The official client does not get the copy a native player's slot names: the bridge's spawn records carry the indices
+  (`v10_translate.c` does not map the server's copies onto them). A native client gets the copy each slot names from the
+  server (Loadout copies, above); a
   plain index (or a gone copy) shows the owner's first painted copy of that store index, the plain-index rule
   (deob-10.0.3.js:252090-252095), and its first worn copy's wear. v10.0.7 gives a plain index no `m` at all
   (:217860-217950): KrunkNative keeps the plain-index rule for older saved slots and older clients.

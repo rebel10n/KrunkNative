@@ -4,8 +4,13 @@ page (ui/) against a real kn_brain and two brain-linked server_bin nodes.
 
   python3 -I server/tests/v10_menu_e2e.py BUILD_DIR      (run from the repository root)
 
-kn_brain on a scratch database (KN_TEST_DB_DRIVER, default sqlite: no server needed), two v10
-server_bin nodes (V10A, V10B: one public FFA lobby each), every port from kn_proto.free_ports().
+kn_brain on a scratch database (KN_TEST_DB_DRIVER, default sqlite: no server needed), two client v10
+server_bin nodes (V10A / V10B with this run's pid suffix: one public FFA lobby each) and, after those nodes
+are retired, two more (V10P / V10Q) for the direct brain probes, every port from kn_proto.free_ports().
+Nothing is shared with another test: the ports are taken just before the nodes bind them, node and
+brain ids carry this run's pid, and every process (brain, nodes, clients) has its own HOME and XDG config,
+state, data and cache dirs under this run's scratch dir (a saved session, settings or recent lobby
+of an earlier e2e is never read).
 Headless client_bin runs (one at a time, input scripts clicking the page by element id):
 
   1. a signed-in player (saved krunker_username / krunker_token): the header is v10's signed-in
@@ -28,7 +33,8 @@ Headless client_bin runs (one at a time, input scripts clicking the page by elem
      signed-in bar without a restart; Logout -> the guest bar again; the modal again -> "(use
      username instead)" -> Login with that account's username -> signed in again
      (signing in with the email: v10_email_login_e2e.py)
-  3. brain: /mm/seek-game?excludeGame= never returns the excluded lobby while another has room;
+  3. brain, on its own node pair so these probes' join-ticket reservations cannot fill the clients' lobbies:
+     /mm/seek-game?excludeGame= never returns the excluded lobby while another has room;
      excludeRecent covering the rest falls back to the recent lobby before excludeGame's
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Exit 77 when the database is unavailable.
@@ -52,7 +58,7 @@ ROOT = os.getcwd()
 DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "sqlite")
 NAME = "kn_test_v10menu_%d" % os.getpid()
 SECRET = "kn-v10menu-%d" % os.getpid()
-PORT_A, PORT_B = kn_proto.free_ports(2)
+RUN = os.getpid() % 100000  # node ids, account names: unique to this run
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-v10menu-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
 results = []
@@ -104,6 +110,18 @@ def lobbies(port):
     return sorted(g[0] for g in body.get("games", [])) if code == 200 else []
 
 
+def xdg_dirs(name):
+    """This process's own HOME and XDG config / state / data / cache dirs: nothing it reads or writes
+    (localStorage, KrunkScript storage, server_history, recent lobbies) outlives the run"""
+    home = os.path.join(WORK, name + "-home")
+    dirs = {"HOME": home, "XDG_CONFIG_HOME": os.path.join(WORK, name + "-cfg"),
+            "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "XDG_DATA_HOME": os.path.join(WORK, name + "-data"),
+            "XDG_CACHE_HOME": os.path.join(WORK, name + "-cache")}
+    for d in dirs.values():
+        os.makedirs(d, exist_ok=True)
+    return dirs
+
+
 def node(brain_port, node_id, game_port):
     log = os.path.join(WORK, node_id + ".log")
     gs = os.path.join(WORK, node_id + ".json")
@@ -115,7 +133,7 @@ def node(brain_port, node_id, game_port):
         json.dump({"gameserver": cfg}, f)
     p = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--config", gs, "--cfg", "none"], cwd=ROOT,
                          stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                         start_new_session=True)
+                         env=dict(os.environ, **xdg_dirs(node_id)), start_new_session=True)
     procs.append(p)
     return p, log
 
@@ -125,15 +143,16 @@ def client(name, brain_port, script, storage=None, secs=120):
     path = os.path.join(WORK, name + ".script")
     with open(path, "w") as f:
         f.write(script)
-    cfg = os.path.join(WORK, name + "-cfg")
+    dirs = xdg_dirs(name)
+    cfg = dirs["XDG_CONFIG_HOME"]
     os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
     for key, value in dict({"knRuleset": "v10"}, **(storage or {})).items():
         with open(os.path.join(cfg, "krunknative", key + ".json"), "w") as f:
             f.write(value)
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
-                "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
+    env.update(dirs)
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_NO_BROWSER": "1",
                 "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
                 "KRUNKNATIVE_NET_TRANSPORT": "tcp", "KRUNKNATIVE_DEBUG": "2",  # the [mm] join / seek lines (klog.h level 2)
                 # the server finder is this brain's (finder role): the nodes heartbeat to it
@@ -168,7 +187,9 @@ def nodes(text, label):
 
 # Find Game (the chooser, the Public list, its region) must never freeze the main thread: every
 # wall-clock frame from the click to the list's screenshot stays under this (`ft`, input_script.c).
-# A frozen frame also ran every later script step inside it, before the game list could arrive.
+# A stalled frame's delta fast-forwards the script clock, so a later step can run in the same
+# breath as the click that asked for it (the list, before /servers answers). `waitfor` stops
+# the clock until the rows exist. The ft window is wall-clock frame time, not that jump.
 FIND_GAME_MAX_FRAME_MS = 500
 
 SIGNED_IN_SCRIPT = """0 menu
@@ -201,6 +222,7 @@ SIGNED_IN_SCRIPT = """0 menu
 3500 nodes @chooser .serverHostOp
 3600 call openServerWindow 0
 5500 call setExpandedRegion 0
+5600 waitfor .settNameIn
 6500 nodes @servers .settNameIn
 6600 frames {shots}/servers 1
 6900 ft @find stop
@@ -240,6 +262,7 @@ GUEST_SCRIPT = """0 menu
 1650 type {user}@example.com
 1700 clickid knV10LoginSubmit
 1730 vis @logging knV10LoggingInBar signedOutHeaderBar signedInHeaderBar
+1740 waitfor [id=signedInHeaderBar]
 6000 vis @registered knV10Login signedInHeaderBar signedOutHeaderBar knV10Name spectButtonHolder chatUIHolder
 6000 attr @guidereg style [id=newUserGuide]
 6100 call logoutAcc
@@ -266,6 +289,7 @@ GUEST_SCRIPT = """0 menu
 GUEST_NAME_SCRIPT = """0 menu
 500 text @tag0 [id=menuClassNameTag]
 600 play
+700 spawn
 3000 down ESC
 3020 up ESC
 4000 text @tag1 [id=menuClassNameTag]
@@ -346,7 +370,7 @@ def signed_accounts_case(brain_port, user, token):
 
 
 def signed_in_case(brain_port, games):
-    user = "v10m%d" % (os.getpid() % 100000)
+    user = "v10m%d" % RUN
     st, reg = http(brain_port, "/auth/register", {"username": user, "password": "pw-v10menu-%d" % os.getpid()})
     token = reg.get("token", "") if isinstance(reg, dict) else ""
     check("1: account registered", st == 200 and token, str(reg)[:200])
@@ -427,8 +451,10 @@ def signed_in_case(brain_port, games):
     qm = re.search(r"\[mm\] quick match: seeking a lobby other than (\S+)", text)
     check("1: Quick Match seeks with the current lobby excluded", qm and joins and qm.group(1) == joins[0],
           "%s %s" % (qm.group(1) if qm else None, joins))
-    check("1: Quick Match joins the other lobby", len(joins) >= 2 and joins[1] != joins[0] and joins[1] in games,
-          str(joins))
+    ok = len(joins) >= 2 and joins[1] != joins[0] and joins[1] in games
+    # on a failure, the brain's view of the lobbies (players, max, meta) for the kept log
+    check("1: Quick Match joins the other lobby", ok,
+          str(joins) + ("" if ok else " game-list " + json.dumps(http(brain_port, "/mm/game-list?hostname=krunknative")[1])[:1500]))
     # the second Quick Match: excludeGame = this lobby, excludeRecent = the one before it (recent_lobbies.h);
     # with only those two, the brain falls back to the one before, never the one it leaves
     qm2 = re.search(r"\[mm\] seek: excluding (\S+), then the recent (\S+)", text)
@@ -447,7 +473,7 @@ def attr_of(text, label):
 
 
 def guest_case(brain_port):
-    user = "v10g%d" % (os.getpid() % 100000)
+    user = "v10g%d" % RUN
     pw = "pw-v10guest-%d" % os.getpid()
     text = client("guest", brain_port, GUEST_SCRIPT.format(user=user, pw=pw))
     g = vis(text, "guest")
@@ -507,7 +533,8 @@ def main():
         return r.returncode
     DB.update(json.loads(r.stdout))
     dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in DB.items()}
-    env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET, **dbenv)
+    # debug: a kept failure log has every seek's answer (routes)
+    env = dict(os.environ, KN_BRAIN_INTERNAL_SECRET=SECRET, KN_LOG_LEVEL="debug", **dbenv, **xdg_dirs("brain"))
     brain_log = os.path.join(WORK, "brain.log")
     try:
         subprocess.run([f"{BUILD}/services/brain/kn_brain", "--migrate-only"], cwd=ROOT, env=env, check=True,
@@ -523,19 +550,45 @@ def main():
         if not m:
             return 1
         port = int(m.group(1))
-        node(port, "V10A", PORT_A)
-        node(port, "V10B", PORT_B)
+        # the ports now, just before the nodes bind them (not at import, minutes before)
+        port_a, port_b = kn_proto.free_ports(2)
+        node_a, _ = node(port, "V10A%d" % RUN, port_a)
+        node_b, _ = node(port, "V10B%d" % RUN, port_b)
         games = wait_for(lambda: (lambda l: l if len(l) == 2 else None)(lobbies(port)), 20) or []
         check("two v10 lobbies listed", len(games) == 2, str(lobbies(port)))
         if len(games) != 2:
             return 1
         listed = wait_for(lambda: len(http(port, "/servers")[1].get("servers", [])) == 2, 20)
         check("both nodes in the server finder", listed, str(http(port, "/servers")[1])[:300])
-        brain_case(port, games)
         signed_in_case(port, games)
         guest_case(port)
         guest_name_case(port)
         accounts_case(port)
+        # The direct seek probes reserve join tickets. Retire the client nodes and wait for their lobbies to go,
+        # then give the probes their own pair: neither side's reservations can fill the other side's lobbies,
+        # and excludeRecent really does cover every remaining lobby.
+        for p in (node_a, node_b):
+            if p.poll() is None:
+                os.killpg(p.pid, signal.SIGTERM)
+        for p in (node_a, node_b):
+            try:
+                p.wait(10)
+            except subprocess.TimeoutExpired:
+                os.killpg(p.pid, signal.SIGKILL)
+                p.wait()
+        gone = wait_for(lambda: len(lobbies(port)) == 0, 10)
+        check("client lobbies retired before isolated brain probes", bool(gone), str(lobbies(port)))
+        if not gone:
+            return 1
+        probe_a, probe_b = kn_proto.free_ports(2)
+        node(port, "V10P%d" % RUN, probe_a)
+        node(port, "V10Q%d" % RUN, probe_b)
+        prefixes = ("V10P%d:" % RUN, "V10Q%d:" % RUN)
+        probes = wait_for(lambda: (lambda l: l if len(l) == 2 else None)([g for g in lobbies(port) if g.startswith(prefixes)]), 20) or []
+        check("two isolated brain-probe lobbies listed", len(probes) == 2, str(probes))
+        if len(probes) != 2:
+            return 1
+        brain_case(port, probes)
     finally:
         for p in procs:
             if p.poll() is None:
@@ -547,7 +600,7 @@ def main():
                 os.killpg(p.pid, signal.SIGKILL)
                 p.wait()
         subprocess.run(scratch + ["drop", DRIVER, NAME], capture_output=True)
-    if all(results):
+    if all(results) and not os.environ.get("KN_KEEP"):
         shutil.rmtree(WORK, ignore_errors=True)
     else:
         print("logs kept in " + WORK)

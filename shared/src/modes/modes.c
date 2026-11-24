@@ -203,8 +203,10 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
     // Dizzy), onMelee as a damage factor, pickStalker health floor(200 + 50 x (players - 1)) and the
     // stalker's own moves (leap, wall stick, coyote time: shared/src/player.c, stalker_v10). The model
     // (opacity 0.1, a still stalker hidden), STALKER_PICKED, the leap HUD timer and the taunts:
-    // shared/src/stalker.c and doc/v10/stalker.md. Not ported: the stalk event / tag ["Event", ...] (menu lists).
-    [MODE_ID_STALK] = {BASE, .id = MODE_ID_STALK, .key = "stalk", .name = "Stalker", .alias = "stalk",
+    // shared/src/stalker.c and doc/v10/stalker.md. `event: true` (deob-10.0.7.js:105049): truthy, so
+    // getPossibleMatches files Stalker in the event bucket, not the normal one (:195645), and `eventIndex == true`
+    // holds for event index 1; event 1 is the same in both. Not ported: the tag ["Event", ...] (menu lists).
+    [MODE_ID_STALK] = {BASE, .id = MODE_ID_STALK, .key = "stalk", .name = "Stalker", .alias = "stalk", .event = 1,
         .end_stats = k_stats_stalk, .amb_ind = 5, .min_players = 2, .has_fog_dist = 1, .fog_dist = 250.0f,
         .has_fog_col = 1, .fog_col = 1842204, .has_sky_col = 1, .sky_col = 1842204,
         .has_light_col = 1, .light_col = 855309, .has_amb_col = 1, .amb_col = 1513239,

@@ -978,8 +978,8 @@ static int preset_index(void) {
 // makes the preset Custom, without restoring krk_customPre (hk = true), saves preIndex and redraws the
 // settings window (showWindow(1, true), deob-10.0.7.js:216584-216620). Krunker Strike has no presets.
 // KrunkNative's own programmatic writes (seek prefs, windowMode, scenarios) call ui_settings_set without
-// it; the player's paths call ui_settings_user_changed. showWindow(1, true) would also open a closed
-// Settings window (a key bind's flip, KrunkScript): here only an open one is redrawn.
+// it; the player's paths call ui_settings_user_changed. As in v10, showWindow(1, true) also opens a closed
+// Settings window (a key bind's flip, KrunkScript), rather than only redrawing an open one.
 static void preset_to_custom(const char *key, const int show) {
     if (flavor_current()->rules || !key) return;
     char buf[96];
@@ -987,7 +987,7 @@ static void preset_to_custom(const char *key, const int show) {
     if (!(g_defaults && cJSON_GetObjectItem(g_defaults, base)) && !preset_for(base) && !kn_preset_key(base)) return;
     if (preset_index() == 2) return;
     html_storage_set("preIndex", "2");
-    if (show && menu_open_window_id() == 1) menu_show_window(1, 1);
+    if (show) menu_show_window(1, 1);
 }
 
 typedef struct {

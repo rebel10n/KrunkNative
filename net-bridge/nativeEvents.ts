@@ -477,15 +477,18 @@ export function hairColorToKrunker(color: number): string | number {
   return color >= 0 ? `#${color.toString(16).padStart(6, "0")}` : 0;
 }
 
-// A loadout slot's store index. v10.0.3 sends a slot three ways: a number (the store index), an owned
+// A loadout slot's store index. v10.0.7 sends a slot three ways: a number (the store index), an owned
 // copy as the string "<copyId>#<skinIndex>" (its paint and wear live on that copy: selectSkin, and
-// getSkin's skinId split at the '#') or a metadata slot {i, m} (i the store index, m the copy's data).
-// KrunkNative keeps no per-copy state, so every form resolves to its store index, and any other value
-// (none, or a non-integer) is -1 as before.
+// the server's skinId / skinIndex split, deob-10.0.7.js:24362-24383) or a metadata slot {i, m}.
+// A copy slot's two sides use parseInt; the copy id itself goes in NET_EXT_KN_SKIN_COPY_IDS. Any other
+// value (none, or a non-integer) is -1 as before.
 export function loadoutIndex(value: unknown): number {
   if (typeof value === "string") {
     const hash = value.indexOf("#");
-    if (hash >= 0) return storeIndexOf(value.slice(hash + 1));
+    if (hash >= 0) {
+      const n = Number.parseInt(value.slice(hash + 1));
+      return Number.isFinite(n) && n >= 0 ? n : -1;
+    }
   }
   if (value !== null && typeof value === "object") return storeIndexOf((value as { i?: unknown }).i);
   return storeIndexOf(value);

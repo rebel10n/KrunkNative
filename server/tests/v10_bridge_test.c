@@ -1243,11 +1243,22 @@ int main(void) {
         // add and START (the official server answers every ENT with the spawn and START)
         const int starts_before_ent = client_count("start");
         const int adds_before_ent = client_count("0");
+        // the primary skin slot is an owned copy, v10.0.7's "<copyId>#<index>" (deob-10.0.7.js:215052, :24381-24383)
+        skins_pair[0] = KRUNKER_V_STR("321#11");
         client_send("en", join_args, 10);
         WAIT_FOR(native_count(NET_PACKET_ENT) == 1);
         NFrame *ent = native_nth(NET_PACKET_ENT, 0);
         CHECK(ent != NULL && ent->len == V10_ENT_SIZE && (int32_t)(ent->payload[0] | ent->payload[1] << 8 | ent->payload[2] << 16 | ent->payload[3] << 24) == 4,
               "ENT: 101 bytes, class 4");
+        CHECK(ent != NULL && rd_i32_test(ent->payload, 42) == 11, "ENT: the copy slot's index (11) as the primary skin");
+        const NFrame *copies = ent != NULL && ent > g_native.frames ? ent - 1 : NULL;
+        CHECK(copies && copies->type == NET_PACKET_EXT && copies->conn == ent->conn && copies->len == V10_SKIN_COPY_IDS_SIZE &&
+                  copies->payload[0] == 0xC0 && copies->payload[1] == 0x81 &&
+                  rd_i32_test(copies->payload, 2 + 4 * SKIN_COPY_SLOT_PRIMARY) == 11 &&
+                  rd_i32_test(copies->payload, 2 + 64 + 4 * SKIN_COPY_SLOT_PRIMARY) == 321 &&
+                  rd_i32_test(copies->payload, 2 + 64 + 4 * SKIN_COPY_SLOT_SECONDARY) == 0,
+              "right before the ENT: NET_EXT_KN_SKIN_COPY_IDS with copy 321 of 11 in the primary slot");
+        skins_pair[0] = KRUNKER_V_NUM(-1);
         WAIT_FOR(client_count("start") == starts_before_ent + 1);
         CHECK(client_count("start") == starts_before_ent + 1, "an ENT while alive: START again for our spawn");
         CHECK(client_count("0") == adds_before_ent + 1, "an ENT while alive: our add again (the round's init may have cleared it)");

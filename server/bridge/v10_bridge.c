@@ -626,8 +626,14 @@ static void handle_client(V10Session *s, const char *label, const KrunkerValue *
         v10_hello_payload(hello);
         write_native(s, NET_PACKET_HELLO, hello, sizeof hello);
     } else if (!strcmp(label, V10_OUT_ENTER_GAME)) {
-        uint8_t ent[V10_ENT_SIZE];
-        if (v10_encode_enter(a0, ent)) write_native(s, NET_PACKET_ENT, ent, sizeof ent);
+        uint8_t ent[V10_ENT_SIZE], copies[V10_SKIN_COPY_IDS_SIZE];
+        /* v10.0.7 sends an owned copy's slot as "<copyId>#<index>" (deob-10.0.7.js:215052, :24381-24383): the ENT takes
+         * the index, and the copies go to the native server right before it in NET_EXT_KN_SKIN_COPY_IDS, every time, as
+         * a native client sends them (a slot that no longer names a copy goes back to 0) */
+        if (v10_encode_enter(a0, ent)) {
+            if (v10_encode_skin_copy_ids(a0, copies)) write_native(s, NET_PACKET_EXT, copies, sizeof copies);
+            write_native(s, NET_PACKET_ENT, ent, sizeof ent);
+        }
         /* challMode: the join's array item 7 (EN.CHALLENGE), truthy */
         s->chall_mode = a0 && a0->type == KRUNKER_ARRAY && a0->len > 7 && v10_truthy(&a0->u.items[7]) ? 1 : 0;
         /* The official server answers every ENT with our spawn and START, and the client's loading waits for that START (its

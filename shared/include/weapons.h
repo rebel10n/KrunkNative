@@ -180,7 +180,8 @@ typedef struct {
     unsigned char type;         // weaponTypes.js: 0 primary, 1 secondary, 2 melee, 3 equipment
     int kill_score;             // kill: ["", N] replaces the base 50 kill score, 0 = none
     int min_rec;                // minRec: account level to pick it, 0 = open
-    int mag_reserve;            // magReserve: reserve magazines (finiteAmmo modes)
+    int mag_reserve;            // magReserve: reserve magazines (finiteAmmo modes), 0 = null (getReserveMags: 1)
+    unsigned char no_mag_reserve:1; // magReserve: 0 given (the Minigun, the War Machine): getReserveMags 0, no reserve
     float leg_mlt;              // lsMlt, 0 = 0.5: legshot multiplier (not on headshots)
     float move_spread;          // movSpread, 0 = 1: spreadPlus gained per unit moved / fallen
     float aim_spread;           // adSpread: share of the hip spread kept while fully aimed

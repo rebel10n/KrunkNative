@@ -138,12 +138,15 @@ Round 7 (2026-11-23) took that list:
 - Weapon wear uses v10's wearMap key (:174184-174189). The item view shows a copy's wear and serial
   (:223653-223690). v10's createTip shows wear only from `data-wear`, which only the trade cards set.
 
-uidiff `customize-customize` (content 3.95 %) is a sub-pixel offset of the first row only. The card borders sit at
-the same rows in both images (y 136, 252, 368 at the 1280 x 720 capture), but the reference's top border of row 1 is
-brighter at y 136 and darker at y 138, i.e. about 0.3 px higher, and its labels sit 1 px higher (y 140-150 against
-141-151). Rows 2 and 3 match to the pixel. So Chrome's first line box in `#customizeContainer` (inline-block cards,
-`text-align: center`) starts a fraction of a pixel higher than the later ones, and the text snaps a whole pixel; KN
-lays every line box out alike. Not changed: it is the engine's line-box rounding, not the markup.
+uidiff `customize-customize` (content 3.95 %) was a sub-pixel offset of every card row (KN about 0.33 px higher;
+row 1's labels a whole pixel higher, rows 2 and 3 rounded alike). Not the line boxes: Chrome lays the cards out
+exactly where KN does (headless Chrome on KN's own DOM: the first card's top at 136.3907 px in both) and its
+screenshot of that DOM matches the reference to the pixel. The difference was KN's scrollable overflow:
+`.otherContainer` (205 px) has rows that end 4 px into `#loadoutContent`'s 18 px bottom padding, and KN added the end
+padding after those descendants (scrollHeight 913 > clientHeight 909), so it treated `#loadoutContent` as a composited
+scroller and moved its contents to a whole device pixel (`scroller_layer_snap`, -0.565 CSS px). Chrome adds the end
+padding to the in-flow children's boxes only (ScrollableOverflowCalculator; its scrollHeight there is 909): fixed in
+`layout_block.c` `compute_overflow` (2026-11-23), content 3.95 -> 0.40 %.
 
 ## Round 12: round 11's leftovers and the areas no round had covered (2026-11-23)
 
@@ -155,7 +158,7 @@ handler by handler. Every gap is fixed unless its row says otherwise; the differ
 
 | Area | Gaps | Main fixes | Left open | Tests |
 | --- | --- | --- | --- | --- |
-| Item copies and the end table | 11 | endGame's skin reward in the end table's reward cell (`.skinReward`, openSales; EXT 0x81D0); a worn copy's wear, serial and name tag to every client (EXT 0x81D1, the slot's named copy first; `skin_meta_of`); name tags on copies (migration 0402) kept through listings and trades; `/items/:id/instances` with the Mints and Wear tabs; the Market's card wear line, listing spans, the copy overlay and the `wears=` filter; a styled copy loses its style when it moves (:195123-195291, :226765-226770, :24335, :109727-109935, :110688-110790, :130983-130991, :136679-136700, :223620-223650) | drawing the name tag on the HUD and the Store's openSales (menu agent) | `market_copies_e2e`, `kill_pools_server_e2e.py`, `player_rank_flag_e2e`, `brain_v10_api_market`, `brain_schema_parity`, `brain_economy`, `brain_live_trade` |
+| Item copies and the end table | 11 | endGame's skin reward in the end table's reward cell (`.skinReward`, openSales; EXT 0x81D0); a worn copy's wear, serial and name tag to every client (EXT 0x81D1, the slot's named copy first; `skin_meta_of`); name tags on copies (migration 0402) kept through listings and trades; `/items/:id/instances` with the Mints and Wear tabs; the Market's card wear line, listing spans, the copy overlay and the `wears=` filter; a styled copy loses its style when it moves (:195123-195291, :226765-226770, :24335, :109727-109935, :110688-110790, :130983-130991, :136679-136700, :223620-223650) | the Store's openSales (menu agent). The HUD .weapNametag landed with the menu merge | `market_copies_e2e`, `kill_pools_server_e2e.py`, `player_rank_flag_e2e`, `brain_v10_api_market`, `brain_schema_parity`, `brain_economy`, `brain_live_trade` |
 | Challenges | 3 | a real challenge completed mid-match end to end; the mid-match UPDATE_CHALLENGES_PROGRESS after each event's chgC (`challenge_progress_reported`, :180731-180741, :180925-180934, :225206-225215); a mid-match challenge's Junk into the Rewards tab (:225219) | official daily BPP values (none exist locally) | `challenge_mid_match_e2e`, `brain_progress_sqlite` / `_mysql`, `season_test`, `chal_card_e2e`, `krunker_challenges_e2e.py` |
 | Account | 3 | skin makers (`player_skinmaker`, :115136) and the krunker.io account's `tw_twitchname` / `player_skinmaker` (setData [23] / [42]) reach getSkins; a Twitch link or unlink updates the streamer items at once | none | `v10_customize_e2e.py` |
 | Map editor | 27 | entities and archetypes; Publish Game and Publish Asset as v10 sends them (`uploadM`, `plm`, migration 0403 `map_mobile`); multiplayer co-editing (windows 16 / 17, `#mp-chat`); the inspector, T-key picker and AI Rarity Chances; settings, history, resets, view resolution and object visuals; Tools and Quick GUI as v10 binds them, v10's own quirks included (E10:6610-20982, IDX:6124-15193, CFG:4406-9215) | `publish_ui_e2e`'s Burg template (`assets/maps/burg_new.json` is in no checkout) | `panels_e2e`, `inspector_check`, `objects_e2e`, `windows_check`, `tools_check`, `logic_parity`, `io_e2e`, `entities_e2e`, `mp_e2e`, `publish_e2e`, `asset_upload_test`, `brain_editor_rooms`, `editor_serialize_test` |

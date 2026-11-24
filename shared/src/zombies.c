@@ -350,8 +350,9 @@ int zombies_finite_ammo(const Player *player) {
     return player && player->game && player->game->mode && player->game->mode->config.finite_ammo && !player->is_bot;
 }
 
+// getReserveMags: magReserve ?? 1 (deob-10.0.7.js:192775-192777): an explicit 0 (Minigun, War Machine) is no reserve
 static int weapon_reserve_full(const Game *game, const Weapon *weapon) {
-    const int mags = weapon->mag_reserve ? weapon->mag_reserve : 1; // getReserveMags: magReserve ?? 1
+    const int mags = weapon->no_mag_reserve ? 0 : weapon->mag_reserve ? weapon->mag_reserve : 1;
     return mode_ammo_limit(game, (int) weapon->ammo) * mags;
 }
 
@@ -361,7 +362,9 @@ int player_reserve_ammo(Player *player, const int slot) {
     for (int i = 0; i < player->reserve_count; i++) {
         if (player->reserve_weapons[i] == id) return player->reserve_ammo[i];
     }
-    const Weapon *weapon = weapon_by_id(player->game, id);
+    // the slot's weapon: an upgraded slot's is the upgradeWeapons entry, with its own ammo and magReserve (giveWeapon
+    // with upgraded, deob-10.0.7.js:175867-175882; updateLoadout's players.getWeapon, :171812-171822)
+    const Weapon *weapon = player_slot_weapon(player, slot);
     const int full = weapon ? weapon_reserve_full(player->game, weapon) : 0;
     // a weapon new to the loadout: drop the reserves of weapons no longer held, then add it
     for (int i = player->reserve_count - 1; i >= 0; i--) {

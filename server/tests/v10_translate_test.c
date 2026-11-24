@@ -239,6 +239,53 @@ int main(void) {
         CHECK(v10_encode_enter(&KRUNKER_V_ARRAY(en, T_EN_LENGTH_V10), ent) && ent[100] == 0x0D, "ENT show badges: + rank (bit 2, en[33])");
         en[33] = B(0);
 
+        // v10.0.7 "<copyId>#<index>" slots (ENTER_GAME sends the saved values as they are, deob-10.0.7.js:215052; the server's
+        // split iïiíiïí, :24362-24380): the ENT gets the index, NET_EXT_KN_SKIN_COPY_IDS the copy each slot names
+        {
+            uint8_t ids[V10_SKIN_COPY_IDS_SIZE];
+            CHECK(V10_SKIN_COPY_IDS_SIZE == NET_EXT_HEADER_SIZE + sizeof(NetSkinCopyIdsPacket), "the copies EXT is subtype + 128 bytes");
+            CHECK(v10_encode_skin_copy_ids(&KRUNKER_V_ARRAY(en, T_EN_LENGTH_V10), ids) && ids[0] == 0xC0 && ids[1] == 0x81,
+                  "a plain loadout: the EXT 0x81C0 still goes (a slot that named a copy goes back to 0)");
+            int plain = 1;
+            for (int k = 0; k < SKIN_COPY_SLOTS; k++) plain &= rd(ids, 2 + 64 + 4 * k) == 0;
+            CHECK(plain && rd(ids, 2 + 4 * SKIN_COPY_SLOT_PRIMARY) == 11 && rd(ids, 2 + 4 * SKIN_COPY_SLOT_CARD) == 35 &&
+                  rd(ids, 2 + 4 * SKIN_COPY_SLOT_CHARM2) == 31, "a plain loadout: every copy id 0, each slot its index");
+            KrunkerValue cen[T_EN_LENGTH_V10];
+            memcpy(cen, en, sizeof cen);
+            cen[2] = ARR(S("123#11"), N(12));    // SKINS: a copy of 11, the plain 12
+            cen[9] = S("7#13");                  // MELEE
+            cen[3] = S("55#3");                  // HAT
+            cen[16] = S("0#8");                  // WAIST: id 0 is no copy (iîìîiìï writes the index alone)
+            cen[20] = S("abc#xyz");              // FACE: parseInt NaN: no item
+            cen[14] = S("#6");                   // DYE: no id
+            cen[29] = ARR(S("9#30"), S("10#30")); // CHARMS: two copies of one index
+            cen[32] = S("77#35");                // PLAYER_CARD
+            cen[31] = S(" 4012#34x");            // HEAD: parseInt's whitespace and trailing junk
+            CHECK(v10_encode_enter(&KRUNKER_V_ARRAY(cen, T_EN_LENGTH_V10), ent), "encodeEnter of copy slots");
+            CHECK(rd(ent, 42) == 11 && rd(ent, 46) == 12 && rd(ent, 50) == 13, "ENT skins: the copies' indices (11, 13), the plain 12");
+            CHECK(rd(ent, 16) == 3 && rd(ent, 24) == 8 && rd(ent, 28) == -1 && rd(ent, 32) == 6,
+                  "ENT hat 3, waist 8, face none (abc#xyz), dye 6");
+            CHECK(rd(ent, 64) == 34 && rd(ent, 84) == 30 && rd(ent, 88) == 30 && rd(ent, 92) == 35, "ENT v7 head 34, charms 30 / 30, card 35");
+            CHECK(v10_encode_skin_copy_ids(&KRUNKER_V_ARRAY(cen, T_EN_LENGTH_V10), ids), "the copies of those slots");
+#define SKIN_OF(k) rd(ids, 2 + 4 * (k))
+#define COPY_OF(k) rd(ids, 2 + 64 + 4 * (k))
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_PRIMARY) == 11 && COPY_OF(SKIN_COPY_SLOT_PRIMARY) == 123, "primary: copy 123 of 11");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_SECONDARY) == 12 && COPY_OF(SKIN_COPY_SLOT_SECONDARY) == 0, "secondary: the plain 12");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_MELEE) == 13 && COPY_OF(SKIN_COPY_SLOT_MELEE) == 7, "melee: copy 7 of 13");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_HAT) == 3 && COPY_OF(SKIN_COPY_SLOT_HAT) == 55, "hat: copy 55 of 3");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_WAIST) == 8 && COPY_OF(SKIN_COPY_SLOT_WAIST) == 0, "waist: id 0 is a plain index");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_FACE) == -1 && COPY_OF(SKIN_COPY_SLOT_FACE) == 0, "face: no index, no copy");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_DYE) == 6 && COPY_OF(SKIN_COPY_SLOT_DYE) == 0, "dye: no id before '#'");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_CHARM1) == 30 && COPY_OF(SKIN_COPY_SLOT_CHARM1) == 9 && SKIN_OF(SKIN_COPY_SLOT_CHARM2) == 30 &&
+                  COPY_OF(SKIN_COPY_SLOT_CHARM2) == 10, "charms: copies 9 and 10 of 30");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_CARD) == 35 && COPY_OF(SKIN_COPY_SLOT_CARD) == 77, "card: copy 77 of 35");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_HEAD) == 34 && COPY_OF(SKIN_COPY_SLOT_HEAD) == 4012, "head: parseInt reads \" 4012\" and \"34x\"");
+            CHECK(SKIN_OF(SKIN_COPY_SLOT_SHOE) == 15 && COPY_OF(SKIN_COPY_SLOT_SHOE) == 0, "shoe: the plain 15");
+#undef SKIN_OF
+#undef COPY_OF
+            CHECK(!v10_encode_skin_copy_ids(&KRUNKER_V_ARRAY(cen, 2), ids), "a short array: no copies EXT");
+        }
+
         // PICKUP (128): NetPickupPacket (26 bytes) -> inat [-1, null, null, uid, weapon|null, true, active, pos|null]
         {
             uint8_t pk[26];

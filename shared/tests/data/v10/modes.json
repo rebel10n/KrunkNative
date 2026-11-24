@@ -1,0 +1,1356 @@
+[
+ {
+  "id": "ffa",
+  "name": "Free for All",
+  "alias": "ffa",
+  "leaderStats": [
+   "score",
+   "kills",
+   "deaths"
+  ],
+  "description": "In this mode, you have no friends.\nEliminate as many opponents as you can.",
+  "descriptionLang": "game.mode.ffa.description"
+ },
+ {
+  "id": "tdm",
+  "name": "Team Deathmatch",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "assists",
+   "reward"
+  ],
+  "alias": "tdm",
+  "teams": true,
+  "leaderStats": [
+   "score",
+   "kills",
+   "deaths"
+  ],
+  "description": "It’s you and your team.\nEliminate the other team players.\nTeam with highest score, wins.",
+  "descriptionLang": "game.mode.tdm.description"
+ },
+ {
+  "id": "point",
+  "name": "Hardpoint",
+  "sub": "Attack the Objective",
+  "alias": "point",
+  "description": "Follow the target and control the area. The longer you stay, the more points you and your team make. Location changes every minute.",
+  "descriptionLang": "game.mode.point.description",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "obj",
+   "dmg",
+   "reward"
+  ],
+  "leaderStats": [
+   "score",
+   "objective",
+   "kills"
+  ],
+  "objective": true,
+  "teams": true,
+  "gameStart": "<fn>",
+  "onKill": "<fn>",
+  "update": "<fn>"
+ },
+ {
+  "id": "ctf",
+  "name": "Capture the Flag",
+  "alias": "ctf",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "caps",
+   "reward"
+  ],
+  "leaderStats": [
+   "caps",
+   "score"
+  ],
+  "description": "Help your team steal the other team’s flag and bring it to your base. You can’t steal if yours has been stolen. Get it back first by eliminating the carrier.",
+  "descriptionLang": "game.mode.ctg.description",
+  "leaderSort": "<fn>",
+  "endSort": "<fn>",
+  "onKill": "<fn>",
+  "flags": true,
+  "teams": true,
+  "noScoreC": true
+ },
+ {
+  "id": "bhop",
+  "name": "Parkour",
+  "alias": "bhop",
+  "sendR": 5,
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "deaths"
+  ],
+  "noKick": true,
+  "friendly": true,
+  "logTime": true,
+  "showMS": true,
+  "ownTime": true,
+  "allowReset": true,
+  "showHour": true,
+  "viewDis": 1000,
+  "custUI": "<fn>"
+ },
+ {
+  "id": "hide",
+  "name": "Hide & Seek",
+  "alias": "hide",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "found",
+   "reward"
+  ],
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "minPlayers": 2,
+  "waitTimers": [
+   {
+    "time": 10000,
+    "msg": "picking seeker in ",
+    "trigger": "<fn>"
+   },
+   {
+    "time": 45000,
+    "msg": "releasing seeker in ",
+    "trigger": "<fn>"
+   }
+  ],
+  "spdMlt": {
+   "1": 0.8
+  },
+  "teams": true,
+  "teamOptions": [
+   "Hiders",
+   "Seekers"
+  ],
+  "killConv": true,
+  "noKick": true,
+  "showTeam": true,
+  "viewDis": 2000,
+  "convTeam": 2,
+  "convWord": "found",
+  "noWeap": true,
+  "friendly": true,
+  "hideNames": true
+ },
+ {
+  "id": "infect",
+  "name": "Infected",
+  "alias": "infect",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "infected",
+   "reward"
+  ],
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "minPlayers": 2,
+  "waitTimers": [
+   {
+    "time": 20000,
+    "msg": "infection in ",
+    "trigger": "<fn>"
+   }
+  ],
+  "teamClass": {
+   "2": 9
+  },
+  "spdMlt": {
+   "2": 1.15
+  },
+  "killConv": true,
+  "noKick": true,
+  "teams": true,
+  "teamOptions": [
+   "Survivors",
+   "Infected"
+  ],
+  "convWord": "infected",
+  "convTeam": 2,
+  "modelOverrides": {
+   "Infected": {
+    "headIndex": 122,
+    "skinColor": 5857617
+   }
+  }
+ },
+ {
+  "id": "race",
+  "name": "Race",
+  "alias": "race",
+  "sendR": 5,
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "time"
+  ],
+  "gameTime": 0,
+  "showMS": true,
+  "timed": true,
+  "logTime": true,
+  "viewDis": 1000,
+  "noWeap": true,
+  "friendly": true,
+  "endSort": "<fn>",
+  "gameStart": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "waitTimers": [
+   {
+    "time": 15000,
+    "msg": "race starting in ",
+    "trigger": "<fn>"
+   }
+  ],
+  "custUI": "<fn>"
+ },
+ {
+  "id": "lms",
+  "name": "Last Man Standing",
+  "alias": "lms",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "assists"
+  ],
+  "noRegen": true,
+  "noKick": true,
+  "teams": true,
+  "lives": 1,
+  "winCondition": "<fn>",
+  "gameTime": 300000
+ },
+ {
+  "id": "simon",
+  "name": "Simon Says",
+  "alias": "simon",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "reward"
+  ],
+  "condition": [
+   "<fn>"
+  ],
+  "minPlayers": 3,
+  "waitTimers": [
+   {
+    "time": 10000,
+    "msg": "starts in ",
+    "trigger": "<fn>"
+   }
+  ],
+  "teams": true,
+  "viewDis": 1000,
+  "teamOptions": [
+   "Followers",
+   "Simon"
+  ],
+  "noKick": true,
+  "teamSee": [
+   "Followers",
+   "Simon"
+  ]
+ },
+ {
+  "id": "gun",
+  "name": "Gun Game",
+  "alias": "gun",
+  "party": true,
+  "randClassScr": 0.5,
+  "tag": [
+   "Party",
+   "#ffac00",
+   "#ffb600"
+  ],
+  "endStats": [
+   "sid",
+   "name",
+   "weapon",
+   "kills",
+   "melees",
+   "setbacks",
+   "reward"
+  ],
+  "description": "Kill other players to progress through every gun in the game. Do it with all guns to win",
+  "descriptionLang": "game.mode.gun.description",
+  "leaderStats": [
+   "weaponTier",
+   "kills"
+  ],
+  "leaderSort": "<fn>",
+  "endSort": "<fn>",
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "onKill": "<fn>",
+  "startingLoadout": [
+   2
+  ],
+  "keepLoadout": true,
+  "noAssists": true,
+  "minPlayers": 2,
+  "noWeap": true,
+  "noPickups": true,
+  "weaponOrder": [
+   2,
+   27,
+   16,
+   10,
+   4,
+   11,
+   21,
+   5,
+   3,
+   9,
+   1,
+   14,
+   6,
+   0,
+   28,
+   18,
+   7,
+   8,
+   13,
+   22,
+   12
+  ],
+  "disabledStreaks": [
+   4,
+   5,
+   6
+  ]
+ },
+ {
+  "id": "prop",
+  "name": "Prop Hunt",
+  "alias": "prop",
+  "genID": "p",
+  "prop": true,
+  "tickR": 20,
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills"
+  ],
+  "noRegen": true,
+  "noKick": true,
+  "teams": true,
+  "viewDis": 2000,
+  "lives": 1,
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "minPlayers": 2,
+  "waitTimers": [
+   {
+    "time": 10000,
+    "msg": "locking seekers in ",
+    "trigger": "<fn>"
+   },
+   {
+    "time": 30000,
+    "msg": "releasing seekers in ",
+    "noJoin": true,
+    "trigger": "<fn>"
+   }
+  ],
+  "propSwitches": 3,
+  "teamOptions": [
+   "Prop",
+   "Seekers"
+  ],
+  "teamSort": true,
+  "showTeam": true,
+  "hideNames": true
+ },
+ {
+  "id": "boss",
+  "name": "Boss Hunt",
+  "alias": "boss",
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "waitTimers": [
+   {
+    "time": 15000,
+    "msg": "picking boss in ",
+    "trigger": "<fn>"
+   }
+  ],
+  "teams": true,
+  "teamOptions": [
+   "Heros",
+   "Boss"
+  ],
+  "noReward": true,
+  "minPlayers": 2
+ },
+ {
+  "id": "clas",
+  "name": "Classic FFA",
+  "alias": "clas",
+  "leaderStats": [
+   "score",
+   "kills",
+   "deaths"
+  ],
+  "party": true,
+  "tag": [
+   "Party",
+   "#ffac00",
+   "#ffb600"
+  ],
+  "noSliding": true,
+  "noKnives": true,
+  "noStreaks": true,
+  "noWallJ": true,
+  "impulseMlt": 0,
+  "noPickups": true,
+  "noMelee": true,
+  "realMov": true
+ },
+ {
+  "id": "depo",
+  "name": "Deposit",
+  "alias": "depo",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "deposits",
+   "denies",
+   "reward"
+  ],
+  "leaderStats": [
+   "deposits",
+   "kills",
+   "denies",
+   "score"
+  ],
+  "objective": true,
+  "teams": true,
+  "tagLimit": 65,
+  "objScore": 50,
+  "noScoreC": true,
+  "tagHoldLimit": 20,
+  "deposit": true,
+  "maxPerCluster": 3,
+  "gameStart": "<fn>",
+  "leaderSort": "<fn>",
+  "endSort": "<fn>",
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "onKill": "<fn>",
+  "update": "<fn>"
+ },
+ {
+  "id": "stalk",
+  "name": "Stalker",
+  "alias": "stalk",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "reward"
+  ],
+  "genID": "st",
+  "ambInd": 5,
+  "minPlayers": 2,
+  "fogD": 250,
+  "fogC": 1842204,
+  "skyCol": 1842204,
+  "lightCol": 855309,
+  "ambCol": 1513239,
+  "lives": 1,
+  "event": true,
+  "tag": [
+   "Event",
+   "#d95487",
+   "#e86b9b"
+  ],
+  "condition": [
+   "<fn>"
+  ],
+  "winCondition": "<fn>",
+  "waitTimers": [
+   {
+    "time": 15000,
+    "msg": "picking stalker in ",
+    "trigger": "<fn>"
+   }
+  ],
+  "onMelee": "<fn>",
+  "onKill": "<fn>",
+  "update": "<fn>",
+  "hideNames": true,
+  "noReward": true,
+  "noKick": true,
+  "teams": true,
+  "teamOptions": [
+   "Living",
+   "Stalker"
+  ],
+  "spdMlt": {
+   "1": 0.65
+  },
+  "canSlide": "<fn>",
+  "wallJ": true,
+  "wallJM": 100,
+  "wallJD": 0.2,
+  "wallJV": 0.04,
+  "wallJYV": 1.2,
+  "modelOverrides": {
+   "Stalker": {
+    "noCosmetics": true,
+    "skinColor": 0,
+    "shirtColor": 0,
+    "pantsColor": 0,
+    "shoeColor": 0,
+    "hairColor": 0,
+    "sleeveColor": 0,
+    "waistColor": 0,
+    "opacity": 0.1
+   }
+  }
+ },
+ {
+  "id": "king",
+  "name": "King of the Hill",
+  "alias": "king",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "obj",
+   "reward"
+  ],
+  "objective": true,
+  "killMlt": 0.15,
+  "hillMlt": 0.05,
+  "objScore": 10,
+  "gameStart": "<fn>",
+  "collisionCheck": "<fn>",
+  "update": "<fn>",
+  "onKill": "<fn>"
+ },
+ {
+  "id": "oinc",
+  "name": "One in the Chamber",
+  "alias": "oinc",
+  "party": true,
+  "tag": [
+   "Party",
+   "#ffac00",
+   "#ffb600"
+  ],
+  "endStats": [
+   "sid",
+   "name",
+   "kills",
+   "deaths",
+   "melees"
+  ],
+  "leaderStats": [
+   "lives",
+   "kills"
+  ],
+  "leaderSort": "<fn>",
+  "endSort": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "winCondition": "<fn>",
+  "waitTimers": [
+   {
+    "time": 10000,
+    "msg": "starts in ",
+    "trigger": "<fn>"
+   },
+   {
+    "time": 100,
+    "msg": "",
+    "noJoin": true,
+    "trigger": "<fn>"
+   }
+  ],
+  "gameStart": "<fn>",
+  "onKill": "<fn>",
+  "forceSpawn": 3,
+  "lives": 3,
+  "maxHealth": 10,
+  "forceClass": 10,
+  "ammoLimit": 1,
+  "noReloads": true,
+  "hideNames": true,
+  "noAssists": true,
+  "noStreaks": true,
+  "minPlayers": 2,
+  "noPickups": true
+ },
+ {
+  "id": "trade",
+  "name": "Trade",
+  "sendR": 5,
+  "endStats": [
+   "sid",
+   "name",
+   "score"
+  ],
+  "alias": "trade",
+  "noClientKick": true,
+  "canTrade": true,
+  "friendly": true,
+  "noHPbars": true,
+  "viewDis": 500,
+  "nameDist": 60,
+  "gameTime": 0,
+  "maxNoMov": 180000,
+  "noMinimap": true
+ },
+ {
+  "id": "kc",
+  "name": "Kill Confirmed",
+  "alias": "kc",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "confirms",
+   "denies",
+   "reward"
+  ],
+  "leaderStats": [
+   "confirms",
+   "score",
+   "denies"
+  ],
+  "leaderSort": "<fn>",
+  "endSort": "<fn>",
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "onKill": "<fn>",
+  "tagLimit": 65,
+  "teams": true,
+  "noScoreC": true
+ },
+ {
+  "id": "def",
+  "name": "Defuse",
+  "alias": "def",
+  "site": true,
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "reward"
+  ],
+  "lives": 1,
+  "noRegen": true,
+  "teams": true,
+  "hitBoxPad": 0.5,
+  "gameStart": "<fn>",
+  "realMov": true,
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "onKill": "<fn>",
+  "waitTimers": [
+   {
+    "time": 10000,
+    "comp": true,
+    "noClear": true,
+    "msg": "match starting in ",
+    "trigger": "<fn>"
+   }
+  ]
+ },
+ {
+  "id": "shrp",
+  "name": "Sharp Shooter",
+  "alias": "shrp",
+  "party": true,
+  "tag": [
+   "Party",
+   "#ffac00",
+   "#ffb600"
+  ],
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "reward"
+  ],
+  "leaderStats": [
+   "score",
+   "kills",
+   "deaths"
+  ],
+  "objWep": true,
+  "randClassScr": 0.5,
+  "gameStart": "<fn>",
+  "onKill": "<fn>",
+  "forceClass": 9,
+  "disabledStreaks": [
+   4,
+   5,
+   6
+  ]
+ },
+ {
+  "id": "trai",
+  "name": "Traitor",
+  "alias": "trai",
+  "lives": 1,
+  "teams": true,
+  "noDeadChat": true,
+  "noKillFeed": true,
+  "teamOptions": [
+   "Innocent",
+   "Traitor"
+  ],
+  "teamColors": [
+   "#37ad47",
+   "#d13838"
+  ],
+  "showTeam": true,
+  "noRegen": true,
+  "fakeNames": true,
+  "noScoreK": true,
+  "dmgTeam": true,
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "waitTimers": [
+   {
+    "time": 15000,
+    "msg": "picking traitors in ",
+    "trigger": "<fn>"
+   }
+  ],
+  "onKill": "<fn>",
+  "noReward": true,
+  "minPlayers": 3
+ },
+ {
+  "id": "raid",
+  "name": "Raid",
+  "alias": "raid",
+  "tag": [
+   "Event",
+   "#d95487",
+   "#e86b9b"
+  ],
+  "party": true,
+  "randClassScr": 0.5,
+  "sendR": 5,
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "time",
+   "dmg",
+   "reward"
+  ],
+  "showMS": true,
+  "noRegen": true,
+  "lives": 1,
+  "minPlayers": 1,
+  "waitTimers": [
+   {
+    "time": 20000,
+    "msg": "starting in "
+   }
+  ],
+  "winCondition": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "onEnd": "<fn>",
+  "update": "<fn>",
+  "onAIDeath": "<fn>",
+  "noProfileStats": true,
+  "skipStats": [
+   "h",
+   "s",
+   "crc",
+   "step"
+  ],
+  "noWeap": true,
+  "friendly": true,
+  "noClan": true,
+  "noFreeCam": true,
+  "viewDis": 500,
+  "specMaxD": 25,
+  "gameTime": 1500000,
+  "botsAsAI": true,
+  "noAssists": true,
+  "botBypassClass": true,
+  "noMinimap": true
+ },
+ {
+  "id": "blitz",
+  "name": "Blitz",
+  "alias": "blitz",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "caps"
+  ],
+  "onKill": "<fn>",
+  "rush": true,
+  "flags": true,
+  "teams": true,
+  "noScoreC": true
+ },
+ {
+  "id": "dom",
+  "name": "Domination",
+  "sub": "Dominate the Objective",
+  "alias": "dom",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "caps",
+   "reward"
+  ],
+  "leaderStats": [
+   "score",
+   "caps"
+  ],
+  "description": "Capture as many areas as possible by standing your position and defending it. The more time your team stay in the secured zone, the more points it wins.",
+  "descriptionLang": "game.mode.dom.description",
+  "dom": true,
+  "teams": true,
+  "noScoreC": true,
+  "captureTime": 10000,
+  "lockoutMlt": 1.5,
+  "perPlayerMlt": 0.2,
+  "collisionCheck": "<fn>",
+  "onKill": "<fn>"
+ },
+ {
+  "id": "sdm",
+  "name": "Squad Deathmatch",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "assists",
+   "reward"
+  ],
+  "alias": "sdm",
+  "teams": true,
+  "multiTeam": 4
+ },
+ {
+  "id": "krank",
+  "name": "Kranked FFA",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "reward"
+  ],
+  "leaderStats": [
+   "score",
+   "kills",
+   "deaths"
+  ],
+  "alias": "krank",
+  "forceSpawn": 5,
+  "krankedTimer": 15000,
+  "bonuses": {
+   "speed": 1.25,
+   "reload": 0.35,
+   "firerate": 0.85
+  },
+  "update": "<fn>",
+  "onKill": "<fn>"
+ },
+ {
+  "id": "tdf",
+  "name": "Team Defender",
+  "alias": "tdf",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "obj",
+   "reward"
+  ],
+  "leaderStats": [
+   "objective",
+   "score"
+  ],
+  "teams": true,
+  "objScore": 20,
+  "teamCarrierMlt": 1,
+  "nonCarrierMlt": 0.5,
+  "carrierMlt": 1.25,
+  "onKill": "<fn>",
+  "oneflag": true,
+  "update": "<fn>"
+ },
+ {
+  "id": "depoffa",
+  "name": "Deposit FFA",
+  "alias": "depoffa",
+  "party": true,
+  "tag": [
+   "Party",
+   "#ffac00",
+   "#ffb600"
+  ],
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "deposits",
+   "reward"
+  ],
+  "leaderStats": [
+   "deposits",
+   "kills",
+   "score"
+  ],
+  "objective": true,
+  "tagLimit": 65,
+  "objScore": 75,
+  "killMlt": 0.5,
+  "noScoreC": true,
+  "tagHoldLimit": 20,
+  "deposit": true,
+  "maxPerCluster": 3,
+  "gameStart": "<fn>",
+  "leaderSort": "<fn>",
+  "endSort": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "onKill": "<fn>",
+  "update": "<fn>"
+ },
+ {
+  "id": "car",
+  "name": "Carrier",
+  "alias": "car",
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "obj",
+   "reward"
+  ],
+  "leaderStats": [
+   "objective",
+   "score"
+  ],
+  "preventCustomGames": true,
+  "objScore": 20,
+  "teamCarrierMlt": 1,
+  "nonCarrierMlt": 0.5,
+  "carrierMlt": 1.25,
+  "onKill": "<fn>",
+  "oneflag": true,
+  "update": "<fn>"
+ },
+ {
+  "id": "aon",
+  "name": "All or Nothing",
+  "alias": "aon",
+  "preventCustomGames": true,
+  "tag": [
+   "Event",
+   "#d95487",
+   "#e86b9b"
+  ],
+  "event": 4,
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "reward"
+  ],
+  "leaderStats": [
+   "score",
+   "kills"
+  ],
+  "onKill": "<fn>",
+  "doubleXP": true,
+  "forceSpawn": 3,
+  "forceClass": 9,
+  "ammoLimit": 0,
+  "noReloads": true,
+  "noPickups": true,
+  "randClassScr": 0.5,
+  "noScrLimit": true,
+  "noKnives": true,
+  "startingLoadout": [
+   16
+  ],
+  "disabledStreaks": [
+   4,
+   5,
+   6
+  ]
+ },
+ {
+  "id": "md",
+  "name": "Mag Dump",
+  "alias": "md",
+  "preventCustomGames": true,
+  "tag": [
+   "Event",
+   "#d95487",
+   "#e86b9b"
+  ],
+  "event": 5,
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "pickups",
+   "reward"
+  ],
+  "leaderStats": [
+   "score",
+   "kills",
+   "pickups"
+  ],
+  "onKill": "<fn>",
+  "doubleXP": true,
+  "forceSpawn": 3,
+  "forceClass": 9,
+  "noReloads": true,
+  "noPickups": true,
+  "randClassScr": 0.5,
+  "noScrLimit": true,
+  "noKnives": true,
+  "startingLoadout": [
+   2
+  ],
+  "disabledStreaks": [
+   4,
+   5,
+   6
+  ]
+ },
+ {
+  "id": "chs",
+  "name": "Chaos Snipers",
+  "alias": "chs",
+  "party": true,
+  "tag": [
+   "Party",
+   "#ffac00",
+   "#ffb600"
+  ],
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "reward"
+  ],
+  "leaderStats": [
+   "score",
+   "kills"
+  ],
+  "forceSpawn": 3,
+  "forceClass": 0,
+  "noPickups": true,
+  "noKnives": true,
+  "gravMlt": 0.92,
+  "jumpMlt": 1.5,
+  "groundAccel": 2,
+  "airAccel": 1.4,
+  "reloadMlt": 0.5,
+  "frSlid": true,
+  "wallJ": true,
+  "wallJM": 100,
+  "wallJD": 0.05,
+  "wallJV": 0.06,
+  "wallJYV": 2,
+  "maxHealth": 10,
+  "ammoLimit": 1,
+  "noScrLimit": true,
+  "startingLoadout": [
+   0
+  ],
+  "disabledStreaks": [
+   4,
+   5,
+   6
+  ]
+ },
+ {
+  "id": "bhffa",
+  "name": "Bighead FFA",
+  "alias": "bhffa",
+  "leaderStats": [
+   "score",
+   "kills",
+   "deaths"
+  ],
+  "party": true,
+  "tag": [
+   "Party",
+   "#ffac00",
+   "#ffb600"
+  ],
+  "bighead": true,
+  "headMlt": 0.1,
+  "headMltMax": 3,
+  "onKill": "<fn>"
+ },
+ {
+  "id": "zom",
+  "name": "Zombies",
+  "alias": "zom",
+  "noSliding": true,
+  "noStreaks": true,
+  "noWallJ": true,
+  "impulseMlt": 0,
+  "lives": 1,
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "zombies",
+   "downs",
+   "rounds",
+   "reward"
+  ],
+  "leaderStats": [
+   "points",
+   "zombies",
+   "downs",
+   "dmg"
+  ],
+  "description": "Survive endless waves of zombies",
+  "descriptionLang": "game.mode.zom.description",
+  "sendR": 5,
+  "update": "<fn>",
+  "custUI": "<fn>",
+  "noScrLimit": true,
+  "startingLoadout": [
+   2
+  ],
+  "finiteAmmo": true,
+  "forceClass": 9,
+  "noClassScr": true,
+  "viewDis": 500,
+  "friendly": true,
+  "skipStats": [
+   "h",
+   "s",
+   "crc",
+   "step"
+  ],
+  "minPlayers": 1,
+  "noMinimap": true,
+  "showAllLeaders": true,
+  "forceCharge": true,
+  "preventCustomGames": true,
+  "forceOldScoreboard": true,
+  "regenMlt": 0.1,
+  "gameTime": 0,
+  "starterScore": 150,
+  "pointsPerHit": 0.085,
+  "unrestrictedWeapons": true,
+  "onTrigger": "<fn>",
+  "onAIDeath": "<fn>",
+  "powerups": [
+   [],
+   [
+    9,
+    14
+   ],
+   [
+    11,
+    15
+   ],
+   [
+    10,
+    12,
+    13
+   ]
+  ],
+  "powerupRarities": [
+   89,
+   5,
+   4,
+   2
+  ],
+  "onKill": "<fn>",
+  "onEnd": "<fn>",
+  "onPreEnd": "<fn>",
+  "gameStart": "<fn>",
+  "condition": [
+   "<fn>"
+  ],
+  "winCondition": "<fn>"
+ },
+ {
+  "id": "imp",
+  "name": "Impulsed",
+  "alias": "imp",
+  "party": true,
+  "tag": [
+   "Party",
+   "#ffac00",
+   "#ffb600"
+  ],
+  "endStats": [
+   "sid",
+   "name",
+   "score",
+   "kills",
+   "deaths",
+   "reward"
+  ],
+  "leaderStats": [
+   "score",
+   "kills"
+  ],
+  "forceSpawn": 3,
+  "forceClass": 0,
+  "noPickups": true,
+  "explMlt": 5,
+  "explSMlt": 2,
+  "gravMlt": 1.05,
+  "jumpMlt": 1.5,
+  "impulseMlt": 3,
+  "nonObjImpulse": true,
+  "groundAccel": 2,
+  "airAccel": 1.4,
+  "reloadMlt": 0.5,
+  "frSlid": true,
+  "wallJ": true,
+  "wallJM": 100,
+  "wallJD": 0.05,
+  "wallJV": 0.06,
+  "wallJYV": 2,
+  "noScrLimit": true,
+  "startingLoadout": [
+   5,
+   22
+  ],
+  "disabledStreaks": [
+   4,
+   5,
+   6
+  ],
+  "preventCustomGames": true,
+  "onKill": "<fn>"
+ },
+ {
+  "id": "candy",
+  "name": "Candy Heist",
+  "alias": "candy",
+  "tag": [
+   "Event",
+   "#ff8a1a",
+   "#ffb347"
+  ],
+  "event": 10,
+  "preventCustomGames": true,
+  "gameTime": 360000,
+  "forceClass": 9,
+  "noPickups": true,
+  "noScrLimit": true,
+  "noScoreXP": true,
+  "noProfileStats": true,
+  "noWinner": true,
+  "endStats": [
+   "sid",
+   "name",
+   "candy",
+   "reward"
+  ],
+  "leaderStats": [
+   "candy"
+  ],
+  "statForm": {
+   "candy": "<fn>"
+  },
+  "scoreStat": "candy",
+  "scoreLabel": "Candy",
+  "description": "Trick-or-treat across Hollowmere: knock on lit doors for candy and bank it at the Cauldron. Dodge the Hollowmen.",
+  "descriptionLang": "game.mode.candy.description"
+ }
+]

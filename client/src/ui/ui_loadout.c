@@ -600,6 +600,25 @@ int ui_loadout_copy_style(const int index, const int copy_id) {
     return style;
 }
 
+int ui_loadout_copy_name(const int index, const int copy_id, char *out, const size_t n) {
+    // iïîìîîï (deob-10.0.7.js:24335-24337) is the slot object's own m, and only an object slot has one.
+    // A plain index, or a copy that is gone, is not some other copy's name.
+    if (out && n) out[0] = 0;
+    if (copy_id <= 0 || index < 0 || !out || n < 2) return 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, owned_entries()) {
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id"), *ind = cJSON_GetObjectItemCaseSensitive(e, "ind");
+        if (!cJSON_IsNumber(id) || id->valuedouble != (double) copy_id || !cJSON_IsNumber(ind) || ind->valueint != index) continue;
+        cJSON *m = entry_meta(e);
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(m, "name"));
+        const int ok = name && name[0];
+        if (ok) snprintf(out, n, "%s", name);
+        cJSON_Delete(m);
+        return ok;
+    }
+    return 0;
+}
+
 // the wear tiers (deob-10.0.7.js:16478-16494, :24599-24617): skin_paint.c
 const char *ui_loadout_wear_tier_key(const double wear) { return skin_wear_tier_key(wear); }
 const char *ui_loadout_wear_tier_color(const double wear) { return skin_wear_tier_color(wear); }

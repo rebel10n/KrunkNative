@@ -1996,6 +1996,9 @@ def sc_loadout_preview():
       - AJ47 (a forceAttach skin) with the Acog picked: v7 mounts the Reflex Sight on both;
       - Vince Mastery (attachBypass) on the Shotgun takes the Acog, Good Ol' Days (noAttach) on the
         Assault Rifle none (v10.0.7 generateMeshes, deob-10.0.7.js:173960);
+      - fully aimed (RMB held), the sight's dot (#aimDot) shows exactly when a sight is mounted: toggleAim
+        takes the same sight (deob-10.0.7.js:174576-174577), so the Shotgun with Vince Mastery shows it
+        and the Assault Rifle with Good Ol' Days does not;
       - the Piss (Object Manager): no model, the procedural hose on the first-person and the
         third-person (preview) model sets alike, in the skin colour.
     Menu and in-game frames are kept next to the logs (WORK) for review."""
@@ -2011,12 +2014,13 @@ def sc_loadout_preview():
     for case, (storage, want_attach) in cases.items():
         name = f"loadout-preview-{case}"
         shot = lambda label: os.path.join(WORK, f"{name}-{label}")  # noqa: E731
+        # aimed (RMB held 700 ms: every class weapon here is fully aimed by then), #aimDot's inline opacity
         script = ["0 menu", "1500 wsel @menu", f"1600 frames {shot('menu')} 1", "2000 play", "4500 wsel @game",
-                  f"4600 frames {shot('game')} 1"]
+                  f"4600 frames {shot('game')} 1", "4700 mdown right", "5400 style @aimed aimDot:opacity", "5450 mup right"]
         if case == "acog":
-            script += ["5000 om add 65", "6000 wsel @piss", f"6100 frames {shot('piss')} 1", "6500 con thirdperson",
-                       "7500 wsel @piss3", f"7600 frames {shot('piss3')} 1"]
-        script.append("8000 quit")
+            script += ["6000 om add 65", "7000 wsel @piss", f"7100 frames {shot('piss')} 1", "7500 con thirdperson",
+                       "8500 wsel @piss3", f"8600 frames {shot('piss3')} 1"]
+        script.append("9000 quit")
         lines = run_client(name, ["--offline", "--map", "kanji"], "\n".join(script), timeout=120,
                            env_extra={"KRUNKNATIVE_MODE": "offline", "KRUNKNATIVE_FIXED_DELTA": "16"}, storage=storage)
         if lines is None:
@@ -2028,6 +2032,14 @@ def sc_loadout_preview():
         record(name, "menu", "preview sight", want_attach, preview[2], want_attach in preview[2].split())
         record(name, "game", "viewmodel model set", "first person", "first person" if me[1] == 0 else str(me[1]), me[1] == 0)
         record(name, "game", "viewmodel == preview", preview[2], me[2], me[2] != "-" and me[2] == preview[2])
+        # toggleAim's dot (deob-10.0.7.js:174576-174577) follows the mounted sight
+        dot = "-"
+        for line in lines:
+            m = re.search(r"\[input_script\] style t=\d+ @aimed aimDot:opacity=(\S+)", line)
+            if m:
+                dot = m.group(1)
+        want_dot = "0" if want_attach == "attach=-" else "1"
+        record(name, "aimed", "#aimDot opacity", want_dot, dot, dot == want_dot)
         if case == "acog":
             first, third = wsel_lines(lines, "piss").get("me", (-1, -1, "-")), wsel_lines(lines, "piss3").get("me", (-1, -1, "-"))
             record(name, "piss", "first-person hose", "w=65 model=hose", first[2], "w=65" in first[2].split() and "model=hose" in first[2].split())

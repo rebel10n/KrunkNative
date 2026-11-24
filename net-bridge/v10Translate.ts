@@ -8,7 +8,7 @@
 //
 // Translated so far (see v10Proxy.ts for the order they run in):
 //   load (LOAD)           -> HELLO (1)         the client is ready for INIT
-//   en   (ENTER_GAME)     -> ENT (3), V9 form  the join: class, loadout, cosmetics, lag comp, badges
+//   en   (ENTER_GAME)     -> EXT 0x81C0 + ENT (3), V9 form  the join: class, loadout, copy ids, lag comp, badges
 //   ct   (CHAT_MESSAGE)   -> CHAT_SEND (8)
 //   native PING (17)      -> PONG (18)         the native probe, echoed verbatim
 //   native MAP_INFO (25)  -> MAP_REQUEST (26)  the bridge never has the map: it asks by hash
@@ -226,6 +226,36 @@ export function encodeEnter(en: unknown): Buffer | null {
   return out;
 }
 
+// The copy id of a "<copyId>#<index>" slot. v10.0.7's server parseInts both sides (deob-10.0.7.js:24362-24380);
+// 0 means a plain index, no item, or a malformed / out-of-int32 copy id.
+function slotCopyId(value: unknown, index: number): number {
+  if (index < 0 || typeof value !== "string") return 0;
+  const hash = value.indexOf("#");
+  if (hash < 0) return 0;
+  const id = Number.parseInt(value.slice(0, hash));
+  return Number.isFinite(id) && id >= 1 && id <= 0x7fffffff ? id : 0;
+}
+
+// NET_EXT_KN_SKIN_COPY_IDS, sent right before every ENT: each slot's store index and the owned copy it names.
+// A plain loadout still sends the packet, clearing a copy selected by an earlier ENT (client_send_skin_copies).
+export function encodeSkinCopyIds(en: unknown): Buffer | null {
+  if (!Array.isArray(en) || en.length < EN.SHOE + 1) return null;
+  const skins = Array.isArray(en[EN.SKINS]) ? (en[EN.SKINS] as unknown[]) : [];
+  const charms = Array.isArray(en[EN.CHARMS]) ? (en[EN.CHARMS] as unknown[]) : [];
+  const slots: unknown[] = [
+    skins[0], skins[1], en[EN.MELEE], en[EN.HAT], en[EN.BODY], en[EN.WAIST], en[EN.FACE], en[EN.DYE],
+    en[EN.HEAD], en[EN.BACK], en[EN.SHOE], en[EN.PET], en[EN.WRIST], charms[0], charms[1], en[EN.PLAYER_CARD],
+  ];
+  const out = Buffer.alloc(SKIN_COPY_IDS_SIZE);
+  out.writeUInt16LE(EXT_SKIN_COPY_IDS, 0);
+  slots.forEach((slot, i) => {
+    const index = storeIndex(slot);
+    out.writeInt32LE(index, 2 + i * 4);
+    out.writeInt32LE(slotCopyId(slot, index), 2 + (SKIN_COPY_SLOTS + i) * 4);
+  });
+  return out;
+}
+
 // KN CHAT_SEND for a "ct" text; null for a blank line (the v10 client never sends one, but KN drops it too).
 export function encodeChat(text: unknown): Buffer | null {
   if (typeof text !== "string" || !text.trim().length) return null;
@@ -279,6 +309,13 @@ export const EXT_GAME_ANNOUNCEMENT = 0x0302; // NET_EXT_GAME_ANNOUNCEMENT: v10 g
 // message for them (its rights are krunker.io's account data), so the bridge consumes it, as it does SOCIAL_V7.
 export const EXT_ACCOUNT_RIGHTS = 0x8001;
 export const EXT_RANKED_MATCH = 0x8050; // NET_EXT_KN_RANKED_MATCH: 1 in a ranked match; the init's isRanked (argument 16)
+export const EXT_SKIN_COPY_IDS = 0x81c0; // NET_EXT_KN_SKIN_COPY_IDS: the copy each slot of the next ENT names
+export const SKIN_COPY_SLOT = Object.freeze({
+  PRIMARY: 0, SECONDARY: 1, MELEE: 2, HAT: 3, BODY: 4, WAIST: 5, FACE: 6, DYE: 7,
+  HEAD: 8, BACK: 9, SHOE: 10, PET: 11, WRIST: 12, CHARM1: 13, CHARM2: 14, CARD: 15,
+} as const);
+export const SKIN_COPY_SLOTS = 16;
+export const SKIN_COPY_IDS_SIZE = 2 + SKIN_COPY_SLOTS * 8; // subtype + NetSkinCopyIdsPacket (skin[16], copy_id[16])
 
 const MAP_INFO_SIZE = 44; // NetMapInfoPacket: int32 map_index, uint32 hash, uint32 size, char name[32]
 const MAP_DATA_HEADER = 10; // NetMapDataPacket: uint32 hash, uint32 offset, uint16 length

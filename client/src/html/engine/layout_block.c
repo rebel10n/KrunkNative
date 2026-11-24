@@ -269,17 +269,23 @@ void layout_overflow_union_child(Box *parent, const Box *child)
  * Two results:
  *  - visual overflow (overflow_l/t/r/b, local): border box U children's
  *    overflow, used by ancestors; reset to the border box when b clips.
- *  - scrollable overflow (scroll_w/h): CSS Overflow 3 - the content extent
- *    (in-flow children's margin boxes in the block axis, their descendants'
- *    unclipped overflow, line content, abs boxes) measured from the padding
- *    edge, plus the block-end/inline-end padding ONCE, at least the client box. */
+ *  - scrollable overflow (scroll_w/h): CSS Overflow 3 - measured from the
+ *    padding edge, at least the client box: the in-flow bounds (in-flow
+ *    children's border boxes, margin boxes in the block axis, line content)
+ *    plus the block-end/inline-end padding once, united with the children's
+ *    own unclipped overflow and the abs boxes, which get no padding. Blink's
+ *    ScrollableOverflowCalculator::Result adds the end padding to the inflow
+ *    bounds only: a grandchild hanging out of its in-flow parent into the
+ *    scroller's bottom padding does not make it scrollable (v10's Customize
+ *    tab: the Title row ends 4 px into #loadoutContent's 18 px padding, and
+ *    Chrome's scrollHeight is its clientHeight, 909). */
 static void compute_overflow(Box *b, int items_abs)
 {
     layout_reset_overflow(b);
     int clips = (b->flags & BOXF_CLIPS) != 0;
     float ox = items_abs ? b->x : 0, oy = items_abs ? b->y : 0;
     float ext_r = box_cl(b), ext_b = box_ct(b);        /* in-flow content extent, local */
-    float abs_r = 0, abs_b = 0;                          /* out-of-flow extent (no end padding) */
+    float abs_r = 0, abs_b = 0;                          /* children's overflow, out-of-flow boxes (no end padding) */
     for (Box *c = b->first_child; c; c = c->next) {
         if (c->type == BOX_TEXT || c->type == BOX_LINEBREAK) continue;
         if (c->type == BOX_INLINE) {
@@ -298,11 +304,14 @@ static void compute_overflow(Box *b, int items_abs)
         if (c->container != b) continue;
         layout_overflow_union_child(b, c);
         if (c->flags & BOXF_OUT_OF_FLOW) continue;   /* counted from abs_children below */
-        float cr = c->lx + kn_maxf(c->w, c->overflow_r);
-        float cbt = c->ly + kn_maxf(c->h, c->overflow_b);
-        if (box_is_inflow(c) && !(c->flags & BOXF_INLINE_LEVEL)) cbt = kn_maxf(cbt, c->ly + c->h + c->margin[CSS_BOTTOM]);
+        /* the in-flow bounds take the child's box (its margin box in the block axis), the overflow of its
+         * descendants counts as is */
+        float cr = c->lx + c->w, cbt = c->ly + c->h;
+        if (box_is_inflow(c) && !(c->flags & BOXF_INLINE_LEVEL)) cbt += c->margin[CSS_BOTTOM];
         ext_r = kn_maxf(ext_r, cr);
         ext_b = kn_maxf(ext_b, cbt);
+        abs_r = kn_maxf(abs_r, c->lx + kn_maxf(c->w, c->overflow_r));
+        abs_b = kn_maxf(abs_b, c->ly + kn_maxf(c->h, c->overflow_b));
     }
     for (int i = 0; i < b->abs_count; i++) {
         Box *a = b->abs_children[i];

@@ -16,7 +16,8 @@ Headless client_bin runs (offline Kanji, private XDG_CONFIG_HOME):
      is uncapped: its fps lines show cap 0, and KRUNKNATIVE_HEADLESS=false does not make it headless.
   6. crosshairSho shows and hides its rows (deob-10.0.7.js:211866-211890): searching "crosshair" with type 1
      lists the dot row, not the image row; after setSetting crosshairSho 4 the image row, not the dot row.
-  7. editing a setting under a preset makes it Custom (preIndex 2, deob-10.0.7.js:214445).
+  7. editing a setting under a preset makes it Custom (preIndex 2, deob-10.0.7.js:214445), with
+     showWindow(1, true) reopening a closed Settings window (:216584-216621).
   8. the customize block (deob-10.0.7.js:217209-217219, :214502-214508): exportSettings writes the stored
      scopes / favourites (krk_favList) / loadouts into settings.txt; importing a text with a customize block
      stores its lists, cleans the loadout keys and drops falsy loadouts, and makes the preset Custom.
@@ -232,15 +233,28 @@ def main():
     check("crosshairSho 4: the image row shows and the dot row is gone",
           t4.get("crosshairImage_div") == "1" and t4.get("crosshairDot_div") == "-", str(t4))
 
-    # 7. a setting changed under a preset: Custom
-    code, text = run("preset-custom", "0 menu\n500 call selectSettingPre 4\n1200 call setSetting \"fov\" 95\n1700 quit\n")
+    # 7. a setting changed under a preset: Custom; set()'s showWindow(1, true) also opens a closed Settings
+    code, text = run("preset-custom", """0 menu
+500 call selectSettingPre 4
+800 down ESC
+820 up ESC
+900 vis @closed windowHolder
+1200 call setSetting "fov" 95
+1500 vis @custom windowHolder settHolder
+1700 quit
+""")
     try:
         stored = json.loads(read_store("preset-custom", "knSettings") or "{}")
     except ValueError:
         stored = {}
+    vis = {m.group(1): dict(kv.split("=") for kv in m.group(2).split()) for m in
+           re.finditer(r"\[input_script\] vis t=\d+ (@\S+) (.*)", text)}
     check("setSetting under Beautiful makes the preset Custom (preIndex 2)",
           read_store("preset-custom", "preIndex") in ("2", '"2"'), str(read_store("preset-custom", "preIndex")))
     check("... and stores the value", stored.get("fov") == 95, f"fov={stored.get('fov')!r}")
+    check("... with Settings closed before the change, then open (showWindow(1, true))",
+          vis.get("@closed", {}).get("windowHolder") == "0" and vis.get("@custom", {}).get("windowHolder") == "1" and
+          vis.get("@custom", {}).get("settHolder") == "1", str(vis))
 
     # 8. the customize block: export
     scopes = [{"name": "kn-scope", "img": "https://example.invalid/scope.png"}]

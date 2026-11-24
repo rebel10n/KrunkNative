@@ -22,7 +22,7 @@
 //   native LEADERBOARD (14), LEADER_STATS (240)        -> "7" rows (free for all); the repeat is consumed
 //   native AI_ADD (90)                                  -> consumed: the v7 record (162) is the one for v7 peers
 //   native AI_ADD_V7 (162)                              -> not translated yet: the session stops here
-//   client sends en (ENTER_GAME)                       -> ENT (3)
+//   client sends en (ENTER_GAME)                       -> EXT 0x81C0 (copy ids), then ENT (3)
 //   client sends ct (CHAT_MESSAGE)                     -> CHAT_SEND (8)
 //   native PING (17)                                   -> PONG (18), answered here
 
@@ -601,7 +601,13 @@ function handleClientPacket(session: V10Session, label: string, args: unknown[])
       break;
     case T.V10_OUT.ENTER_GAME: {
       const ent = T.encodeEnter(args[0]);
-      if (ent) writeNative(session, T.NATIVE.ENT, ent);
+      if (ent) {
+        // v10.0.7's "<copyId>#<index>" slots keep their indices in ENT and their copy ids in the EXT
+        // immediately before it, as a native client sends them (deob-10.0.7.js:215052, :24362-24383).
+        const copies = T.encodeSkinCopyIds(args[0]);
+        if (copies) writeNative(session, T.NATIVE_MORE.EXT, copies);
+        writeNative(session, T.NATIVE.ENT, ent);
+      }
       const join = args[0];
       session.challMode = Array.isArray(join) && join[T.EN.CHALLENGE] ? 1 : 0;
       session.loadoutPaint = Array.isArray(join) ? T.loadoutPaintOf(join) : {};
