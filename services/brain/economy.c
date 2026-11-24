@@ -680,6 +680,13 @@ static void list_done(SocialSession *s, kn_db_result *res, void *extra) {
     push_funds(s->account_id);
 }
 
+/* deob-10.0.7.js:109194-109195: a collectible (type 10) lists from 1 KR; anything else from its
+ * rarity's sell value (rarity 0's when the rarity is missing). A 0 sell still means 1. */
+static int list_min_kr(const SkinInfo *k) {
+    if (!k || k->type == 10 || k->rarity < 0 || k->rarity >= RARITIES) return 1;
+    return k_rarity_sell[k->rarity] > 0 ? k_rarity_sell[k->rarity] : 1;
+}
+
 /* ["li", skin, skinid, uid, price, {op}] -> ["lir", {cnt, funds, listingId, fee} | {response:"MAX"}, uid] */
 void sh_market_list(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
@@ -694,6 +701,16 @@ void sh_market_list(SocialSession *s, const cJSON *f) {
         price_v->valuedouble != (double) (int64_t) price_v->valuedouble) {
         social_error(s, "Invalid price");
         return;
+    }
+    /* the confirm's check (deob-10.0.7.js:109201-109202), after the modal's own minimum */
+    if (acct_skin_count() > 0) {
+        const int min = list_min_kr(acct_skin(skin));
+        if ((int64_t) price_v->valuedouble < min) {
+            char msg[80];
+            snprintf(msg, sizeof msg, "Price must be at least %d KR for this rarity", min);
+            social_error(s, msg);
+            return;
+        }
     }
     EconHead h;
     econ_head(&h, s, f, "list", "market");
@@ -990,8 +1007,16 @@ void sh_market_list_bulk(SocialSession *s, const cJSON *f) {
         const int64_t skin = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 0)), unit = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 1));
         const double price = cJSON_GetNumberValue(cJSON_GetArrayItem(it, 2));
         const int64_t qty = (int64_t) cJSON_GetNumberValue(cJSON_GetArrayItem(it, 3));
+        char min_msg[80] = "";
         const char *why = acct_skin_count() > 0 ? skin_unlistable(acct_skin(skin)) : NULL;
         if (!why && !(price >= 1 && price <= (double) g_acct.sale_max && price == (double) (int64_t) price)) why = "Invalid price";
+        if (!why && acct_skin_count() > 0) {
+            const int min = list_min_kr(acct_skin(skin));
+            if (price < min) {
+                snprintf(min_msg, sizeof min_msg, "Price must be at least %d KR for this rarity", min);
+                why = min_msg;
+            }
+        }
         cJSON *r = cJSON_CreateArray();
         cJSON_AddItemToArray(r, cJSON_CreateNumber((double) skin));
         cJSON_AddItemToArray(r, cJSON_CreateNumber((double) (unit >= V10_COPY_ID_BASE ? unit : 0)));

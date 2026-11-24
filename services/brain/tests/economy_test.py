@@ -381,6 +381,10 @@ async def scenario(url, db):
         check(r[0] == "lir" and r[2] == 7 and r[1]["fee"] == 101 and r[1]["funds"] == before - 101 and r[1]["cnt"] == 2,
               "listed: fee ceil(10%%) of 1009 is 101, item leaves the inventory: %r" % (r,))
         listing = r[1]["listingId"]
+        held, left = funds(db, C), count(db, C, 4)
+        r = await c.call(("lir", "po"), "li", 4, 4, 9, 50, op())
+        check(po_text(r) == "Price must be at least 100 KR for this rarity" and funds(db, C) == held and count(db, C, 4) == left,
+              "a legendary under its sell value is refused (deob-10.0.7.js:109201-109202): %r" % (r,))
         r = await c.call(("lir", "po"), "li", 4, 4, 7, 0, op())
         check(po_text(r) == "Invalid price", "price 0 refused")
         r = await c.call(("lir", "po"), "li", 4, 4, 7, 10000001, op())
