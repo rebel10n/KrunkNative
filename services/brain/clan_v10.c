@@ -25,6 +25,7 @@
 #include "acct_internal.h"
 #include "v10_paint.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,10 +136,20 @@ static kn_db_result *run_transfer(kn_dbconn *c, int n, const char *const *p) {
     int owner;
     member_rank(&x, P(0), PI(1), &owner);
     if (!owner) return dbx_finish(&x, kn_db_result_user_error("Only the clan owner can transfer ownership"));
+    /* the form checks trim() and then sends the field as typed (deob-10.0.7.js:96030-96034) */
+    const char *raw = P(2) ? P(2) : "";
+    while (*raw && isspace((unsigned char) *raw)) raw++;
+    size_t nlen = strlen(raw);
+    while (nlen && isspace((unsigned char) raw[nlen - 1])) nlen--;
+    char who[64];
+    if (nlen >= sizeof who) nlen = sizeof who - 1;
+    memcpy(who, raw, nlen);
+    who[nlen] = 0;
+    if (!who[0]) return dbx_finish(&x, kn_db_result_user_error("Please enter a player name"));
     const int64_t to = dbx_int(&x,
         SQL(.any = "SELECT m.account_id FROM clan_members m JOIN accounts a ON a.id = m.account_id"
                    " WHERE m.clan_id = $1 AND lower(a.username) = lower($2)"),
-        KN_DB_ARGS(I64S(PI(1)), P(2) ? P(2) : ""), 0);
+        KN_DB_ARGS(I64S(PI(1)), who), 0);
     if (to <= 0) return dbx_finish(&x, kn_db_result_user_error("Player is not a member of your clan"));
     if (to == PI(0)) return dbx_finish(&x, kn_db_result_user_error("You already own this clan"));
     dbx_exec(&x, SQL(.any = "UPDATE clans SET clan_transfer_to = {int:$2}, clan_transfer_at = {now} WHERE clan_id = $1"),
