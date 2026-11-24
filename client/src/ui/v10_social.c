@@ -3324,7 +3324,9 @@ static void sb_comment(StrBuf *sb, const cJSON *c) {
     sb_append(sb, "</div></div>");
 }
 
-static char g_reply[1024];
+/* the reply box is maxlength 500 (deob-10.0.7.js:107368). One character can be four bytes. */
+static char g_reply[500 * 4 + 1];
+_Static_assert(sizeof g_reply > 500 * 3, "a reply of 500 characters fits");
 
 static void sb_post_detail(StrBuf *sb, View *v) {
     sb_append(sb, "<div class=\"detail-overlay svelte-h3kymj\" role=\"presentation\" onclick=\"v10s('backdrop')\"><div class=\"detail-window svelte-h3kymj\" role=\"dialog\" aria-modal=\"true\" "

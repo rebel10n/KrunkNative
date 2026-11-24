@@ -5132,7 +5132,7 @@ static void handle_reply_frame(const cJSON *frame) {
                 const AccountInfo *me = g_hub.logged_in ? active_account() : NULL;
                 sb_append(&sb, "<div class='replyHolder'><img src='");
                 sb_pfp(&sb, me ? me->id : 0, me && me->premium, "./img/player_pfp.png");
-                sb_appendf(&sb, "' class='replyPfp'><input class='replyInput' placeholder='Reply' id='replyInput'></input><div class='replyBtn' onclick='postReply(%d)' id='replyBtn'>Reply</div></div>", (int) jnum(post, "pid"));
+                sb_appendf(&sb, "' class='replyPfp'><input class='replyInput' placeholder='Reply' id='replyInput' maxlength='500'></input><div class='replyBtn' onclick='postReply(%d)' id='replyBtn'>Reply</div></div>", (int) jnum(post, "pid"));
                 const cJSON *c;
                 sb_append(&sb, "<div style='margin-top:10px' id='comHolderH'>");
                 cJSON_ArrayForEach(c, cJSON_GetObjectItem(res, "c")) {
@@ -7833,16 +7833,22 @@ H(h_leave_post) {
     return 1;
 }
 
-// postReply(id): io.send("com", id, {txt})
+// postReply(id): io.send("com", id, {txt}). #replyInput is maxlength 500 (deob-10.0.7.js:107368).
 H(h_post_reply) {
     UNUSED;
-    char text[1024] = "";
+    char text[500 * 4 + 1] = ""; /* one character can be four bytes; 1024 cut a long reply */
+    _Static_assert(sizeof text > 500 * 3, "a hub reply of 500 characters fits");
     const HtmlElem input = el("replyInput");
     if (input) html_dom_get_value(input, text, sizeof(text));
-    if (!text[0] || !g_hub.logged_in) return 1;
+    char *p = text;
+    while (*p && isspace((unsigned char) *p)) p++;
+    size_t n = strlen(p);
+    while (n && isspace((unsigned char) p[n - 1])) n--;
+    p[n] = 0;
+    if (!p[0] || !g_hub.logged_in) return 1;
     set_html("replyBtn", "<div class='lds-ringm'><div></div><div></div><div></div><div></div></div>");
     cJSON *body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "txt", text);
+    cJSON_AddStringToObject(body, "txt", p);
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("com"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
