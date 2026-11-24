@@ -277,6 +277,8 @@ async def scenario(port):
     check(f and f[3] == 0 and f[1] == "Invalid Discord", "invalid Discord link refused", f)
     f = await a.cln(9, "https://discord.com/invite/abcDEF-12")
     check(f and f[3] == 1 and f[2]["clan_link4"] == "abcDEF-12", "owner sets the Discord link", f)
+    f = await a.cln(9, "https://Discord.GG/invite/Ab-12")
+    check(f and f[3] == 1 and f[2]["clan_link4"] == "Ab-12", "a capitalised Discord host is the same link (deob-10.0.7.js:220483)", f)
 
     q("INSERT INTO match_results (match_id, account_id, score, at) VALUES ('m1', ?, 1234, " + NOW_PLUS_1S + ")", b.id)
     f = await a.cln(3)

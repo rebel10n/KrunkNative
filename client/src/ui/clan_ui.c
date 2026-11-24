@@ -44,6 +44,7 @@
 // the picked PNG as `file` (v10_gapi_upload, deob-10.0.7.js:96094-96120); their answers are applied as
 // v10's settings components apply them.
 #include <avatar_ui.h>
+#include <clan_discord.h>
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>
@@ -2209,20 +2210,9 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
     } else if (!strcmp(m, "updateDis") && g_clan && i_am_leader()) { // owner only (a Captain's Update does nothing)
         char v[256] = "";
         read_value("clanDiscordLink", v, sizeof(v));
-        const char *p = strstr(v, "discord");
-        int valid = 0;
-        for (; p && !valid; p = strstr(p + 1, "discord")) {
-            const char *q = p + 7;
-            if (!strncmp(q, ".com/", 5)) q += 5;
-            else if (!strncmp(q, "app.com/", 8)) q += 8;
-            else if (!strncmp(q, ".gg/", 4)) q += 4;
-            else continue;
-            if (!strncmp(q, "invite/", 7)) q += 7;
-            int len = 0;
-            while (len < 32 && (q[len] == '-' || (q[len] >= '0' && q[len] <= '9') || ((q[len] | 32) >= 'a' && (q[len] | 32) <= 'z'))) len++;
-            valid = len >= 2;
-        }
-        if (!valid) result_popup(0, "Invalid Discord");
+        // deob-10.0.7.js:220483: the i flag, so Discord.GG is the same link as discord.gg.
+        // The field is sent as typed; the brain keeps the invite code.
+        if (!clan_discord_link_ok(v)) result_popup(0, "Invalid Discord");
         else send_cln(9, cJSON_CreateString(v), NULL);
     } else if (!strcmp(m, "updRol")) { // _70159 + io.send("cln", 6, id, {r})
         const int id = arg_num(args, argc, 0, 0);
