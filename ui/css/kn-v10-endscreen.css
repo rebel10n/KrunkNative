@@ -15,9 +15,9 @@
     z-index: 9999;
 }
 
-/* v10's #endButtonsHolder and #doubleXPButton (main.css 6377, 16086) as classes: the engine's #id
- * selectors do not match the nodes inserted at the end (client/src/ui/hud_endscreen_v10.c), so the
- * same rules carry the class too. Same declarations as v10. */
+/* v10's #endButtonsHolder and #doubleXPButton. The engine's #id selectors do not match nodes inserted
+ * at the end (client/src/ui/hud_endscreen_v10.c), so the same rules use their id attributes instead.
+ * Same declarations as v10; the button itself has no class in 10.0.7 (:210089). */
 .endButtonsHolder {
     display: flex;
     position: absolute;
@@ -29,7 +29,7 @@
     align-items: center;
     flex-direction: row;
 }
-.doubleXPButton {
+[id=doubleXPButton] {
     display: block;
     border-radius: 4px;
     border-collapse: collapse;
@@ -42,6 +42,6 @@
     border: 6px solid #FFE540;
     padding: 6px;
 }
-.doubleXPButton:hover {
+[id=doubleXPButton]:hover {
     background-color: rgba(0, 0, 0, 0.75);
 }

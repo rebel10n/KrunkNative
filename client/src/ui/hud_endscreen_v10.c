@@ -43,7 +43,7 @@
 // #doubleXPButton (v10.js 203200, every match but a comp one, signed in or not): the ad icon and the label
 // (window.endgame.player.doubleGainedXP, %s). The click claims at games % 3 (double_xp_end_claim, double_xp_offer.c).
 // v10's whitespace kept: the newline + tabs between the inline icon and #returnText lay out as one space.
-#define DOUBLE_XP_HTML "<div id=\"doubleXPButton\" class=\"doubleXPButton\" onmouseenter=\"playTick(0.1);\" onclick=\"knDoubleXP()\">\n\t\t\t\t\t\t" \
+#define DOUBLE_XP_HTML "<div id=\"doubleXPButton\" onmouseenter=\"playTick(0.1);\" onclick=\"knDoubleXP()\">\n\t\t\t\t\t\t" \
     "<img style=\"vertical-align: middle;display:inline\" height=\"60px\" src=\"./img/frvr-ui/ad-icon.svg\">\n\t\t\t\t\t\t" \
     "<div id=\"returnText\">%s</div>\n\t\t\t\t\t</div>"
 // #returnButton (v10.js 203200, a comp match, isComp): "Return to Krunker" (%s) leaves the match for the menu:

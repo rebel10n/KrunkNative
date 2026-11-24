@@ -251,7 +251,7 @@ def scenario(brain_url, game_port, smtp, db):
     # 6. an account flagged for hacking: its login shows v10.0.7's BANNED popup (genericPopup "contPop",
     #    deob-10.0.7.js:216854-216855) and skips the rest of the login (the promo prefs, the deletion confirm)
     con = sqlite3.connect(db)
-    n = con.execute("UPDATE players SET player_hack = 1 WHERE player_id = (SELECT id FROM accounts WHERE username = ?)", (NAME,)).rowcount
+    n = con.execute("UPDATE players SET player_hack = 1, player_premium = 1 WHERE player_id = (SELECT id FROM accounts WHERE username = ?)", (NAME,)).rowcount
     con.commit()
     check("the account is flagged for hacking (players.player_hack)", n == 1, repr(n))
     con.close()
@@ -264,12 +264,14 @@ def scenario(brain_url, game_port, smtp, db):
 2800 clickid accPass
 2900 type new_pass_2
 3000 clickid knV10LoginSubmit
-6000 vis @ban genericPop popupHolder
+6000 vis @ban genericPop popupHolder aHider topRightAdHolder
 6100 quit
 """, brain_url, game_port)
     check("a flagged account still logs in", f"[account] logged in as {NAME}" in log)
     check("its login shows the BANNED popup", "[account] BANNED: the account is flagged for hacking" in log and
           vis(log, "ban").get("genericPop") == "1", str(vis(log, "ban")))
+    check("a hack-flagged premium login keeps the ad slots (the premium hide is after the BANNED return)",
+          vis(log, "ban").get("aHider") == "1" and vis(log, "ban").get("topRightAdHolder") == "1", str(vis(log, "ban")))
 
 
 def down_scenario(game_port):

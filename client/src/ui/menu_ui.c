@@ -1922,14 +1922,15 @@ static int scenario_on(void) {
 // The menu's ad slots, as v10.0.7 sets them at every round's init (iíìíiíi, deob-10.0.7.js:226522-226527, run from
 // :226471): #aHider (the bottom-centre #aContainer strip, the dark rgba(0,0,0,.6) box under Now Playing in v10's
 // captures: doc/ref/krunker-v10.0.2/main-menu.png) block, #topRightAdHolder (the right panel's first 300x250 slot,
-// transparent while empty) inline-block, both none for a premium account. window.canShowAds is
+// transparent while empty) inline-block, both none for a premium account without a hack flag (the BANNED
+// login returns before v10's premium hide). window.canShowAds is
 // !(isMsPwa || isSteamClient || isEpicClient || isOAuthPage) (the live page's index.html): true for krunker.io's
 // page, and true here, where Box Office's own placeholder ad (kn_ad.c, strike_banner_ad.c) always is. Box Office
 // fills no display ad, so the slots stay empty, as in v10's captures. The competitive menu hides #aHider again
 // (comp_ui.c, :226554); a login with premium hides both (v10_menu_account_changed, :216881).
 void menu_ads_apply(void) {
     const AccountInfo *acc = active_account();
-    const int premium = acc && acc->premium;
+    const int premium = acc && acc->premium && !acc->hack; // :216877 returns before :216881's premium ad hide
     set_display("aHider", premium ? "none" : "block");
     set_display("topRightAdHolder", premium ? "none" : "inline-block");
 }

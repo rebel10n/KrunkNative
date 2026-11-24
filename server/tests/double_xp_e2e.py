@@ -190,8 +190,8 @@ BASE_SCRIPT = """
 10000 check @endanim endUI=1 inGameUI=0
 15000 check @results endUI=1 endTabbedView=1
 15000 check @offer doubleXPButton=1
-15000 nodes @button .doubleXPButton
-15000 text @label .doubleXPButton
+15000 nodes @button [id=doubleXPButton]
+15000 text @label [id=doubleXPButton]
 15100 clickid doubleXPButton
 15300 clicksel .knAdContinue
 16000 nodes @popup .dxp-header

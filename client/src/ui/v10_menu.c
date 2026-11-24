@@ -451,9 +451,9 @@ void v10_menu_account_changed(void) {
     // for the guest (:216910); main.css keeps it hidden (display:none !important) and nothing fills its icon or text
     if (acc) set_display(by_id("newUserGuide"), acc->level > 20 ? "none" : "block");
     else if (V.signed_in == 1) set_display(by_id("newUserGuide"), "block");
-    // a premium account's login takes the ad slots away (deob-10.0.7.js:216881); a logout leaves them until the next
-    // round's init brings them back (menu_ads_apply)
-    if (acc && acc->premium) {
+    // a premium account's login takes the ad slots away (deob-10.0.7.js:216881), except a hack-flagged
+    // login, which returns for BANNED first (:216877); a logout leaves them until the next init
+    if (acc && acc->premium && !acc->hack) {
         set_display(by_id("aHider"), "none");
         set_display(by_id("topRightAdHolder"), "none");
     }
@@ -586,10 +586,9 @@ static void popular_interval(void *user) {
 // streams and no promo hides the overlay (v10's visibility rule). No answer (Box Office with no brain: nobody to
 // ask; the host unreachable) hides the overlay, as v10's error state does.
 //
-// The Live Streams panel: a port of v10.0.3's streams-overlay component (the Svelte component that reads
-// /streams/top's {streams, promo, dropCampaigns}). Each rule below cites the component's code in the v10.0.3 bundle
-// (/home/user/jails/kru/src/Krunker_v10.0.3/game.js), read through its own string table: the store, the derived
-// lists, the template conditions and the handlers.
+// The Live Streams panel: v10.0.7's streams-overlay component (the Svelte component that reads
+// /streams/top's {streams, promo, dropCampaigns}). Its store, derived lists, template conditions and
+// handlers are deob-10.0.7.js:146840-146866, :148350-148490 and :148536-148744.
 #define STREAMS_SHOWN 3           // the small view: three cards, or two and the promo (slice(0, 3) / slice(0, min(2, n)))
 #define STREAMS_EXPANDED_MAX 12   // the expanded view: three rows of four (slice(0, 4 * 3 - promo))
 #define STREAMS_COLS 4            // the expanded view's columns (800 px: four 180 px cards)
@@ -647,9 +646,9 @@ static int streams_picture_ok(const char *url) {
     return !strncasecmp(url, "https://", 8) || !strncasecmp(url, "http://", 7);
 }
 
-// Twitch's CDN refuses the native media lane on some networks, so a Twitch-hosted thumbnail goes
-// through the brain's /streams/thumb (its allowlist is streams_thumb_url_ok's hosts). Any other host
-// is loaded directly, and with no brain the original URL is kept, as v10's <img src>.
+// Twitch's CDN refuses the native media lane on some networks, so only static-cdn.jtvnw.net goes
+// through the brain's /streams/thumb (the same host its allowlist accepts). Every other host is loaded
+// directly, and with no brain the original URL is kept, as v10's <img src>.
 static void streams_thumb_url(const char *url, char *out, const size_t n) {
     out[0] = 0;
     if (!streams_picture_ok(url)) return;
@@ -657,8 +656,7 @@ static void streams_thumb_url(const char *url, char *out, const size_t n) {
     const char *host = scheme ? scheme + 3 : url;
     const char *slash = strchr(host, '/');
     const size_t hn = slash ? (size_t) (slash - host) : strlen(host);
-    const int twitch = (hn >= 9 && !strncasecmp(host + hn - 9, "jtvnw.net", 9)) ||
-                       (hn >= 10 && !strncasecmp(host + hn - 10, "twitch.tv", 10));
+    const int twitch = hn == 20 && !strncasecmp(host, "static-cdn.jtvnw.net", 20);
     if (!twitch || !backend_url()[0]) {
         snprintf(out, n, "%s", url);
         return;
@@ -761,7 +759,7 @@ static void streams_mode_set(const int mode) {
     html_storage_set(STREAMS_VIEW_KEY, mode == STREAMS_CLOSED ? "closed" : "small");
 }
 
-// The layout: every rule is v10.0.3's derived store or template condition (streams-overlay, decoded). D = the displayed
+// The layout: every rule is v10.0.7's derived store or template condition. D = the displayed
 // streams (the featured ones when there are any, else the rest), R = the rest behind the featured ones.
 struct streams_layout {
     int nd, rest, promo, prom_grid, prom_row, shown, cols, cols_width, rows, full, body, feat, rest_on, max_h;
@@ -777,7 +775,7 @@ static struct streams_layout streams_layout(void) {
     const int rows = exp ? (count + STREAMS_COLS - 1) / STREAMS_COLS : 1;
     const int full = exp && rows >= STREAMS_FULL_ROWS;
     y.nd = nd;
-    y.rest = L.n - L.nfeat;
+    y.rest = L.nfeat ? L.n - L.nfeat : 0; // regularStreams is [] when the featured list leads (:148353-148355)
     y.promo = prom_vis;
     y.shown = exp ? (nd < STREAMS_EXPANDED_MAX - prom_vis ? nd : STREAMS_EXPANDED_MAX - prom_vis)
                   : (small && P ? (nd < 2 ? nd : 2) : (nd < STREAMS_SHOWN ? nd : STREAMS_SHOWN));
@@ -798,13 +796,13 @@ static struct streams_layout streams_layout(void) {
     return y;
 }
 
-// one stream card (v10's .stream-card: the thumbnail with the viewer count, the drop badge, the event tags, the language
-// flag; then the title and the streamer's name). anim = fade in with a delay (ms), else it is already on screen.
-static void streams_card(StrBuf *sb, const int i, const int anim, const int delay) {
+// one stream card (v10's .stream-card: image, viewer count, language flag, drop badge, then event tags;
+// the last two are present only where the template has them, and event tags only on featured cards).
+static void streams_card(StrBuf *sb, const int i, const int featured, const int anim, const int delay) {
     const struct stream_entry *s = &L.e[i];
     char count[24];
     streams_viewers(count, sizeof count, s->viewers);
-    sb_appendf(sb, "<div class=\"stream-card%s svelte-60shhe\" style=\"", s->has_tags ? " has-event" : "");
+    sb_appendf(sb, "<div class=\"stream-card%s svelte-60shhe\" style=\"", featured && s->has_tags ? " has-event" : "");
     if (anim) sb_appendf(sb, "animation:kn-stream-fade %dms linear %dms both;", STREAMS_FADE_MS, delay);
     sb_append(sb, "pointer-events:all;cursor:pointer;\" onclick=\"knV10Stream(");
     sb_appendf(sb, "%d)\"><div class=\"thumbnail svelte-60shhe\">", i);
@@ -815,21 +813,21 @@ static void streams_card(StrBuf *sb, const int i, const int anim, const int dela
     sb_append(sb, "\"> <div class=\"viewer-count svelte-60shhe\"><span class=\"dot svelte-60shhe\"></span> <span class=\"svelte-60shhe\">");
     sb_append_esc(sb, count);
     sb_append(sb, " viewers</span></div>");
+    // :146848, :148556-148575: flag, drops, event chips, in that order. Regular / rest cards have no chips.
+    if (s->lang[0] && strcasecmp(s->lang, "en") != 0) {
+        sb_append(sb, "<div class=\"language-flag svelte-60shhe\"><div class=\"flag-icon flag-icon-");
+        sb_append_esc(sb, s->lang);
+        sb_append(sb, " svelte-60shhe\"></div></div>");
+    }
     if (s->dropped) {
         sb_append(sb, "<div class=\"drop-badge svelte-60shhe\"><span class=\"drop-icon svelte-60shhe\" role=\"img\" aria-label=\"🎁\" style=\"display:inline-block;width:17.44px;height:14px;background:url(img/gift-emoji.png) no-repeat center / contain;\"></span> <span class=\"drop-text svelte-60shhe\">DROPS</span></div>");
     }
-    if (s->has_tags) {
+    if (featured && s->has_tags) {
         // under a drop badge the chips sit 36 px down (v10's .thumbnail:has(.drop-badge) .event-tags-badge)
         sb_append(sb, s->dropped ? "<div class=\"event-tags-badge svelte-60shhe\" style=\"top:36px;\">"
                                  : "<div class=\"event-tags-badge svelte-60shhe\">");
         if (s->tags) sb_append(sb, s->tags);
         sb_append(sb, "</div>");
-    }
-    // the flag shows for any language but English (v10's languageCode !== 'en' test)
-    if (s->lang[0] && strcasecmp(s->lang, "en") != 0) {
-        sb_append(sb, "<div class=\"language-flag svelte-60shhe\"><div class=\"flag-icon flag-icon-");
-        sb_append_esc(sb, s->lang);
-        sb_append(sb, " svelte-60shhe\"></div></div>");
     }
     sb_append(sb, "</div><div class=\"stream-info svelte-60shhe\"><h3 class=\"stream-title svelte-60shhe\">");
     sb_append_esc(sb, s->title);
@@ -908,15 +906,15 @@ static void streams_render(void) {
     }
     html_dom_set_style(ov, "animation", root_fade ? "kn-stream-fade 200ms linear 0ms both" : "");
 
-    StrBuf sb = {0};
+    // :146863 has no .streams-body wrapper: the featured section / plain grid and the rest grid are siblings.
+    StrBuf sb = {0}, rest = {0};
     if (y.body) {
-        sb_append(&sb, "<div class=\"streams-body svelte-60shhe\" id=\"knStreamsBody\">");
         if (y.feat) {
-            sb_append(&sb, "<div class=\"featured-section svelte-60shhe\"><div class=\"featured-label svelte-60shhe\">Featured</div>");
+            sb_append(&sb, "<div class=\"featured-section svelte-60shhe\" id=\"knStreamsBody\"><div class=\"featured-label svelte-60shhe\">Featured</div>");
             sb_appendf(&sb, "<div class=\"streams-grid featured-grid svelte-60shhe\" style=\"grid-template-columns: repeat(%d, 180px);\">", y.cols);
             for (int i = 0; i < y.shown; i++) {
                 const int anim = i >= prev_count[SB_FEAT];
-                streams_card(&sb, i, anim, STREAMS_STAGGER_MS * i);
+                streams_card(&sb, i, 1, anim, STREAMS_STAGGER_MS * i);
                 L.prev_count[SB_FEAT] = i + 1;
             }
             if (y.prom_grid) {
@@ -926,10 +924,11 @@ static void streams_render(void) {
             }
             sb_append(&sb, "</div></div>");
         } else {
-            sb_appendf(&sb, "<div class=\"streams-grid regular-grid svelte-60shhe\" style=\"grid-template-columns: repeat(%d, 180px);\">", y.cols);
+            // With no featured stream v10 still uses featured-grid, not regular-grid (:146855, :148612-148669).
+            sb_appendf(&sb, "<div class=\"streams-grid featured-grid svelte-60shhe\" id=\"knStreamsBody\" style=\"grid-template-columns: repeat(%d, 180px);\">", y.cols);
             for (int i = 0; i < y.shown; i++) {
                 const int anim = i >= prev_count[SB_PLAIN];
-                streams_card(&sb, i, anim, STREAMS_STAGGER_MS * i);
+                streams_card(&sb, i, 0, anim, STREAMS_STAGGER_MS * i);
                 L.prev_count[SB_PLAIN] = i + 1;
             }
             if (y.prom_grid) {
@@ -940,28 +939,28 @@ static void streams_render(void) {
             sb_append(&sb, "</div>");
         }
         if (y.rest_on) {
-            sb_appendf(&sb, "<div class=\"streams-grid regular-grid svelte-60shhe\" style=\"grid-template-columns: repeat(%d, 180px); max-height: %dpx;\">",
+            sb_appendf(&rest, "<div class=\"streams-grid regular-grid svelte-60shhe\" id=\"knStreamsRest\" style=\"grid-template-columns: repeat(%d, 180px); max-height: %dpx;\">",
                        STREAMS_COLS, y.max_h);
             for (int j = 0; j < y.rest; j++) {
                 const int anim = j >= prev_count[SB_REST];
                 const int delay = j < STREAMS_REST_STAGGER_MAX ? STREAMS_STAGGER_MS * j : 0;
-                streams_card(&sb, L.nfeat + j, anim, delay);
+                streams_card(&rest, L.nfeat + j, 0, anim, delay);
                 L.prev_count[SB_REST] = j + 1;
             }
-            sb_append(&sb, "</div>");
             if (y.prom_row) {
                 const int anim = !prev_promo[PB_ROW];
-                streams_promo(&sb, anim, 0);
+                streams_promo(&rest, anim, 0); // :148728-148742: the row promo is inside the rest grid
                 L.prev_promo[PB_ROW] = 1;
             }
+            sb_append(&rest, "</div>");
         }
-        sb_append(&sb, "</div>");
     }
     char *html = sb_finish(&sb);
-    HtmlElem old = by_id("knStreamsBody");
-    if (old) html_dom_remove(old);
-    if (html) html_dom_insert_html(ov, HTML_INSERT_BEFORE_END, html);
+    streams_replace("knStreams", "knStreamsBody", html);
     free(html);
+    char *rest_html = sb_finish(&rest);
+    streams_replace("knStreams", "knStreamsRest", rest_html);
+    free(rest_html);
 
     // the header: the drops tag beside the title (dropCampaigns.length > 0), the buttons at the right
     StrBuf hb = {0};
@@ -1579,7 +1578,25 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         const char *json = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
         L.override = json && *json;
         if (L.override) {
-            cJSON *res = cJSON_Parse(json);
+            cJSON *res = NULL;
+            if (json[0] == '@') { // @file: an input-script argument cannot carry a long JSON string
+                FILE *f = fopen(json + 1, "rb");
+                if (f) {
+                    fseek(f, 0, SEEK_END);
+                    const long len = ftell(f);
+                    fseek(f, 0, SEEK_SET);
+                    char *text = len > 0 && len < (1 << 20) ? malloc((size_t) len + 1) : NULL;
+                    if (text) {
+                        const size_t got = fread(text, 1, (size_t) len, f);
+                        text[got] = 0;
+                        res = cJSON_Parse(text);
+                        free(text);
+                    }
+                    fclose(f);
+                }
+            } else {
+                res = cJSON_Parse(json);
+            }
             streams_apply(res);
             cJSON_Delete(res);
         } else {

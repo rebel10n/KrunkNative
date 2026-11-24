@@ -52,10 +52,10 @@ SCRIPT = """
 15000 rects @tab .tabBody
 15000 rects @holder .endButtonsHolder
 15000 rects @card #endTabbedView
-15000 nodes @dxp .doubleXPButton
+15000 nodes @dxp [id=doubleXPButton]
 15000 text @deftab .tabHeader.selected
 15000 text @scorelabel .crLabel
-15000 rects @dxp .doubleXPButton
+15000 rects @dxp [id=doubleXPButton]
 15500 nodes @rank1 .rank-display
 15500 text @name1 .rank-display .rank-value
 15500 text @rating1 .rank-display .crVal

@@ -21,8 +21,8 @@ types showed them in Popular Now, and the streams were the brain's for every Ser
 Each card's picture: the answer's thumbnailUrl is a JPEG on a third stub (the CDN: /previews/<name>-440x248.jpg). The
 first card's <img src> is that URL, as v10's markup sets it (v10.js:146254) on every Server Type, the CDN is asked for
 it, and the picture is drawn in a frame of the page. The cache is cold (KRUNKNATIVE_REMOTE_IMAGE_CACHE): the picture
-arrives after the page's first paint, and the page must repaint to show it. The client never asks the brain's
-/streams/thumb for a picture (the stub counts such requests).
+arrives after the page's first paint, and the page must repaint to show it. Those hosts are not Twitch's CDN, so the
+brain's /streams/thumb is asked only for the later static-cdn.jtvnw.net card.
 
 Each answer has three streams, so the overlay has three cards: they sit in one row inside the grid's content box and
 the grid is no taller than them, on every Server Type. A horizontal scrollbar under the cards would make the grid
@@ -253,9 +253,12 @@ def phase(t, tag):
             "%d rects @%s_grid [id=knStreams] .streams-grid\n"
             "%d rects @%s_cards [id=knStreams] .stream-card\n"
             "%d rect @%s_ovbox knStreams\n"
+            "%d nodes @%s_body [id=knStreams] > .streams-body\n"
+            "%d nodes @%s_gridclass [id=knStreams] > .streams-grid.featured-grid\n"
+            "%d nodes @%s_mode [id=knStreamsMode]\n"
             % (t, tag, t + 5, tag, t + 10, tag, t + 20, tag, t + 30, tag, t + 40, tag, t + 45, tag,
                t + 46, tag, t + 47, os.path.join(WORK, tag),
-               t + 100, tag, t + 100, tag, t + 100, tag))
+               t + 100, tag, t + 100, tag, t + 100, tag, t + 110, tag, t + 111, tag, t + 112, tag))
 
 
 def boxes(log, label):
@@ -328,7 +331,31 @@ def main():
     script += "5200 call setSetting \"knSeekServers\" \"official\"\n" + phase(8000, "kio")
     script += "8200 call setSetting \"knSeekServers\" \"both\"\n" + phase(11000, "both")
     script += "11200 call setSetting \"knSeekServers\" \"kn\"\n" + phase(14000, "bo2")
-    script += "14300 quit\n"
+    mixed = {"streams": [
+        {"username": "feat0", "title": "Featured event", "featured": True, "viewerCount": 100, "languageCode": "de",
+         "eventTags": ["Cup"], "thumbnailUrl": "https://static-cdn.jtvnw.net/previews-ttv/live_user_feat0-440x248.jpg"},
+        {"username": "feat1", "title": "Featured one", "featured": True, "viewerCount": 90, "languageCode": "en", "thumbnailUrl": ""},
+        {"username": "feat2", "title": "Featured two", "featured": True, "viewerCount": 80, "languageCode": "en", "thumbnailUrl": ""},
+        {"username": "feat3", "title": "Featured three", "featured": True, "viewerCount": 70, "languageCode": "en", "thumbnailUrl": ""},
+        {"username": "regular", "title": "Regular event", "viewerCount": 60, "languageCode": "fr", "eventTags": ["Hidden"],
+         "thumbnailUrl": "http://127.0.0.1:%d/previews/regular-440x248.jpg" % cdn_port}],
+        "promo": True, "dropCampaigns": [{"streamerNames": ["feat0"]}]}
+    mixed_path = os.path.join(WORK, "mixed-streams.json")
+    with open(mixed_path, "w") as f:
+        json.dump(mixed, f, separators=(",", ":"))
+    script += "14300 call knV10Streams \"@%s\"\n" % mixed_path
+    script += ("14320 nodes @struct_event .stream-card.has-event\n"
+               "14321 nodes @struct_order [id=knStreamsBody] .thumbnail > .viewer-count + .language-flag\n"
+               "14322 nodes @struct_droporder [id=knStreamsBody] .thumbnail > .language-flag + .drop-badge\n"
+               "14323 nodes @struct_tagorder [id=knStreamsBody] .thumbnail > .drop-badge + .event-tags-badge\n"
+               "14324 attr @struct_proxy src [id=knStreamThumb0]\n"
+               "14400 clickid knStreamsMode\n"
+               "14500 nodes @struct_restevent [id=knStreamsRest] .stream-card.has-event\n"
+               "14501 nodes @struct_resttags [id=knStreamsRest] .event-tags-badge\n"
+               "14502 nodes @struct_restpromo [id=knStreamsRest] > .promo-card\n"
+               "14503 attr @struct_direct src [id=knStreamThumb4]\n"
+               "14504 nodes @struct_restorder [id=knStreamsRest] .thumbnail > .viewer-count + .language-flag\n"
+               "14600 quit\n")
     log = run_native(script, brain.server_address[1], kio.server_address[1])
     brain.shutdown()
     kio.shutdown()
@@ -386,7 +413,24 @@ def main():
     for tag, name in (("bo", "Box Office servers"), ("kio", "krunker.io servers"), ("both", "Both"), ("bo2", "Box Office servers again")):
         ok, detail = overlay_fits(log, tag)
         check(ok, f"{name}: the three cards fit the Live Streams overlay, no horizontal scrollbar ({detail})")
-    check(Brain.hits.get("/streams/thumb", 0) == 0, "the client never asks the brain's /streams/thumb for a picture")
+        check(nodes(log, "@%s_body" % tag) == 0, f"{name}: no .streams-body wrapper")
+        check(nodes(log, "@%s_gridclass" % tag) == 1, f"{name}: no featured streams still uses featured-grid")
+        check(nodes(log, "@%s_mode" % tag) == 0, f"{name}: three unfeatured streams have no More button")
+    # these answers' pictures are on the stub CDN, not Twitch. Only the later static-cdn card is proxied.
+    check(Brain.hits.get("/streams/thumb", 0) == 1, "only the static-cdn card asks the brain's /streams/thumb")
+
+    check(nodes(log, "@struct_event") == 1, "only the featured card with event tags has has-event")
+    check(nodes(log, "@struct_order") == 1 and nodes(log, "@struct_droporder") == 1 and nodes(log, "@struct_tagorder") == 1,
+          "the featured thumbnail orders viewer count, language, drops, event tags")
+    check(nodes(log, "@struct_restevent") == 0 and nodes(log, "@struct_resttags") == 0,
+          "a regular card with eventTags draws neither the chips nor has-event")
+    check(nodes(log, "@struct_restpromo") == 1, "the expanded row promo is inside the rest grid")
+    check(nodes(log, "@struct_restorder") == 1, "a regular thumbnail keeps viewer count before its language flag")
+    proxy = attr_src(log, "@struct_proxy") or ""
+    check(proxy.startswith("http://127.0.0.1:%d/streams/thumb?url=" % brain.server_address[1]) and
+          "static-cdn.jtvnw.net" in proxy, "only static-cdn.jtvnw.net uses the brain thumbnail proxy (%s)" % proxy)
+    direct = attr_src(log, "@struct_direct") or ""
+    check(direct == mixed["streams"][-1]["thumbnailUrl"], "a non-Twitch host keeps its direct thumbnail URL (%s)" % direct)
 
     if failures:
         print(f"menu_sources_e2e: {len(failures)} failed (logs in {WORK})")
