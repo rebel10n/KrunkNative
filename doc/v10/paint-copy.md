@@ -331,7 +331,6 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   paints, `basic.frag` mixes the albedo as the official colorNode does). The official client does not yet get native
   players' paint: the C bridge (`server/bridge/v10_translate.c`) accepts V2 and takes only the indices.
 - `paintTargets` (which items accept a paint) is not checked by the brain; the client offers only paintable items.
-- The style route (`POST /items/{id}/style`) is still a refusal.
 
 ## Not verified
 
