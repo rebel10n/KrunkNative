@@ -75,6 +75,7 @@
 #include "skins.h"
 #include "v10_api.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -102,7 +103,7 @@
 #define MAX_TICKETS 64
 #define MAX_PARTS 14
 #define CHUNK_MAX (512u * 1024u)
-#define NAME_MAX_LEN 128 /* published_assets.name (mysql VARCHAR(128)); the popup allows 500 characters */
+#define NAME_MAX_LEN 500 /* the publish boxes' maxlength (deob-10.0.7.js:220959, editor.deob.js:20615) */
 #define MB 1000000ll     /* the editor measures MB as size / 1000000 (updateFile, editor-10.0.7.js:13942) */
 #define KB 1000ll
 #define MOD_LEVEL 5              /* MODS_PUBLISH_LEVEL_TOO_LOW below it (errors.mods.publishLevelTooLow names level 5) */
@@ -834,11 +835,11 @@ void asset_upload_begin(SocialSession *s, const cJSON *f) {
     Ticket *t = &b->t;
     t->account = s->account_id;
     snprintf(t->username, sizeof t->username, "%s", s->username);
-    /* the name: trimmed, 1..128 characters */
+    /* the name: trimmed, 1..500 characters (the asset popup's maxlength, editor.deob.js:20615) */
     const char *name = fa_str(f, 1);
-    while (name && (*name == ' ' || *name == '\t')) name++;
+    while (name && isspace((unsigned char) *name)) name++;
     size_t nl = name ? strlen(name) : 0;
-    while (nl && (name[nl - 1] == ' ' || name[nl - 1] == '\t')) nl--;
+    while (nl && isspace((unsigned char) name[nl - 1])) nl--;
     if (!nl) {
         free(b);
         refuse(s, "Invalid Name");
@@ -1754,11 +1755,11 @@ static void h_mod_key(kn_http_req *req, void *ud) {
     k->req = req;
     k->t.kind = K_MOD;
     snprintf(k->t.ext, sizeof k->t.ext, "zip");
-    /* the name: trimmed (submit() trims it too), 1..128 characters, no control characters or markup */
+    /* the name: trimmed (submit() trims it, deob-10.0.7.js:220995), 1..500 characters, no control characters or markup */
     const char *name = kn_json_str(in, "name", "");
-    while (*name == ' ' || *name == '\t') name++;
+    while (*name && isspace((unsigned char) *name)) name++;
     size_t nl = strlen(name);
-    while (nl && (name[nl - 1] == ' ' || name[nl - 1] == '\t')) nl--;
+    while (nl && isspace((unsigned char) name[nl - 1])) nl--;
     int restricted = 0;
     for (size_t i = 0; i < nl; i++) restricted |= (unsigned char) name[i] < 0x20 || name[i] == '<' || name[i] == '>' || name[i] == '"';
     const size_t keep = brain_utf16_prefix(name, NAME_MAX_LEN);

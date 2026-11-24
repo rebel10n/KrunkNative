@@ -302,6 +302,22 @@ async def scenario_mods(names):
     await other.send(["plm", "Neon Pack"])
     f = await other.recv_until(lambda f: f[0] in ("plm", "po"))
     check(f and f[0] == "po" and f[1] is None and f[2] == "Mod not found", "plm on another account's mod -> po Mod not found: %r" % (f,))
+    time.sleep(0.35)
+    long = "L" * 200
+    st, d, code = mod_key(sock.token, "  " + long + "  ", len(zipped))
+    st, body = mod_send(d["fileId"] if d else "", [("mod", zipped)])
+    j = json.loads(body) if st == 200 else {}
+    lid = (j.get("data") or {}).get("mod_id", 0)
+    row = q("SELECT mod_name FROM published_mods WHERE mod_id = ?", lid)
+    check(st == 200 and row and row[0][0] == long,
+          "a 200-character mod name is kept and trimmed (deob-10.0.7.js:220959): %r" % (row,))
+    time.sleep(0.35)
+    st, d, code = mod_key(sock.token, "H" * 600, len(zipped))
+    st, body = mod_send(d["fileId"] if d else "", [("mod", zipped)])
+    j = json.loads(body) if st == 200 else {}
+    hid = (j.get("data") or {}).get("mod_id", 0)
+    row = q("SELECT mod_name FROM published_mods WHERE mod_id = ?", hid)
+    check(st == 200 and row and row[0][0] == "H" * 500, "a mod name stops at 500 characters: %r" % (row and len(row[0][0]),))
     await other.close()
     await sock.close()
 
