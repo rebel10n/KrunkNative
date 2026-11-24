@@ -285,6 +285,9 @@ static void test_recruit_fields(void) {
     CHECK(js_list_price("10e2") == 10 && js_list_price("1e2") == 1 && js_list_price("15.9") == 15 && js_list_price("") == 0 &&
               js_list_price("-3") == 0,
           "a listing price stops at the first letter");
+    CHECK(js_loot_share("") == 0 && js_loot_share("1e2") == 1 && js_loot_share("150") == 100 && js_loot_share("-5") == 0 &&
+              js_loot_share("40") == 40,
+          "a cleared top share is 0 and the rest is 100");
     CHECK(js_floor_tenth("1e2") == 10 && js_floor_tenth("15") == 1 && js_floor_tenth("15.9") == 1 && js_floor_tenth("-4") == 0 &&
               js_floor_tenth("9") == 0,
           "a clan deposit fee is floor of 10 percent of the number");

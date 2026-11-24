@@ -25,6 +25,15 @@ static inline long js_list_price(const char *s) {
     return p < 1 ? 0 : p;
 }
 
+/* Clan top share (deob iìïiïìï): parseInt(value) || 0, clamped to 0..100.
+   A cleared box is 0, and "1e2" is 1. The remainder is 100 minus this. */
+static inline int js_loot_share(const char *s) {
+    long p = js_parse_int(s);
+    if (p < 0) return 0;
+    if (p > 100) return 100;
+    return (int) p;
+}
+
 static inline long js_floor_tenth(const char *s) {
     double v = s && *s ? atof(s) : 0;
     if (v < 0) v = 0;

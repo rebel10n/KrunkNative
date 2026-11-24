@@ -1553,10 +1553,15 @@ static void sync_forms(void) {
     if (g_clan_tab != 4) return;
     if (html_dom_by_id("clanMotdInput")) read_value("clanMotdInput", S.motd_text, sizeof(S.motd_text));
     if (html_dom_by_id("lootMode")) read_value("lootMode", S.loot_mode, sizeof(S.loot_mode));
-    // bound as typed (v10 sends them so); the top share is clamped and moves the remainder only on its own input
+    // bound as typed (v10 sends them so); the top share is parseInt || 0, clamped 0..100, and the rest is 100 - it
     S.loot_clan_pct = read_int("lootClanPct", S.loot_clan_pct);
     S.loot_top_count = read_int("lootTopCount", S.loot_top_count);
-    S.loot_top_pct = clampi(read_int("lootTopPct", S.loot_top_pct), 0, 100);
+    if (html_dom_by_id("lootTopPct")) {
+        char share[32] = "";
+        read_value("lootTopPct", share, sizeof share);
+        S.loot_top_pct = js_loot_share(share);
+        S.loot_rem = 100 - S.loot_top_pct;
+    }
     S.loot_min_games = read_int("lootMinGames", S.loot_min_games);
     if (html_dom_by_id("recruit-desc")) {
         read_value("recruit-desc", S.r_desc, sizeof(S.r_desc));
@@ -2064,7 +2069,6 @@ static void motd_input(void) {
 static void loot_input(const int top_share) {
     sync_forms();
     if (top_share) {
-        S.loot_rem = 100 - S.loot_top_pct;
         HtmlElem in = html_dom_by_id("lootTopPct");
         char typed[32] = "", v[16];
         if (in) html_dom_get_value(in, typed, sizeof(typed));
