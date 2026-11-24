@@ -102,3 +102,5 @@ int game_apply_freeze_others(struct Game_t *game, int freeze, int except_uid);
 // disableMelee = freeze, the script's own flags (its KsRef, created when the game has no script yet).
 // An unfreeze turns all four on whatever the script had set; a respawn's reset turns the movement on.
 void player_apply_freeze(struct Player_t *player, int freeze);
+// The player list's FREEZE (ADMIN_ACTIONS 6): one player, the same "frz" and hold as applyFreezeOthers.
+void game_freeze_player(struct Game_t *game, struct Player_t *player, int freeze);

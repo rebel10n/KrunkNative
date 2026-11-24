@@ -18,6 +18,7 @@
 #include <shared.h>
 #include <game_config.h> // game_config_is_custom: no vote kicks in hosted lobbies (v10 isCustom)
 #include <chat_commands.h> // chat_command_admin_action: the DEV kick / ban (NET_EXT_ADMIN_ACTION)
+#include <player_pose.h>   // game_freeze_player: the player list's FREEZE (ADMIN_ACTIONS 6)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -515,7 +516,7 @@ void votekick_handle_admin(ClientConnection *client, const uint8_t *body, const 
     if (!client || length < sizeof(NetAdminActionPacket)) return;
     NetAdminActionPacket req;
     memcpy(&req, body, sizeof(req));
-    if (req.action != 0 && req.action != 1 && req.action != 2 && req.action != 7 && req.action != 8) return; // kill / tp / bring stay chat commands
+    if (req.action != 0 && req.action != 1 && req.action != 2 && req.action != 6 && req.action != 7 && req.action != 8) return; // kill / tp / bring stay chat commands
     if (req.action == 2) { // Kick Spec: punishPlayer(null, 2), host or canGlobalKick (deob-10.0.7.js:264659, :268431)
         const int host = accounts_is_custom_host(client);
         const int mod = vk_is_account(client) && (client->acct.flags & NET_PLAYER_INFO_MOD);
@@ -524,6 +525,16 @@ void votekick_handle_admin(ClientConnection *client, const uint8_t *body, const 
             return;
         }
         net_kick_spectators(client->id, "Kicked by host", "004002");
+        return;
+    }
+    if (req.action == 6) { // FREEZE: punishPlayer(id, 6), isDev only (deob-10.0.7.js:264674). "frz" carries the new state.
+        if (!net_client_is_dev(client)) {
+            vk_chat_to(client, "Only DEV accounts can freeze from the player list");
+            return;
+        }
+        ClientConnection *target = vk_by_id((int) req.uid);
+        if (target == client) vk_chat_to(client, "Cannot freeze yourself");
+        else if (target && target->player) game_freeze_player(target->player->game, target->player, !target->player->frozen);
         return;
     }
     if (req.action == 7) {

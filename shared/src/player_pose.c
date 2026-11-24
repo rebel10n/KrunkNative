@@ -113,3 +113,15 @@ int game_apply_freeze_others(Game *game, const int freeze, const int except_uid)
     }
     return changed;
 }
+
+void game_freeze_player(Game *game, Player *player, const int freeze) {
+    // one player of applyFreezeOthers (:221558-221564): "frz", and a live player held where it stands
+    if (!game || !player || !game_is_authority(game)) return;
+    player_apply_freeze(player, freeze);
+    if (freeze && player->active) {
+        game_change_position(game, player, player->position, 1, 1, 0, 0);
+        trigger_send_change_position(game, player, 1, 1, 0, 0);
+    }
+    const NetCheatPacket packet = {.flag = NET_CHEAT_FROZEN, .on = (uint8_t) !!freeze};
+    game_send(game, player->uid, NET_PACKET_CHEAT, &packet, sizeof(packet));
+}

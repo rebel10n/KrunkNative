@@ -708,7 +708,7 @@ typedef struct {
 // the sender gets a Server line.
 typedef struct {
     int32_t uid;
-    uint8_t action; // 0 kick, 1 ban, 2 kick spectators (uid ignored), 8 transfer host (v10 punishPlayer)
+    uint8_t action; // 0 kick, 1 ban, 2 kick spectators (uid ignored), 6 freeze that player, 8 transfer host (v10 punishPlayer)
 } NetAdminActionPacket;
 
 // NET_EXT_KPD_RESPONSE (S -> C, v10 "kpd" [code, message, data]): code 0 answers a call

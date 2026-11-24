@@ -840,7 +840,7 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
 // /kick, /ban). A K.P.D officer's case (hud_votekick.c kpdData) puts the suspect first in a red
 // row. In a canTrade mode (Trade) every row starts with Trade Player (requestTrade -> "strd", the live
 // trade: trade_ui.c). Kick Spec (the local row, host or canGlobalKick) is punishPlayer(null, 2).
-// Not ported: FREEZE and the bots popup (no server action behind them yet).
+// FREEZE (another row, isDev) is punishPlayer(id, 6). Not ported: the bots popup.
 static char g_plist_search[64]; // windows[22].playerSearch
 
 typedef struct {
@@ -991,6 +991,7 @@ static void hud_plist_row(StrBuf *sb, const Client *client, const PlistRow *r, c
     if (dev) { // account.canTeleport: staff (the host teleports with /tp and /bring)
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton tp2' onclick='punishPlayer(\"%d\", 4)'>TP2</span>", r->uid);
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton tpme' onclick='punishPlayer(\"%d\", 5)'>TPME</span>", r->uid);
+        sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton tpme' onclick='punishPlayer(\"%d\", 6)'>FREEZE</span>", r->uid);
     }
     if (kick || host) // isHost || account.canGlobalKick / canSilentKick / canGlobalBan / canGlobalFlag
         sb_appendf(sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPopup(\"%d\")'>"
@@ -5506,7 +5507,7 @@ static void plist_punish_send(const int uid, const int action) {
         if (menu_ui()->client) hud_votekick_admin_action(menu_ui()->client, 0, 2);
         return;
     }
-    if (action == 0 || action == 1 || action == 7 || action == 8) { // Kick / Ban / Disconnect / Transfer Host: v10 ADMIN_ACTIONS (the server checks the right)
+    if (action == 0 || action == 1 || action == 6 || action == 7 || action == 8) { // Kick / Ban / FREEZE / Disconnect / Transfer Host: v10 ADMIN_ACTIONS (the server checks the right)
         if (menu_ui()->client) hud_votekick_admin_action(menu_ui()->client, uid, action);
         return;
     }

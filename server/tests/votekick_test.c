@@ -542,6 +542,17 @@ int main(void) {
     give_account(C, 203, 30, "CarolToo");
     CHECK(conn(C) != NULL, "Carol is back for the Disconnect case");
     reset_received();
+    admin_action(B, conn(C)->id, 6); // a moderator is not isDev
+    pump(5);
+    CHECK(conn(C) && conn(C)->player && !conn(C)->player->frozen && got_chat(B, "Only DEV accounts can freeze from the player list"),
+          "a moderator's FREEZE is refused: Carol stays unfrozen");
+    admin_action(A, conn(C)->id, 6);
+    pump(5);
+    CHECK(conn(C)->player && conn(C)->player->frozen, "a DEV's FREEZE freezes Carol");
+    admin_action(A, conn(C)->id, 6);
+    pump(5);
+    CHECK(conn(C)->player && !conn(C)->player->frozen, "FREEZE again lets Carol move");
+    reset_received();
     admin_action(B, conn(C)->id, 7); // a moderator is not canSilentKick
     admin_action(A, conn(A)->id, 7); // the DEV herself
     pump(5);
