@@ -6,7 +6,7 @@ trade offers against kn_brain on a scratch database, with concurrency tests.
 env: KN_TEST_DB_DRIVER=postgres (default: a per-run schema in config/config.json's database,
      127.0.0.1:5432 in development) | sqlite | mysql (db_scratch.py). 77 = skip.
 
-Covers the v7.1.4 rules (gift min / fee ceil / level 10 (v10; v7.1.4 30), list fee floor / level 10 (v7.1.4 15) / MAX / sale
+Covers the v7.1.4 rules (gift min / fee ceil / level 10 (v10; v7.1.4 30), list fee ceil (v10.0.7's list modal; v7.1.4 floor) / level 10 (v7.1.4 15) / MAX / sale
 grace, non-tradable items, quick sell, trade level 10 on both sides (v7.1.4 20), 5 / 20 items per side, the
 per-rarity trade fee, premium), KrunkNative's KR in offers + escrow, the idempotency keys (a
 replayed frame does not move anything twice), feature bans, account bans, trade locks, rate
@@ -378,8 +378,8 @@ async def scenario(url, db):
         set_player(db, C, level=40)
         before = funds(db, C)
         r = await c.call(("lir", "po"), "li", 4, 4, 7, 1009, op())
-        check(r[0] == "lir" and r[2] == 7 and r[1]["fee"] == 100 and r[1]["funds"] == before - 100 and r[1]["cnt"] == 2,
-              "listed: fee floor(10%%), item leaves the inventory: %r" % (r,))
+        check(r[0] == "lir" and r[2] == 7 and r[1]["fee"] == 101 and r[1]["funds"] == before - 101 and r[1]["cnt"] == 2,
+              "listed: fee ceil(10%%) of 1009 is 101, item leaves the inventory: %r" % (r,))
         listing = r[1]["listingId"]
         r = await c.call(("lir", "po"), "li", 4, 4, 7, 0, op())
         check(po_text(r) == "Invalid price", "price 0 refused")

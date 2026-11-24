@@ -38,8 +38,11 @@ cJSON *econ_rules_request(void) {
 }
 
 double econ_list_fee(const double price) {
-    if (price <= g_econ_rules.market_fee_bypass) return 0;
-    return floor(price * g_econ_rules.market_fee / 100.0);
+    /* v10.0.7's list modal (deob-10.0.7.js:130807): Math.ceil(0.1 * parseInt(price)). The percent
+     * comes from the server's marketFee. At or below marketFeeBypass there is no fee. */
+    const long long p = (long long) price, pct = (long long) g_econ_rules.market_fee;
+    if (p < 1 || p <= (long long) g_econ_rules.market_fee_bypass || pct <= 0) return 0;
+    return (double) ((p * pct + 99) / 100);
 }
 
 double econ_gift_fee(const double amount) {

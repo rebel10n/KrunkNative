@@ -37,7 +37,7 @@ typedef struct AcctConfig {
     int gift_min_level;             /* config.giftMinLVl 10 (v10) */
     int gift_fee_percent;           /* KR gift fee, ceil (config.giftFee 10/100) */
     int64_t gift_min, gift_max;     /* config.giftMin 10 / giftMax 1e7 */
-    int market_fee_percent;         /* list fee, floor (config.marketFee 10/100) */
+    int market_fee_percent;         /* list fee, ceil (config.marketFee 10/100; deob-10.0.7.js:130807) */
     int64_t market_fee_bypass;      /* prices <= this pay no fee (config.marketFeeBypass 0) */
     int market_min_level;           /* config.marketMinLVl 10 (v10; list + buy) */
     int64_t sale_max;               /* max listing price (config.saleMax 1e7) */

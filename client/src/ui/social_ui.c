@@ -5992,7 +5992,8 @@ H(h_sell_confirmed) {
     return 1;
 }
 
-// calcFee(input): the list fee line, floor(price * marketFee) unless price <= marketFeeBypass
+// calcFee(input): the list fee line. v10.0.7's market modal ceils it (deob-10.0.7.js:130807);
+// a price at or below marketFeeBypass shows no fee
 H(h_calc_fee) {
     (void) user; (void) args; (void) argc;
     const HtmlElem in = ev ? ev->target : 0;
@@ -6002,7 +6003,9 @@ H(h_calc_fee) {
     double a = atof(text);
     if (a < 0) a = 0;
     if (a > SALE_MAX) a = SALE_MAX;
-    const double fee = a <= g_econ.market_fee_bypass ? 0 : floor(a * g_econ.market_fee / 100.0);
+    const long long price = (long long) a, pct = (long long) g_econ.market_fee;
+    const double fee = (price < 1 || price <= (long long) g_econ.market_fee_bypass || pct <= 0)
+                           ? 0 : (double) ((price * pct + 99) / 100);
     StrBuf sb = {0};
     if (fee > 0) {
         char n[32];

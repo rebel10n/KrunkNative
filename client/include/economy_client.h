@@ -23,7 +23,7 @@ cJSON *econ_rules_request(void);            // ["ecfg"]
 // store.rarities[r].sell / .fee (the quick-sell KR and calcTradeFee per unit), 0..7
 int econ_rarity_sell(int rarity);
 int econ_rarity_trade_fee(int rarity);
-// What the server charges: the list fee floor(price * marketFee%) (0 at or below marketFeeBypass),
+// What the server charges: the list fee ceil(price * marketFee%) (0 at or below marketFeeBypass),
 // the gift fee ceil(amount * giftFee%) on top
 double econ_list_fee(double price);
 double econ_gift_fee(double amount);

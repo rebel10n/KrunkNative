@@ -291,8 +291,9 @@ static void trade_keep_copy(Dbx *x, const int64_t trade, const char *side, const
 }
 
 /* $4 skin, $5 price, $6 fee %, $7 fee bypass, $8 sale max, $9 max listings, $10 min level, $11 the copy id (0 for a
- * stack's unit) -> {cnt, funds, listingId, fee} | {response: "MAX"}. v7.1.4 calcFee: floor(price * marketFee)
- * unless price <= marketFeeBypass, paid when listing (no fee on the sale). A painted copy (a copy id) is listed as
+ * stack's unit) -> {cnt, funds, listingId, fee} | {response: "MAX"}. v10.0.7's list modal
+ * (deob-10.0.7.js:130805-130807): fee = ceil(price * marketFee / 100), unless price <= marketFeeBypass,
+ * paid when listing (no fee on the sale). A painted copy (a copy id) is listed as
  * that copy: its paint is kept on the listing (paint_color / paint_shader) and given back with the copy (doc/v10/paint-copy.md). */
 static kn_db_result *run_market_list(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
@@ -315,7 +316,7 @@ static kn_db_result *run_market_list(kn_dbconn *c, int n, const char *const *p) 
         cJSON_AddStringToObject(o, "response", "MAX"); /* io_lir: "Max Items on Sale" */
         return econ_done(&x, n, p, "list", "kn_market_list", o);
     }
-    const int64_t fee = price <= PI(7) ? 0 : price * pct / 100; /* floor */
+    const int64_t fee = price <= PI(7) ? 0 : (price * pct + 99) / 100; /* ceil, as the list modal */
     int64_t cnt = 0, funds = 0, listing = 0;
     char ref[48];
     listing = dbx_insert_id(&x, SQL(.pg = "INSERT INTO market_listings (seller_id, skin_id, price) VALUES ($1, $2, $3) RETURNING id",
@@ -406,7 +407,7 @@ static kn_db_result *run_market_list_bulk(kn_dbconn *c, int n, const char *const
                 why = "Max Items on Sale"; /* io_lir's MAX */
                 break;
             }
-            const int64_t fee = price <= PI(6) ? 0 : price * pct / 100; /* floor, as run_market_list */
+            const int64_t fee = price <= PI(6) ? 0 : (price * pct + 99) / 100; /* ceil, as run_market_list */
             if (funds < fee) { /* the fee is paid when listing: a row the balance can't pay is its own error */
                 why = "Not enough KR";
                 break;

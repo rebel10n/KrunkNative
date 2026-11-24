@@ -119,7 +119,7 @@ async def scenario(url, db):
         r = await a.call("ilkr", "ilk")
         check([x["skin_id"] for x in r[1]["locks"]] == [COPY_BASE + 202], "one lock left: %r" % (r,))
 
-        # ---- bulk list: per-row errors, the fee per listing (10%, floor), escrow, a copy keeps its paint
+        # ---- bulk list: per-row errors, the fee per listing (10%, ceil), escrow, a copy keeps its paint
         give(db, A, LIST4, 3)  # 4 unpainted units (1 from earlier) + the locked copy
         add_copy(db, A, LIST4, COPY_BASE + 203, "#0000ff")
         f3 = funds(db, A)
@@ -130,7 +130,7 @@ async def scenario(url, db):
         errs = [x.get("error") for x in res.get("results", [])]
         check(r[2] == 31 and res.get("listed") == 3 and errs == [None, None, "That item is locked.", "Invalid price", "Item not owned"],
               "bulk list: 2 stack units + 1 copy listed, a locked copy / bad price / unowned row refused alone: %r" % (r,))
-        check(res.get("funds") == f3 - 15 - 15 - 30 and funds(db, A) == f3 - 60, "a fee per listing, floor(10%%): %r" % (res,))
+        check(res.get("funds") == f3 - 16 - 16 - 30 and funds(db, A) == f3 - 62, "a fee per listing, ceil(10%%): %r" % (res,))
         check(db.q("SELECT paint_color FROM market_listings WHERE seller_id = $1 AND paint_color IS NOT NULL", A) == [("#0000ff",)]
               and db.one("SELECT count(*) FROM skin_copies WHERE copy_id = $1", COPY_BASE + 203) == 0,
               "the copy's listing keeps its paint; the copy is in escrow")

@@ -2306,7 +2306,7 @@ static void list_modal_dynamic(StrBuf *sb) {
     }
     sb_append(sb, " ");
     if (M.price_in[0] && valid) {
-        // KrunkNative: the fee the server charges (marketFee %, rounded down; v10 shows ceil(10 %))
+        // the fee the server charges: ceil(marketFee % of the price), as the list modal shows it
         char fee[32], label[48];
         fmt(fee, sizeof(fee), econ_list_fee(atof(M.price_in)));
         snprintf(label, sizeof(label), "Listing Fee (%d%%):", (int) g_econ_rules.market_fee);
