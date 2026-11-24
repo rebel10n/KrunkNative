@@ -5,10 +5,12 @@
 //     (deob-10.0.7.js:226239, from INIT's custom map id and creator; here NET_EXT_KN_CREATION_INFO);
 //     an official map or a map the brain does not know leaves it empty (:226235);
 //   - voteMap(id, v) (:227018-227031): pressing the side already chosen clears the vote (0), the other
-//     side sets it (1 / -1); the choice goes to the server once, the two buttons are removed and a short
-//     notice says what happened; a guest's press just empties the panel (:227031);
-//   - voteMod(id, v) (:227008-227016): the same three-way choice for the loaded mod, then #modVoteHold's
-//     row is hidden; #modVote shows while a mod with a brain id is loaded (:225872-225880).
+//     side sets it (1 / -1); the choice goes to the server once and the two buttons are removed. The
+//     "Map Upvoted" line runs only when a third argument is passed, and the panel's onclick does not
+//     pass one, so a vote from the panel is silent. A guest's press just empties the panel (:227031);
+//   - voteMod(id, v) (:227008-227016): the same three-way choice for the loaded mod, then the thumbs'
+//     box is hidden and the Donate link stays; #modVote shows while a mod with a brain id is loaded
+//     (:225872-225880).
 // Krunker sends the vote on the game socket (MAP_VOTE "vote"); Box Office's maps and mods live in kn_brain,
 // so the client posts it there (services/brain/v10_catalog.c POST /maps/:id/vote, v10_mods.c POST
 // /mods/:id/vote), which keeps one vote per account and the net count.
@@ -121,7 +123,7 @@ static void render_mod(void) {
         // openPlayerProfile(creator, {autoGift: 1, assetName: mod}) (:225878): "I like your <mod> mod"
         snprintf(html, sizeof(html),
                  "<span class=\"voteHint vHR\" onclick='openPlayerProfile(\"%s\",1,\"%s\")'>%s</span>"
-                 "<span class=\"kn-vote-pair\">"
+                 "<span class=\"kn-vote-pair\" id=\"modVotePair\">"
                  "<i id=\"modVoteD\" class=\"material-icons vote\" onclick=\"voteMod(%d,-1)\">thumb_down</i>"
                  "<i id=\"modVoteU\" class=\"material-icons vote\" onclick=\"voteMod(%d,1)\">thumb_up</i>"
                  "</span>",
@@ -189,15 +191,13 @@ int creation_vote_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
     }
     v->vote = creation_vote_next(v->vote, press);
     send_vote(is_mod, id, v->vote);
-    if (is_map) {
+    if (is_map) { // the panel's onclick passes no third argument, so there is no "Map Upvoted" line
         remove_by_id("mapVoteD");
         remove_by_id("mapVoteU");
-        ui_notify(v->vote == 0 ? I18N("kn.creationVote.cleared", "Your map vote was taken back")
-                  : v->vote == 1 ? I18N("kn.creationVote.up", "You liked this map")
-                                 : I18N("kn.creationVote.down", "You disliked this map"));
     } else {
-        const HtmlElem hold = html_dom_by_id("modVoteHold");
-        if (hold) html_dom_set_display(hold, "none");
+        // the thumbs' box (modVoteU's parent), not the Donate link beside it (:227016)
+        const HtmlElem pair = html_dom_by_id("modVotePair");
+        if (pair) html_dom_set_display(pair, "none");
     }
     return 0;
 }

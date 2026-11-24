@@ -15,7 +15,7 @@ static int g_fail;
 
 // ---- stubs: a tiny id -> {html, display, removed} table
 typedef struct { const char *id; char html[1024]; char display[16]; int removed; } El;
-static El g_els[] = {{"mapVote"}, {"modVote"}, {"modVoteName"}, {"modVoteHold"}, {"mapVoteU"}, {"mapVoteD"}};
+static El g_els[] = {{"mapVote"}, {"modVote"}, {"modVoteName"}, {"modVoteHold"}, {"mapVoteU"}, {"mapVoteD"}, {"modVotePair"}};
 #define NELS ((int) (sizeof(g_els) / sizeof(g_els[0])))
 HtmlElem html_dom_by_id(const char *id) {
     for (int i = 0; i < NELS; i++)
@@ -70,12 +70,14 @@ int main(void) {
     CHECK(!strstr(g_els[0].html, "x()") || !strstr(g_els[0].html, "');x"), "creator is sanitised");
     CHECK(strstr(g_els[0].html, "openPlayerProfile(\"alicex\",2,\"Arena\")") != NULL, "creator keeps its safe characters");
 
-    // an upvote posts to the brain, removes the buttons and tells the player
+    // an upvote posts to the brain and removes the buttons. The panel's onclick passes no third
+    // argument, so v10 draws no "Map Upvoted" line (:227019, :227027).
     g_sends = 0;
+    g_notice[0] = 0;
     press("voteMap", 4242, 1);
     CHECK(g_sends == 1 && !strcmp(g_path, "POST /maps/4242/vote") && g_sent_vote == 1, "map upvote sent");
     CHECK(g_els[4].removed && g_els[5].removed, "map buttons removed after voting");
-    CHECK(strstr(g_notice, "liked") != NULL, "map upvote notice");
+    CHECK(g_notice[0] == 0, "map upvote is silent");
 
     // pressing up again (after the next INIT re-renders) takes it back
     reset_els();
@@ -107,14 +109,15 @@ int main(void) {
     CHECK(g_sends == 0 && g_els[0].html[0] == 0, "guest: no vote, panel emptied");
     g_signed_in = 1;
 
-    // a loaded mod shows #modVote; its vote posts to /mods/:id/vote and hides the row
+    // a loaded mod shows #modVote; its vote posts to /mods/:id/vote and hides the thumbs, not Donate
     reset_els();
     creation_vote_set_mod(55, "Neon", "carol");
     CHECK(!strcmp(g_els[1].display, "block") && !strcmp(g_els[2].html, "Neon"), "mod panel shown with its name");
     CHECK(strstr(g_els[3].html, "voteMod(55,-1)") && strstr(g_els[3].html, "id=\"modVoteU\""), "mod buttons rendered");
     CHECK(strstr(g_els[3].html, "openPlayerProfile(\"carol\",1,\"Neon\")") != NULL, "mod tip: autoGift 1 and the mod's name (deob-10.0.7.js:225878)");
     press("voteMod", 55, -1);
-    CHECK(!strcmp(g_path, "POST /mods/55/vote") && g_sent_vote == -1 && !strcmp(g_els[3].display, "none"), "mod downvote");
+    CHECK(!strcmp(g_path, "POST /mods/55/vote") && g_sent_vote == -1 && !strcmp(g_els[6].display, "none") && g_els[3].display[0] == 0,
+          "mod downvote hides the thumbs and leaves Donate");
     creation_vote_set_mod(0, NULL, NULL);
     CHECK(!strcmp(g_els[1].display, "none"), "no mod: panel hidden");
 
