@@ -28,6 +28,7 @@
 #include <cJSON.h>
 #include <html_dom.h>
 #include <html_ui.h>
+#include <js_int.h>
 #include <social.h>
 #include <badges.h>    // badge_get: the earned badges of a profile (Badges tab)
 #include <ranked.h>    // ranked_rank_icon: the profile header's rank (rankedRank)
@@ -8891,11 +8892,14 @@ H(h_calc_map_fee) {
     return 1;
 }
 
-// chngMapFunds(id, 0 deposit | 1 withdraw) (:6673-6679): parseInt of #mapFundsInp, sent when it is not 0
+// chngMapFunds(id, 0 deposit | 1 withdraw) (deob-10.0.7.js, window.chngMapFunds): parseInt of
+// #mapFundsInp, sent when that text is not empty. "1e3" is 1, not 1000.
 H(h_chng_map_funds) {
     UNUSED;
-    const double amount = trunc(map_tools_input_number("mapFundsInp"));
-    if (!amount || isnan(amount)) return 1;
+    char text[64] = "";
+    if (el("mapFundsInp")) html_dom_get_value(el("mapFundsInp"), text, sizeof(text));
+    const long amount = js_parse_int(text);
+    if (!amount) return 1;
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("mfnds"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));

@@ -15,6 +15,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <clan_recruit.h>
+#include <js_int.h>
 
 static int g_failures;
 
@@ -278,6 +279,9 @@ static void test_recruit_fields(void) {
           "a level is a whole number 0..200");
     CHECK(clan_recruit_kd_ok("1.5 ") && clan_recruit_kd_ok("99.99") && clan_recruit_kd_ok(""), "a K/D keeps the spaces around it");
     CHECK(!clan_recruit_kd_ok("100") && !clan_recruit_kd_ok("-0.1") && !clan_recruit_kd_ok("1.5x"), "a K/D stops at 99.99");
+    /* chngMapFunds: parseInt, so a scientific amount is not a thousand */
+    CHECK(js_parse_int("1e3") == 1 && js_parse_int("15.9") == 15 && js_parse_int("  -20") == -20 && js_parse_int("") == 0,
+          "parseInt stops at the first non-digit");
 }
 
 static void test_inputs_and_merge(void) {
