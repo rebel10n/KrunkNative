@@ -712,13 +712,17 @@ static kn_db_result *op_monetization_apply(Dbx *x, int64_t actor, int64_t studio
     if (role <= 0) return refuse(x, "STUDIO_NOT_FOUND");
     if (role != 1) return refuse(x, "STUDIO_FORBIDDEN");
     cJSON *in = cJSON_Parse(nz(json));
-    /* the description: 10..500 characters after trimming (v10's counter) */
+    /* trim().length, 10..500 (deob-10.0.7.js, the monetization dialog). A JS string's length
+       counts an emoji as two, the same way the box's maxlength does. */
     const char *d = jstr(in, "description");
     while (*d == ' ' || *d == '\n' || *d == '\t' || *d == '\r') d++;
     size_t len = strlen(d);
     while (len && (d[len - 1] == ' ' || d[len - 1] == '\n' || d[len - 1] == '\t' || d[len - 1] == '\r')) len--;
     size_t chars = 0;
-    for (size_t i = 0; i < len; i++) chars += ((unsigned char) d[i] & 0xC0) != 0x80;
+    for (size_t i = 0; i < len; i++) {
+        const unsigned char c = (unsigned char) d[i];
+        if ((c & 0xC0) != 0x80) chars += c >= 0xF0 ? 2 : 1;
+    }
     char *desc = malloc(len + 1);
     if (desc) {
         memcpy(desc, d, len);

@@ -382,10 +382,12 @@ async def scenario(port):
     check(st == 200 and mon["eligible"] is True and mon["can_apply"] is False, "monetization: eligible, but a member cannot apply", mon)
     st, mon, err = await own.gapi("GET", "/studios/%d/monetization" % sid)
     check(st == 200 and mon["eligible"] is True and mon["can_apply"] is True, "monetization: the owner can apply", mon)
-    st, data, err = await own.gapi("POST", "/studios/%d/monetization" % sid, {"description": "short", "map_ids": []})
-    check(st == 400 and code(err) == "MONETIZATION_INVALID", "apply: under 10 characters", err)
-    st, data, err = await own.gapi("POST", "/studios/%d/monetization" % sid, {"description": "A cosmetic shop in our map.", "map_ids": [m2]})
-    check(st == 400 and code(err) == "MONETIZATION_MAPS_INVALID", "apply: an example game outside the studio", err)
+    # trim().length: an emoji is two. Four is 8, five is 10 (deob-10.0.7.js, the dialog's counter).
+    grin = "\U0001f600"
+    st, data, err = await own.gapi("POST", "/studios/%d/monetization" % sid, {"description": grin * 4, "map_ids": []})
+    check(st == 400 and code(err) == "MONETIZATION_INVALID", "apply: four emoji is eight characters", err)
+    st, data, err = await own.gapi("POST", "/studios/%d/monetization" % sid, {"description": grin * 5, "map_ids": [m2]})
+    check(st == 400 and code(err) == "MONETIZATION_MAPS_INVALID", "apply: five emoji is ten characters", err)
     st, mon, err = await own.gapi("POST", "/studios/%d/monetization" % sid, {"description": "  A cosmetic shop in our map.  ", "map_ids": [m1]})
     check(st == 200 and mon["request"] and mon["request"]["status"] == "pending" and mon["request"]["description"] == "A cosmetic shop in our map."
           and mon["request"]["map_ids"] == [m1] and mon["can_apply"] is False, "apply: pending, the trimmed description and games", (st, mon, err))

@@ -129,9 +129,13 @@ static const char *me(void) {
 
 static int is_owner(void) { return S.studio && (int) jnum(S.studio, "my_role") == 1; }
 
-static size_t utf8_len(const char *s) {
+/* trim().length (deob-10.0.7.js, the monetization counter): one for a letter, two for an emoji. */
+static size_t utf16_len(const char *s) {
     size_t n = 0;
-    for (; s && *s; s++) n += ((unsigned char) *s & 0xC0) != 0x80;
+    for (; s && *s; s++) {
+        const unsigned char c = (unsigned char) *s;
+        if ((c & 0xC0) != 0x80) n += c >= 0xF0 ? 2 : 1;
+    }
     return n;
 }
 
@@ -1068,7 +1072,7 @@ static const struct {
 static int dialog_can_submit(void) { // _48932
     char d[2048];
     trimmed(d, sizeof(d), S.desc);
-    const size_t n = utf8_len(d);
+    const size_t n = utf16_len(d);
     return cJSON_IsTrue(cJSON_GetObjectItem(S.mon, "can_apply")) && S.agree && n >= 10 && n <= 500 && !S.submitting;
 }
 
@@ -1081,7 +1085,7 @@ static int sel_has(const int64_t mid) {
 static void dialog_count(StrBuf *sb) { // the counter's content: the minimum note, then " N/500"
     char d[2048], buf[MSG];
     trimmed(d, sizeof(d), S.desc);
-    const size_t n = utf8_len(d);
+    const size_t n = utf16_len(d);
     if (n > 0 && n < 10) {
         I18N_F(buf, "studios.monetization.descMin", "At least {0} characters.", "10");
         sb_text(sb, buf);
@@ -1136,7 +1140,7 @@ static void dialog_markup(StrBuf *sb) {
     sb_text(sb, S.desc);
     char d[2048];
     trimmed(d, sizeof(d), S.desc);
-    const size_t n = utf8_len(d);
+    const size_t n = utf16_len(d);
     sb_appendf(sb, "</textarea> <span class=\"sma-count svelte-1veg8cv%s\" id=\"knStMonCount\">", n > 0 && (n < 10 || n > 500) ? " sma-count-bad" : "");
     dialog_count(sb);
     sb_append(sb, "</span></label> ");
@@ -1576,7 +1580,7 @@ static void on_input(const char *what, const HtmlEvent *ev, const char *value) {
             free(text);
             char d[2048];
             trimmed(d, sizeof(d), S.desc);
-            const size_t n = utf8_len(d);
+            const size_t n = utf16_len(d);
             html_dom_set_class(count, "sma-count-bad", n > 0 && (n < 10 || n > 500));
         }
         set_disabled("knStMonSubmit", !dialog_can_submit());
