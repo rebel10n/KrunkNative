@@ -2810,6 +2810,11 @@ static void ct_rows_free(void) {
     }
 }
 
+// a locked copy on your side is not offered (deob-10.0.7.js:111343: $itemLocks.ids has the copy id)
+static int ct_copy_locked(const int sid) {
+    return sid > 0 && market_locks_has(inv_locks(), sid, 0, 0);
+}
+
 // a weapon index's name for the Create Trade search (market_trade_list.c)
 static const char *trade_weapon_name(const int weapon_index) {
     const Weapon *w = rules_weapon(weapon_index);
@@ -2828,6 +2833,9 @@ static void ct_rows_select(const int side) {
     int total = 0;
     market_trade_list_set_weapon_name(trade_weapon_name); // the search's weapon names (deob-10.0.7.js:111394)
     market_trade_list_set_skin_json(ui_loadout_skin_json); // keyW, limT and a drop's "drops"
+    const AccountInfo *me = active_account();
+    market_trade_list_set_hide_bound(cJSON_IsTrue(ui_setting_value("hideNonTrade")), me && me->is_dev);
+    market_trade_list_set_copy_locked(side == 0 ? ct_copy_locked : NULL); // only your locked copies (deob-10.0.7.js:111343)
     market_trade_list_select(skin, inv, M.ct_missing ? other : NULL, M.ct_search[side], M.ct_missing, cap, rows, &total);
     M.ct_rows[side] = rows;
     M.ct_nrows[side] = total;

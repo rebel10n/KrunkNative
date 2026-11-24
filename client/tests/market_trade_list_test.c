@@ -19,7 +19,12 @@ static int g_fail, g_pass;
 static const ViewerSkin *skin_at(const int i) { return i >= 0 && i < SKINS ? &g_skins[i] : NULL; }
 static const char *weapon_name_at(const int w) { return w == 2 ? "Zweihander" : NULL; }
 static cJSON *g_extra;
-static const cJSON *skin_json_at(const int i) { return i == 8 ? g_extra : NULL; }
+static int g_json_both;
+static const cJSON *skin_json_at(const int i) {
+    if (i == 8 || (g_json_both && i == 9)) return g_extra;
+    return NULL;
+}
+static int copy_locked(const int sid) { return sid == 77; }
 
 static int ci_has(const char *hay, const char *needle) { // a plain reference match for the expectations
     const size_t n = strlen(needle);
@@ -144,6 +149,42 @@ int main(void) {
     market_trade_list_set_skin_json(NULL);
     drawn = market_trade_list_select(skin_at, inv, NULL, "christmas", 0, LIMIT, rows, &total);
     CHECK(total == 0, "no store row: limT is not searched (%d rows)", total);
+    // Hide Non-Tradable and a locked copy (deob-10.0.7.js:111381, :111343), not the search
+    cJSON_Delete(g_extra);
+    g_json_both = 1;
+    g_extra = cJSON_CreateObject();
+    cJSON_AddTrueToObject(g_extra, "noSale");
+    market_trade_list_set_skin_json(skin_json_at);
+    market_trade_list_set_hide_bound(1, 0);
+    drawn = market_trade_list_select(skin_at, inv, NULL, "", 0, SKINS, rows, &total);
+    int has8 = 0, has9 = 0;
+    for (int j = 0; j < drawn; j++) {
+        has8 |= rows[j].skin == 8;
+        has9 |= rows[j].skin == 9;
+    }
+    CHECK(!has8 && !has9 && total == SKINS - 2, "hide non-tradable drops noSale skins (%d)", total);
+    market_trade_list_set_hide_bound(1, 1); // a developer still sees a non-free bound item
+    drawn = market_trade_list_select(skin_at, inv, NULL, "", 0, SKINS, rows, &total);
+    CHECK(total == SKINS, "a developer keeps a noSale skin (%d)", total);
+    cJSON_Delete(g_extra);
+    g_extra = cJSON_CreateObject();
+    cJSON_AddTrueToObject(g_extra, "free");
+    market_trade_list_set_hide_bound(1, 1);
+    drawn = market_trade_list_select(skin_at, inv, NULL, "", 0, SKINS, rows, &total);
+    CHECK(total == SKINS - 2, "a free item stays hidden from a developer too (%d)", total);
+    market_trade_list_set_hide_bound(0, 0);
+    market_trade_list_set_skin_json(NULL);
+    cJSON *locked = cJSON_CreateObject();
+    cJSON_AddNumberToObject(locked, "i", 3);
+    cJSON_AddNumberToObject(locked, "c", 1);
+    cJSON_AddNumberToObject(locked, "sid", 77);
+    cJSON_AddItemToArray(inv, locked);
+    market_trade_list_set_copy_locked(copy_locked);
+    drawn = market_trade_list_select(skin_at, inv, NULL, "", 0, SKINS + 1, rows, &total);
+    int has_locked = 0;
+    for (int j = 0; j < drawn; j++) has_locked |= rows[j].sid == 77;
+    CHECK(!has_locked && total == SKINS, "a locked copy is not offered (%d)", total);
+    market_trade_list_set_copy_locked(NULL);
     cJSON_Delete(g_extra);
 
     // the page never exceeds its limit, and a limit above the matches draws them all

@@ -33,3 +33,8 @@ int market_trade_list_select(const struct ViewerSkin *(*skin)(int index), const 
 // caller's ruleset. `json(skin index)` is the store row (skins.json); NULL turns keyW / limT / drops off.
 void market_trade_list_set_weapon_name(const char *(*name)(int weapon_index));
 void market_trade_list_set_skin_json(const cJSON *(*json)(int skin_index));
+// Hide Non-Tradable (settings.interface.hideNonTrade, deob-10.0.7.js:111391): a free, noSale, blackM,
+// opensea or itemShop item is left out. A developer still sees the non-free ones. Off by default.
+void market_trade_list_set_hide_bound(int on, int is_dev);
+// Your side only (deob-10.0.7.js:111343): a copy whose sid is locked is not offered. NULL skips the check.
+void market_trade_list_set_copy_locked(int (*locked)(int sid));
