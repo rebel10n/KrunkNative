@@ -1734,6 +1734,14 @@ static void t_scroll_extent(void)
     CHECK(mrg && NEAR(mrg->scroll_h, 150, 0.01), "last child's margin-bottom counted, padding once (%.1f)", mrg ? mrg->scroll_h : -1);
     CHECK(txt && NEAR(txt->scroll_h, 140, 0.01), "four 25px lines + padding = 140 (%.1f)", txt ? txt->scroll_h : -1);
     CHECK(ab && NEAR(ab->scroll_h, 130, 0.01), "abs box extends scrollHeight by its border box only (%.1f)", ab ? ab->scroll_h : -1);
+    /* scrollTop = scrollHeight clamps against clientHeight (the padding box), not the content box. Chrome leaves the
+     * fitting 20px-padded scroller at 0; subtracting the content box wrongly allowed exactly the 40px of padding.
+     * The overflowing one stops at 160 - 140 = 20, not 60. The inline axis follows the same rule. */
+    layout_set_scroll(fx->tree, fit, fit->scroll_w, fit->scroll_h);
+    CHECK(NEAR(fit->scroll_x, 0, 0.01) && NEAR(fit->scroll_y, 0, 0.01),
+          "fitting padded scroller cannot scroll by its padding (x %.1f, y %.1f)", fit->scroll_x, fit->scroll_y);
+    layout_set_scroll(fx->tree, over, 0, over->scroll_h);
+    CHECK(NEAR(over->scroll_y, 20, 0.01), "overflow clamp uses clientHeight: 160 - 140 = 20 (%.1f)", over->scroll_y);
     fx_free(fx);
 }
 

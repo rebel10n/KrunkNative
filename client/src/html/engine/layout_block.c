@@ -818,8 +818,12 @@ static float scrollbar_width_for(LayoutTree *t, Box *b)
 void layout_finish_scroll(LayoutTree *t, Box *b)
 {
     (void)t;
-    float max_x = kn_maxf(0.0f, b->scroll_w - box_content_w(b));
-    float max_y = kn_maxf(0.0f, b->scroll_h - box_content_h(b));
+    /* Chrome clamps scrollLeft / scrollTop against clientWidth / clientHeight: the padding box minus
+     * scrollbars, not the content box. scrollWidth / scrollHeight are already at least that client box,
+     * so a fitting padded scroller has no range; subtracting the content box invented a range equal to
+     * its padding (the editor AI's empty list scrolled 16px when render_all asked for the bottom). */
+    float max_x = kn_maxf(0.0f, b->scroll_w - (box_padding_w(b) - b->scrollbar_w));
+    float max_y = kn_maxf(0.0f, b->scroll_h - (box_padding_h(b) - b->scrollbar_h));
     b->scroll_x = kn_clampf(b->scroll_x, 0, max_x);
     b->scroll_y = kn_clampf(b->scroll_y, 0, max_y);
 }
