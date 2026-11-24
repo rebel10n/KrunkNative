@@ -277,6 +277,8 @@ void sh_report(SocialSession *s, const cJSON *f);      /* "rpt" */
 /* v10 reports (profiles.c): the reason of a frame or body (v10's index or name, NULL refused), the
  * reports list (gapi GET /players/<name>/reports, "grp") and filing one (gapi POST .../report, "rpt") */
 const char *profile_report_reason(const cJSON *v);
+/* the report window (deob-10.0.7.js:111768-111774, maxlength 500): trimmed details, or the refusal */
+const char *profile_report_prepare(const char *in, char *out, size_t cap);
 /* raw: rp_text as stored and rp_ms (epoch ms) added (the v10 gapi reader); else rp_text HTML-escaped (the socket's "rps") */
 void profile_reports_query(SocialSession *s, const char *name, int raw, SocialDbFn fn, void *extra);
 int profile_report_submit(SocialSession *s, const char *name, const cJSON *reason, const char *details, SocialDbFn fn,

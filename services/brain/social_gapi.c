@@ -860,9 +860,10 @@ static void report_filed_done(SocialSession *s, kn_db_result *res, void *extra) 
 static void players_report(SocialSession *s, const GapiReq *r, const char *name) {
     if (!need_login(s, r)) return;
     const cJSON *reason = cJSON_GetObjectItemCaseSensitive(r->body, "reason");
-    const char *text = kn_json_str(r->body, "text", "");
-    if (!profile_report_reason(reason) || strlen(text) > 2000) {
-        gapi_error(s, r->rid, 400, "PLAYERS_REPORT_INVALID", "Invalid report.");
+    char text[2048];
+    const char *bad = profile_report_prepare(kn_json_str(r->body, "text", ""), text, sizeof text);
+    if (!profile_report_reason(reason) || bad) {
+        gapi_error(s, r->rid, 400, "PLAYERS_REPORT_INVALID", bad && profile_report_reason(reason) ? bad : "Invalid report.");
         return;
     }
     if (profile_report_submit(s, name, reason, text, report_filed_done, gctx(r, 0, 0, NULL)) != 0)

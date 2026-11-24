@@ -195,7 +195,7 @@ async def scenario(port):
     check(st == 200 and isinstance(d, list) and any(x.get("player_name") == B.name for x in d), "[167] GET followers: a list of player rows", (st, d, e))
     st, d, e = await C.gapi("GET", "/players/%s/following" % B.name)
     check(st == 200 and isinstance(d, list) and any(x.get("player_name") == A.name for x in d), "[168] GET following: a list of player rows", (st, d, e))
-    st, d, e = await B.gapi("POST", "/players/%s/report" % A.name, {"reason": 0, "text": "probe"})
+    st, d, e = await B.gapi("POST", "/players/%s/report" % A.name, {"reason": 0, "text": "probing them"})
     check(st == 200 and d == {} and e is None, "[170] POST /players/{name}/report -> {}", (st, d, e))
     st, d, e = await B.gapi("GET", "/players/%s/reports" % A.name)
     check(st == 200 and d == [] and e is None, "[171] GET reports, not a moderator: the empty list", (st, d, e))
@@ -206,7 +206,7 @@ async def scenario(port):
     st, d, e = await B.gapi("GET", "/players/%s/reports" % A.name)
     texts = [r.get("rp_text") for r in d or []]
     dates = [r.get("rp_date") or "" for r in d or []]
-    check(st == 200 and "a <b> & 'c'" in texts and "probe" in texts, "[171] a moderator's reports: rp_text raw, not HTML-escaped", (st, texts))
+    check(st == 200 and "a <b> & 'c'" in texts and "probing them" in texts, "[171] a moderator's reports: rp_text raw, not HTML-escaped", (st, texts))
     check(dates and all(len(x) == 24 and x[10] == "T" and x.endswith("Z") for x in dates), "[171] rp_date is ISO UTC", dates)
     check(all("rp_ms" not in r for r in d or []), "[171] no helper column leaks (rp_ms)", d)
     q("UPDATE players SET player_moderator = 0 WHERE player_id = ?", B.id)

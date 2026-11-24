@@ -7,6 +7,7 @@
 #include "acct_internal.h"
 #include "game_presence.h" /* game_presence_status: "playing <map>" (the profile's status text) */
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -480,13 +481,29 @@ static void report_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "rptr", 1, ok ? cJSON_CreateTrue() : cJSON_CreateNull());
 }
 
+/* the report window (deob-10.0.7.js:111768-111774, :111805): trim, then 10 to 500 characters
+ * (the textarea's maxlength). out receives the trimmed text. */
+const char *profile_report_prepare(const char *in, char *out, size_t cap) {
+    const char *s = in ? in : "";
+    while (*s && isspace((unsigned char) *s)) s++;
+    size_t n = strlen(s);
+    while (n && isspace((unsigned char) s[n - 1])) n--;
+    if (!out || n >= cap) return "Invalid report.";
+    memcpy(out, s, n);
+    out[n] = 0;
+    if (brain_utf16_prefix(out, 9) == n) return "Please provide at least 10 characters of detail.";
+    if (brain_utf16_prefix(out, 500) < n) return "Invalid report.";
+    return NULL;
+}
+
 /* file a report of `name` (v10 POST /players/<name>/report, socket "rpt"): reason is v10's index or a
  * name, details the text. fn gets the result: affected rows 1 when filed (not for self, an unknown
  * name, or past 20 reports an hour). Returns 0 when the request was refused before the query. */
 int profile_report_submit(SocialSession *s, const char *name, const cJSON *reason, const char *details, SocialDbFn fn,
                           void *extra) {
+    char trimmed[2048];
     const char *why = profile_report_reason(reason);
-    if (!name || !why || !details || strlen(details) > 2000) return -1;
+    if (!name || !why || profile_report_prepare(details, trimmed, sizeof trimmed)) return -1;
     char me[24];
     return social_query(s,
                         SQL(.pg = "INSERT INTO reports (reporter_id, target_id, reason, details) "
@@ -495,7 +512,7 @@ int profile_report_submit(SocialSession *s, const char *name, const cJSON *reaso
                             .any = "INSERT INTO reports (reporter_id, target_id, reason, details) "
                                    "SELECT $1, id, $3, $4 FROM accounts WHERE lower(username) = lower($2) AND id <> $1 "
                                    "AND (SELECT count(*) FROM reports WHERE reporter_id = $1 AND created_at > {ago:3600}) < 20"),
-                        KN_DB_ARGS(social_viewer(s, me), name, why, details), fn, extra);
+                        KN_DB_ARGS(social_viewer(s, me), name, why, trimmed), fn, extra);
 }
 
 /* ["rpt", name, reason, details] -> ["rptr", ok] (v10's reason index or the name; v10's page sends the index) */
