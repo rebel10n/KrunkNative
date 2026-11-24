@@ -28,6 +28,8 @@ int market_text_contains(const char *hay, const char *needle);
 // Returns the number of rows written to `out`.
 int market_trade_list_select(const struct ViewerSkin *(*skin)(int index), const cJSON *inv, const cJSON *other,
                              const char *search, int missing, int limit, TradeListRow *out, int *total);
-// The search also matches a weapon skin's weapon name (v10.0.7, deob-10.0.7.js:111394: "Trade item search now matches
-// weapon names"); `name(weapon index)` gives it (the caller's ruleset), NULL turns that match off.
+// The search also matches a weapon skin's weapon name, and the store row's keyW, limT and a drop's "drops"
+// (v10.0.7, deob-10.0.7.js:111394, :24045: either string contains the other). `name(weapon index)` is the
+// caller's ruleset. `json(skin index)` is the store row (skins.json); NULL turns keyW / limT / drops off.
 void market_trade_list_set_weapon_name(const char *(*name)(int weapon_index));
+void market_trade_list_set_skin_json(const cJSON *(*json)(int skin_index));

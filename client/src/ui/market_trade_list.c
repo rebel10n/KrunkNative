@@ -23,14 +23,40 @@ static int row_int(const cJSON *o, const char *k, const int def) {
 }
 
 static const char *(*g_weapon_name)(int weapon_index);
+static const cJSON *(*g_skin_json)(int skin_index);
 
 void market_trade_list_set_weapon_name(const char *(*name)(int weapon_index)) { g_weapon_name = name; }
+void market_trade_list_set_skin_json(const cJSON *(*json)(int skin_index)) { g_skin_json = json; }
 
-// the query against the item: its name, either way round, else its weapon's name (weapon - 1 into the weapon list)
-static int search_matches(const ViewerSkin *s, const char *search) {
-    if (market_text_contains(s->name, search) || (s->name && market_text_contains(search, s->name))) return 1;
+// iíiiiìi (deob-10.0.7.js:24045): either string contains the other, ignoring case
+static int either_contains(const char *a, const char *b) {
+    if (!a || !a[0] || !b || !b[0]) return 0;
+    return market_text_contains(a, b) || market_text_contains(b, a);
+}
+
+static const char *json_str(const cJSON *o, const char *key) {
+    const cJSON *v = o ? cJSON_GetObjectItemCaseSensitive(o, key) : NULL;
+    return cJSON_IsString(v) ? v->valuestring : NULL;
+}
+
+static int json_truthy(const cJSON *o, const char *key) {
+    const cJSON *v = o ? cJSON_GetObjectItemCaseSensitive(o, key) : NULL;
+    if (!v || cJSON_IsNull(v) || cJSON_IsFalse(v)) return 0;
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0;
+    if (cJSON_IsString(v)) return v->valuestring[0] != 0;
+    return 1;
+}
+
+// the query against the item (deob-10.0.7.js:111394): its name, keyW, limT, weapon name, or "drops" on a drop
+static int search_matches(const ViewerSkin *s, const int index, const char *search) {
+    if (either_contains(s->name, search)) return 1;
+    const cJSON *j = g_skin_json ? g_skin_json(index) : NULL;
+    const char *key_w = json_str(j, "keyW"), *lim = json_str(j, "limT");
+    if (key_w && key_w[0] && either_contains(key_w, search)) return 1;
+    if (lim && lim[0] && either_contains(lim, search)) return 1;
     const char *weapon = s->weapon > 0 && g_weapon_name ? g_weapon_name(s->weapon - 1) : NULL;
-    return weapon && weapon[0] && market_text_contains(weapon, search);
+    if (weapon && weapon[0] && either_contains(weapon, search)) return 1;
+    return json_truthy(j, "drop") && either_contains("drops", search);
 }
 
 static int cmp_int(const void *pa, const void *pb) {
@@ -87,7 +113,7 @@ int market_trade_list_select(const struct ViewerSkin *(*skin)(int index), const 
         const ViewerSkin *s = i >= 0 ? skin(i) : NULL;
         if (!s || count <= 0) continue;
         if (missing && owned && bsearch(&i, owned, (size_t) nowned, sizeof(*owned), cmp_int)) continue;
-        if (search && search[0] && !search_matches(s, search)) continue;
+        if (search && search[0] && !search_matches(s, i, search)) continue;
         // a painted copy row carries its copy id as sid (a stack none); the row goes with it for its paint
         kept[nkept++] = (KeptRow) {{i, count, row_int(r, "nt", 0), row_int(r, "sid", 0), r}, s->rarity, s->seas ? s->seas : 1};
     }

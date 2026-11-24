@@ -2827,6 +2827,7 @@ static void ct_rows_select(const int side) {
     if (!rows) return;
     int total = 0;
     market_trade_list_set_weapon_name(trade_weapon_name); // the search's weapon names (deob-10.0.7.js:111394)
+    market_trade_list_set_skin_json(ui_loadout_skin_json); // keyW, limT and a drop's "drops"
     market_trade_list_select(skin, inv, M.ct_missing ? other : NULL, M.ct_search[side], M.ct_missing, cap, rows, &total);
     M.ct_rows[side] = rows;
     M.ct_nrows[side] = total;
