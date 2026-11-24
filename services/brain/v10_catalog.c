@@ -28,8 +28,10 @@
  *                                              data_size, current_version} newest first, for its managers
  *   POST   /maps/:id/versions/:v/revert        version :v goes live as a new version; {version} (managers)
  *   POST   /maps/:id/funds {amount}            the creator moves KR between the account and the map's
- *                                              funds (map_funds; > 0 deposit, < 0 withdraw), the ledger
- *                                              rows source map_funds
+ *                                              funds (map_funds; > 0 deposit, < 0 withdraw). The Creations
+ *                                              window's "Deposit fee" (deob-10.0.7.js:107627) is floor(10%)
+ *                                              and comes out of what arrives; |amount| under 10 is refused.
+ *                                              The ledger rows are source map_funds
  *   POST   /maps/:id/leaderboard {type, custom_type, order}  the creator's, developers' and map mods'
  *                                              LEADERBOARD settings written as creations.c's ulb does
  *   GET    /maps/:id/data?player=              the player's ks_storage rows of this map as {mk, kv}
@@ -392,6 +394,9 @@ static kn_db_result *run_map_vote(kn_dbconn *c, int n, const char *const *p) {
     return dbx_json(&x, "v10_map_vote", v);
 }
 static const kn_proc P_MAP_VOTE = {"v10_map_vote", NULL, run_map_vote};
+
+/* The hub's calcMapFee and the Creations window both show floor(10%) (deob-10.0.7.js:107627). */
+#define MAP_FUNDS_FEE "10"
 
 /* (me, map, amount, fee percent) -> {map_funds, player_funds}: the creator's deposit (> 0) or withdrawal (< 0).
  * The fee is floor(|amount| * percent / 100) and comes out of what arrives: a deposit takes the whole amount
@@ -773,7 +778,7 @@ static void op_account(kn_http_req *req, int64_t id, void *ud) {
         kn_db_call(db, &P_MAP_VOTE, KN_DB_ARGS(me, map, n1), on_map_proc, o);
         break;
     case OP_FUNDS:
-        kn_db_call(db, &P_MAP_FUNDS, KN_DB_ARGS(me, map, n1, "0"), on_map_proc, o); /* game.js's Creations window: no fee */
+        kn_db_call(db, &P_MAP_FUNDS, KN_DB_ARGS(me, map, n1, MAP_FUNDS_FEE), on_map_proc, o);
         break;
     case OP_LB:
         kn_db_call(db, &P_MAP_LB, KN_DB_ARGS(me, map, n1, n2, o->s1), on_map_proc, o);
@@ -871,6 +876,11 @@ static void h_map_funds(kn_http_req *req, void *ud) {
     }
     const int64_t amount = (int64_t) a->valuedouble;
     cJSON_Delete(body);
+    /* deob-10.0.7.js:107768-107771: the Funds tab never sends |amount| under 10 */
+    if (amount > -10 && amount < 10) {
+        v10_reply_error(req, 400, "INVALID_AMOUNT", "Minimum is 10 KR");
+        return;
+    }
     map_route(req, OP_FUNDS, path_id(req, "id"), amount, 0, NULL, NULL);
 }
 
@@ -1103,10 +1113,10 @@ void v10_catalog_map_by_name(kn_http_req *req, const char *name) {
  *   ["dkd", mapId, key]                  -> ["po", "SUCCESS", null, text]                (:3649-3653)
  *   ["mfnds", mapId, 0 deposit | 1 withdraw, amount] -> ["mfr", playerFunds | null]     (:6673-6678, 3796-3803)
  * The leaderboard's settings come from the map's LEADERBOARD object (ulb / the HTTP route), not from the frame. A
- * refusal of dd / dkd / mfnds is the hub's "po" error. mfnds charges the "KR Fee" its Edit popup shows (calcMapFee,
- * hub-10.0.7.js:6657-6672, and the editor's copy): floor(amount * 0.1), out of what arrives, in both directions.
- * POST /maps/:id/funds moves the exact amount, as the game's Creations window shows no fee
- * (deob-10.0.7.js:107760-107764, updateMapFunds with the signed amount). */
+ * refusal of dd / dkd / mfnds is the hub's "po" error. mfnds and POST /maps/:id/funds charge the fee both
+ * screens show (calcMapFee, hub-10.0.7.js:6657-6672, and the Creations window's "Deposit fee",
+ * deob-10.0.7.js:107627): floor(|amount| * 0.1), out of what arrives, in both directions. The window sends
+ * the signed amount (updateMapFunds, :107777) and refuses |amount| under 10 before the call (:107768-107771). */
 
 typedef struct HubBoard {
     char name[160];
@@ -1272,7 +1282,6 @@ static void hub_funds_done(SocialSession *s, kn_db_result *res, void *extra) {
 
 /* ["mfnds", mapId, 0 deposit | 1 withdraw, amount]: the creator's map funds (P_MAP_FUNDS, the signed amount)
  * less the 10% fee both screens that send it show (the hub's and the editor's calcMapFee, floor(amount * 0.1)) */
-#define MAP_FUNDS_FEE "10"
 void sh_map_funds(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
     const int64_t map_id = fa_int(f, 1, 0), amount = fa_int(f, 3, 0);

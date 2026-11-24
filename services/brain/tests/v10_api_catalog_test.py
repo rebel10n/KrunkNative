@@ -421,20 +421,32 @@ def section_maps(c):
     check("[94] POST revert of an unknown version -> 400 Version not found (deob-10.0.7.js:107823-107826 reads error.message)",
           st == 400 and "Version not found" in error_message(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
 
-    # row 95 POST /maps/{id}/funds: the creator moves KR between the account and the map (consumer v10.js 107065)
+    # row 95 POST /maps/{id}/funds: the creator moves KR between the account and the map.
+    # The Funds tab shows floor(10%) as "Deposit fee" (deob-10.0.7.js:107627) and sends the signed
+    # amount (updateMapFunds, :107777). The fee comes out of what arrives, same as the hub's mfnds.
+    # |amount| under 10 never leaves the tab (:107768-107771).
     st, body = http(p, "POST", "/maps/%d/funds" % map1, {"amount": 100}, token=tok_b)
     check("[95] funds by a non-creator -> 404 MAP_NOT_FOUND", st == 404 and error_code(body) == "MAP_NOT_FOUND",
           "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    st, body = http(p, "POST", "/maps/%d/funds" % map1, {"amount": 9}, token=tok_a)
+    check("[95] deposit under 10 KR -> 400 Minimum is 10 KR, and nothing moves",
+          st == 400 and error_message(body) == "Minimum is 10 KR"
+          and one("SELECT map_funds FROM published_maps WHERE map_id = ?", (map1,)) == 0
+          and one("SELECT player_funds FROM players WHERE player_id = ?", (a,)) == 1000,
+          "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "POST", "/maps/%d/funds" % map1, {"amount": 100}, token=tok_a)
-    check("[95] deposit 100 KR -> 200 {map_funds: 100, player_funds: 900} (consumer v10.js 107070 reads map_funds, player_funds)",
-          is_data(st, body, {"map_funds": 100, "player_funds": 900}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("[95] deposit 100 KR -> 200 {map_funds: 90, player_funds: 900} (the account pays 100, the map gets 90)",
+          is_data(st, body, {"map_funds": 90, "player_funds": 900}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "POST", "/maps/%d/funds" % map1, {"amount": -40}, token=tok_a)
-    check("[95] withdraw 40 KR -> 200 {map_funds: 60, player_funds: 940}",
-          is_data(st, body, {"map_funds": 60, "player_funds": 940}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("[95] withdraw 40 KR -> 200 {map_funds: 50, player_funds: 936} (the map pays 40, the account gets 36)",
+          is_data(st, body, {"map_funds": 50, "player_funds": 936}), "HTTP %d %s" % (st, json.dumps(body)[:160]))
+    check("[95] the ledger records the fee the window shows",
+          sql("SELECT amount, fee FROM kr_transactions WHERE account_id = ? AND source = 'map_funds' ORDER BY id", (a,))
+          == [(-100, 10), (36, 4)])
     st, body = http(p, "POST", "/maps/%d/funds" % map1, {"amount": -1000}, token=tok_a)
     check("[95] withdraw more than the map holds -> 400 and nothing moves",
           st == 400 and "Not enough map funds" in error_message(body)
-          and one("SELECT map_funds FROM published_maps WHERE map_id = ?", (map1,)) == 60, "HTTP %d %s" % (st, json.dumps(body)[:160]))
+          and one("SELECT map_funds FROM published_maps WHERE map_id = ?", (map1,)) == 50, "HTTP %d %s" % (st, json.dumps(body)[:160]))
     st, body = http(p, "POST", "/maps/%d/funds" % map1, {"amount": 5000}, token=tok_a)
     check("[95] deposit more than the account holds -> 400 Not enough KR",
           st == 400 and "Not enough KR" in error_message(body), "HTTP %d %s" % (st, json.dumps(body)[:160]))
