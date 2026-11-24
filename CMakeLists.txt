@@ -1650,6 +1650,11 @@ else ()
             add_test(NAME open_sales_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/open_sales_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(open_sales_e2e PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # loadout_tip_attrs_e2e: a copy's card carries createTip's data-* attributes in the loadout picker and both
+            # trade lists (deob-10.0.7.js:221824, :223708-223712)
+            add_test(NAME loadout_tip_attrs_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/loadout_tip_attrs_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(loadout_tip_attrs_e2e PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # chat_actions_e2e: a chat line's v10 actions ([Join Queue], NET_EXT_KN_CHAT_ACTIONS) in the rendered document
             add_test(NAME chat_actions_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chat_actions_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
