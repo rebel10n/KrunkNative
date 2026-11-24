@@ -3468,7 +3468,9 @@ static void sb_follows(StrBuf *sb, View *v) {
 
 // ---- gift (_36860) / report (_36916): the economy's "kr" and the hub's "rpt" frames
 
-static char g_gift_amount[32] = "100", g_gift_msg[600], g_report_text[600];
+/* gift and report boxes are maxlength 500 (deob-10.0.7.js:111703, :111790). One character can be four bytes. */
+static char g_gift_amount[32] = "100", g_gift_msg[500 * 4 + 1], g_report_text[500 * 4 + 1];
+_Static_assert(sizeof g_gift_msg > 500 * 3 && sizeof g_report_text > 500 * 3, "a 500-character note fits");
 static int g_report_reason;
 
 static void sb_gift(StrBuf *sb, View *v) {

@@ -136,7 +136,7 @@ static struct {
     // MOTD (svelte-15d5v89)
     cJSON *motd;          // {message, set_by_name, set_at} (owned), NULL = not loaded
     int motd_loading, motd_busy; // busy: 1 saving, 2 removing
-    char motd_text[1024], motd_err[96];
+    char motd_text[500 * 4 + 1], motd_err[96]; /* maxlength 500; one character can be four bytes */
     int motd_saved;       // "Saved!" for 3 s
     int64_t motd_for;     // clan id the MOTD belongs to
     int motd_timer;       // the load's deadline (html_timer id, 0 none)
@@ -152,7 +152,7 @@ static struct {
     int recruit_loaded, recruit_loading, recruit_saving;
     int recruit_timer;    // the load's deadline
     char recruit_err[96], recruit_ok[96];
-    char r_desc[2048], r_looking[512], r_level[16], r_kd[16], r_region[8], r_lang[8];
+    char r_desc[2000 * 4 + 1], r_looking[500 * 4 + 1], r_level[16], r_kd[16], r_region[8], r_lang[8];
     // banner colour
     int banner_sel;       // index in k_paints, -1 none
     int banner_busy;
@@ -169,6 +169,8 @@ static struct {
     int transfer_busy;
     char transfer_err[96], transfer_name[40];
 } S = {.banner_sel = -1};
+_Static_assert(sizeof S.motd_text > 500 * 3 && sizeof S.r_looking > 500 * 3 && sizeof S.r_desc > 2000 * 3,
+               "a clan message keeps every character the box allows");
 
 // Box Office: the file this client uploaded for the clan, shown as its pending logo while the review runs
 static char *g_logo_sent;    // "data:image/png;base64,..." (owned), NULL none

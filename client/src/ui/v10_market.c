@@ -200,7 +200,7 @@ static struct {
     TradeListRow *ct_rows[2]; // every row of a side that matches its search, sorted (ct_rows_select)
     int ct_nrows[2];
     VGrid ct_grid[2];         // a side's virtual list: only the rows near its scroll position are drawn
-    char ct_target[40], ct_err[160], ct_msg[504], ct_search[2][48];
+    char ct_target[40], ct_err[160], ct_msg[500 * 4 + 1], ct_search[2][48]; /* offer note: maxlength 500 */
     cJSON *ct_inv;         // [mine, theirs] rows {i, c, nt}; a painted copy {i, c: 1, sid, paint_color / paint_shader (or m), nt}
     EconTradeItem ct_sel[2][40]; // the offer's units: a stack {i, c}, a painted copy {i, 1, sid}
     int ct_n[2];
@@ -217,6 +217,7 @@ static struct {
     // Guide
     int gtab;
 } M = {.days = 30, .crange = 3, .detail = -1, .cdetail = -1, .data_item = -1, .dstack = -1};
+_Static_assert(sizeof M.ct_msg > 500 * 3, "an offer note of 500 characters fits");
 
 // The inventory's select mode (the market inventory's bulk list, deob-10.0.4.js:132150-132220, :134940-135290): the
 // picks are the ids of the tiles' units as the active account's inventory names them (bulk_official)

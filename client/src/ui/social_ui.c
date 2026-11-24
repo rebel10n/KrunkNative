@@ -6122,7 +6122,7 @@ H(h_gift_popup) {
                 break;
             }
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='popHeader'>%s</div><div id='giftKRBody'><div id='giftAmntFee'>Fee: None</div><input id='giftIn' oninput='calcGiftFee(this)' type='number' placeholder='%s KR' min='0' max='%.0f' step='1'><textarea id='giftMsg' rows='5'",
+    sb_appendf(&sb, "<div class='popHeader'>%s</div><div id='giftKRBody'><div id='giftAmntFee'>Fee: None</div><input id='giftIn' oninput='calcGiftFee(this)' type='number' placeholder='%s KR' min='0' max='%.0f' step='1'><textarea id='giftMsg' maxlength='500' rows='5'",
                I18N("social.market.gift", "Gift KR"), I18N("social.market.gift.amount", "Gift Amount in"), g_econ.gift_max);
     if (kind) {
         sb_append(&sb, ">I like your ");
@@ -6176,7 +6176,8 @@ H(h_calc_gift_fee) {
 // giftUser(): io.send("kr", name, amount, message)
 H(h_gift_user) {
     UNUSED;
-    char amount[32] = "", msg[512] = "";
+    char amount[32] = "", msg[500 * 4 + 1] = ""; /* #giftMsg is maxlength 500; one character can be four bytes */
+    _Static_assert(sizeof msg > 500 * 3, "a gift note of 500 characters fits");
     if (el("giftIn")) html_dom_get_value(el("giftIn"), amount, sizeof(amount));
     if (el("giftMsg")) html_dom_get_value(el("giftMsg"), msg, sizeof(msg));
     if (!amount[0] || !strcmp(amount, "0") || !g_hub.profile_name[0]) return 1;
@@ -6257,8 +6258,9 @@ static struct {
     int fee;              // vLN0611
     int missing;          // v3758
     double kr[2];         // KrunkNative: KR each side puts in
-    char msg[512];        // v3782
+    char msg[500 * 4 + 1]; // the offer note is maxlength 500; one character can be four bytes
 } g_trade;
+_Static_assert(sizeof g_trade.msg > 500 * 3, "an offer note of 500 characters fits");
 
 static int trade_max_items(void) {
     const AccountInfo *acc = g_hub.logged_in ? active_account() : NULL;
@@ -6394,7 +6396,7 @@ static void io_trd(const char *name, const int id, const cJSON *invs) {
     }
     // clear the two floated holders (a browser wraps the 829px textarea below them anyway; the
     // native engine needs the clearance to put it there)
-    sb_append(&sb, "<div style='clear:both'></div><textarea id='tMsg' placeholder='Add a message to the offer'></textarea>");
+    sb_append(&sb, "<div style='clear:both'></div><textarea id='tMsg' maxlength='500' placeholder='Add a message to the offer'></textarea>");
     sb_appendf(&sb, "<div class='tSubOffer' id='trdSubBt' onclick='confSubmitOffer(%d)'>Submit Offer</div>", id);
     sb_append(&sb, "<div class='material-icons tradeSwap' title='Toggle Missing Items' onclick='showMissingItems(this)'>rule</div>");
     spray_anims_keyframes(&sb, &g_trade_anims, 60);
