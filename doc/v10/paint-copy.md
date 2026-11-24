@@ -270,11 +270,10 @@ KrunkNative:
 The v10 bridge (`net-bridge/v10Translate.ts`, `v10Proxy.ts`) keeps the paint of our own loadout's `{i, m}` slots
 (`loadoutPaintOf`, `EV.loadoutPaint`) and puts it on our own spawn's add record (`buildPlayerAdd`, weapon slots [12] and
 [19]): `{i, m}` instead of the plain index. The native ENT carries only indices; the copies ride in
-`NET_EXT_KN_SKIN_COPY_IDS` (above). The C bridge (`server/bridge/v10_bridge.c`, the one `make` builds) reads an official
-client's `"<copyId>#<index>"` slots as v10.0.7's server splits them (`iïiíiïí`, :24362-24380: `parseInt` of each side of
-the `#`): the ENT gets the index (`v10_encode_enter`; before, `Number("<id>#<ind>")` was NaN and the slot went empty) and
-`NET_EXT_KN_SKIN_COPY_IDS` goes right before every ENT with the copy each slot names (`v10_encode_skin_copy_ids`), as a
-native client sends it. The TypeScript bridge (`net-bridge/v10Translate.ts`) still reads such a slot as no item.
+`NET_EXT_KN_SKIN_COPY_IDS` (above). Both bridges (the C `server/bridge/v10_bridge.c` built by `make`, and the TypeScript
+`net-bridge/v10Proxy.ts`) read an official client's `"<copyId>#<index>"` slots as v10.0.7's server splits them
+(`iïiíiïí`, :24362-24380: `parseInt` of each side of the `#`): the ENT gets the index and
+`NET_EXT_KN_SKIN_COPY_IDS` goes right before every ENT with the copy each slot names, as a native client sends it.
 The native SKINS packet carries each worn skin's paint from patch 6 (below): the server fills it from the owner's painted
 copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a native client shows another player's paint.
 
