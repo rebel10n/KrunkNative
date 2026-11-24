@@ -987,10 +987,16 @@ async def friends(port, ids, tokens, names, bob_sock):
         check(wait(lambda: c.textof("title") == "Mods - Krunker Hub", 10), "document.title: Mods - Krunker Hub (hub-10.0.7.js:3130): %r" % c.textof("title"))
         c.ui("windows[1].switchTab(2)")  # New: every mod, newest first
         star = "#modsHolder .creationAction[onclick='favoriteM(1, this, %d);']" % mod_id
+        c.ui("windows[1].switchTab(3)")  # Favorites, loaded before the star, so its list is cached
+        check(wait(lambda: "Loading" not in (c.textof("#modList") or ""), 15), "Favorites loaded before the star")
+        c.ui("windows[1].switchTab(2)")
         if wait(lambda: c.count(star) == 1, 20):
             c.cmd("clicksel 0 " + star)
             check(wait(lambda: q("SELECT 1 FROM creation_favs WHERE account_id = ? AND kind = 1 AND creation_id = ?", A, mod_id), 10)
                   and c.count(star.replace(".creationAction", ".creationAction.sel")) == 1, "favoriteM: the mod is a favourite, its star sel")
+            c.ui("windows[1].switchTab(3)")
+            fav = "#modsHolder .creationAction.sel[onclick='favoriteM(1, this, %d);']" % mod_id
+            check(wait(lambda: c.count(fav) == 1, 20), "Favorites drops its old list and shows the mod just starred")
         else:
             check(False, "the Mods page lists bob's mod with its star: %r" % (c.textof("#modsHolder") or "")[:400])
     finally:

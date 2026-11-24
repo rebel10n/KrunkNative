@@ -8150,19 +8150,40 @@ H(h_share_profile) {
     return 1;
 }
 
-// favoriteM(kind, this, id) (hub-10.0.7.js:6616-6622): signed in, the star's sel class flips and
-// io.send("fvM", kind, id, 1 favourite | 0 not)
+// The Favorites tab of the maps (kind 0) or mods (kind 1) lists.
+static int fav_tab_index(const int is_mods) {
+    const int n = is_mods ? MOD_TAB_COUNT : MAP_TAB_COUNT;
+    for (int i = 0; i < n; i++) {
+        const HubTab *t = list_tab(is_mods, i);
+        if (t && t->fav) return i;
+    }
+    return -1;
+}
+
+// favoriteM(kind, this, id) (hub-10.0.7.js:6616-6622 and deob-10.0.7.js:228231-228245): signed in, the
+// star's sel class flips and io.send("fvM", kind, id, 1 favourite | 0 not). v10.0.7 also drops the
+// Favorites tab's cached list (unless a page of it is loading) so the next time it is shown it lists
+// the change, instead of the list from before the star was clicked.
 H(h_favorite_m) {
     UNUSED;
     if (!g_hub.logged_in || !ev || !ev->target) return 1;
     const int on = !html_dom_has_class(ev->target, "sel");
     html_dom_set_class(ev->target, "sel", on);
+    const int kind = (int) arg_n(args, argc, 0, 0);
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("fvM"));
-    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(kind));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 2, 0)));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(on));
     hub_send(f);
+    const int is_mods = kind == 1;
+    const int fav_tab = fav_tab_index(is_mods);
+    HubList *list = is_mods ? &g_hub.mods : &g_hub.maps;
+    HubListData *d = fav_tab >= 0 ? list_data(list, fav_tab) : NULL;
+    if (d && !d->waiting) {
+        list_reset(d);
+        if (list->tab_index == fav_tab && !strcmp(g_hub.v, is_mods ? "mods" : "maps")) list_update(is_mods);
+    }
     return 1;
 }
 
