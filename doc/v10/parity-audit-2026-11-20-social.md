@@ -57,9 +57,9 @@ and MariaDB 11.8.
 | 5 | Mod page Edit (`updateMod` -> `plm` -> the publish popup prefilled, then `/upload-user-mod`). | hub-10.0.7.js:6640-6651, 6814-6838 | done (4b4a74ee): `h_update_mod` in `social_ui.c`, brain `plm` in `creations.c` | medium |
 | 6 | Gift Premium (`confPremium` / `premiumGiftConfirmed` -> `prm`). | hub-10.0.7.js:5751-5759 | done (2026-11-23): `confPremium` / `premiumGiftConfirmed` in `social_ui.c`, brain `prm` (`sh_premium_gift`) | medium: Premium is real money only (Xsolla), so `prm` checks the target and option and answers v10's error frame with Box Office's no-payments text |
 | 7 | Hub functions with no Box Office handler. Each needs checking, since some are drawn under other names and some (`getSavedVal`, `saveVal`, `genericPopup`, `resetPops`, `createTip`, `cancelTip`) are page helpers the C side replaces: `removeFriend`, `showFriends`, `chatBanUser`, `copyProfile`, `shareGameTweet`, `socPostRes`, `updateChatList`, `clanRSr`, `changeRegion`, `hideAll`, `openListing`, `buyblackM`, `confListPopup`, `confQSPopup`, `loadMoreTradeHistory`, `bundleFilters`, `openReport`, `viewReporter`, `uploadMod` / `selectFile` / `updateFile`, `setCustomImages`, `createBadgeTip`. These are drawn but dead: `clanRSr`, `changeRegion`, `shareGameTweet`, `updateChatList`, `socPostRes`, `hideAll`. | hub-10.0.7.js `window.*` | done (2026-11-23): rechecked, no dead hub button left; `createBadgeTip` and the badge cards added | medium |
-| 8 | Item styles: `POST /items/:id/style {item_id, style}` (the style picker, deob-10.0.7.js:108820-108848), a copy's `m.style` (inventory 110719, cards 222514, 223502) and the `_s<n>` texture of a styled item in game (173602). Two items carry `styles`: KrunkCup Jerseys (48 styles, from bundle #30, a USD bundle Box Office does not sell: ui-backend-audit.md row 16) and the KrunkCup Participation Band. kn_brain refuses the route (`WHY_ITEM_STYLE`). | deob-10.0.7.js:108820-108848, 173602 | refused | medium (low reach) |
-| 9 | Map versions: the Creations window's Versions tab (`getMapVersions` / `revertMapVersion`, deob-10.0.7.js:107794-107835; the list reads `version`, `created`, `data_size`, 108235-108266). kn_brain answers `[]` and refuses the revert (`WHY_VERSIONS`); the client has no Versions tab. | deob-10.0.7.js:107794-108270 | empty / refused | medium |
-| 10 | Email preferences (`GET/POST /email/preferences`, the settings toggle at deob-10.0.7.js:116916-116930). kn_brain refuses (`WHY_PREF`). | deob-10.0.7.js:116916 | refused | low |
+| 8 | Item styles: `POST /items/:id/style {item_id, style}` (the style picker, deob-10.0.7.js:108820-108848), a copy's `m.style` (inventory 110719, cards 222514, 223502) and the `_s<n>` texture of a styled item in game (173602). Two items carry `styles`: KrunkCup Jerseys (48 styles, from bundle #30, a USD bundle Box Office does not sell: ui-backend-audit.md row 16) and the KrunkCup Participation Band. | deob-10.0.7.js:108820-108848, 173602 | done: `style_picker.c` (`styleOpen`), the Style button in `v10_market.c` and `ui_loadout.c`, in-game `m.style` in `player_mesh.c` (`skin_style.c` `_s<n>`, `NET_EXT_KN_SKIN_STYLES` from `accounts.c`); brain `POST /items/:id/style` and `ist` in `v10_market.c` / `economy.c` `sh_item_style` | medium (low reach) |
+| 9 | Map versions: the Creations window's Versions tab (`getMapVersions` / `revertMapVersion`, deob-10.0.7.js:107794-107835; the list reads `version`, `created`, `data_size`, 108235-108266). | deob-10.0.7.js:107794-108270 | done: the Versions tab in `social_ui.c` (`mapVersions`, `revertMapVersion`); brain `GET /maps/:id/versions` and `POST /maps/:id/versions/:v/revert` in `v10_catalog.c` | medium |
+| 10 | Email preferences (`GET/POST /email/preferences`, the settings toggle at deob-10.0.7.js:116916-116930). | deob-10.0.7.js:116916 | done: the popup and cached choice in `account_ui.c`; brain `GET` / `POST /email/preferences` in `v10_auth.c` | low |
 
 ## By design: no change
 
@@ -87,11 +87,11 @@ and MariaDB 11.8.
   `.customBadge` (stats.bdg), the Badges tab's `.badgeCard` grid in table order, and the tooltip (name in #FBC02D,
   italic 8px description). The art is v10's `textures/badges/badge_<id>.png` from the asset host, the same files the
   nametags, HUD and menu already use. Rechecked the dead list: none is still dead.
-- 8 Item styles: brain done (POST /items/:id/style, socket `ist`, item_styles 0393, m.style on the owned list;
-  0be47980). Left for the client: the style picker popup, the inventory's Style button, the `_s<n>` thumbnails and
-  in-game texture (deob-10.0.7.js:108855-108905, 135291, 173602), and the game server's loadout carrying m.style.
-- 9 Map versions: brain done (map_versions 0392, list and revert; 60aad066). Left for the client: the map detail
-  popup (svelte-1kkpw01) with its Versions tab is not ported.
+- 8 Item styles: done. Brain `POST /items/:id/style` and `ist` (`v10_market.c`, `economy.c` `sh_item_style`).
+  Client: `style_picker.c`, the Style button in `v10_market.c` and `ui_loadout.c`, in-game `m.style` in
+  `player_mesh.c` (`skin_style.c` `_s<n>`, `NET_EXT_KN_SKIN_STYLES` from `accounts.c`).
+- 9 Map versions: done. Brain list and revert (`v10_catalog.c`). The Versions tab is `social_ui.c`
+  (`getMapVersions` / `revertMapVersion`).
 - 10 Email preferences: done (0391, the settings toggle, the register box, the opt-in popup on the game page;
   0db2983a, 55bd7a2b; email_prefs_e2e). Box Office asks only when it can mail (`accounts.email.promotional_optin`).
 
