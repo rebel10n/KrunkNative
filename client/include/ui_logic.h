@@ -298,6 +298,7 @@ typedef struct {
     const char *accuracy; // "47%"; NULL = "Unknown"
     // part 2a: the rest of f1975 (NET_PACKET_DEATH_INFO / the killer's and our SPAWN data)
     const char *weapon_color;    // the killer's weapon skin rarity colour ("[name]"), NULL = rgba(255,255,255,0.7)
+    int weapon_rainbow;          // the skin's rarity animates (Unobtainable): rainbowText when rarityAnim is on
     const char *killer_card_url; // .death-row-bottom-bg banners: Game.store.skins[playerCardIndex].thumbnail, NULL none
     const char *my_card_url;
     const char *pc_stat_name;    // the killer's player card stat: config.playerCardStats[i].name, NULL = none ("3" [2] null)

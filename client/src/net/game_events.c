@@ -195,8 +195,9 @@ static const char *events_card_url(const int index, char *out, const size_t n) {
 // card gets a boolean where the kill info was (:227493), so its "Fists" (info.fs) never shows: `fists` is the Strike
 // kill card's (strike_hud.c), the v10 card passes 0.
 static const char *events_weapon_label(const Player *killer, const Weapon *weapon, const int weapon_index, const int fists,
-                                       const char **color) {
+                                       const char **color, int *rainbow) {
     *color = NULL;
+    if (rainbow) *rainbow = 0;
     if (!weapon) return fists ? "Fists" : "";
     if (weapon->melee && fists) return "Fists";
     const ViewerSkin *skin = NULL;
@@ -212,6 +213,7 @@ static const char *events_weapon_label(const Player *killer, const Weapon *weapo
     }
     if (!skin || !skin->name) return weapon->name ? weapon->name : "";
     if (skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count) *color = g_viewer_rarities[skin->rarity].color;
+    if (rainbow) *rainbow = skin->rarity == 6; // rarities[r].animate: only Unobtainable (hud_death_html's rainbowText)
     return skin->name;
 }
 
@@ -356,7 +358,7 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         const Weapon *killer_weapon = death && death->weapon_index >= 0 ? events_weapon(client, death->weapon_index) : weapon;
         card.killer = events_name(client, killer, killer_shown, sizeof(killer_shown));
         card.hide_extras = player_names_extras_hidden(killer == client->me); // the killer's level and card stat
-        card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, 0, &card.weapon_color);
+        card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, 0, &card.weapon_color, &card.weapon_rainbow);
         strike_fists = ((packet->fists & NET_KILL_FISTS) || (death && death->fists)) && (!killer_weapon || killer_weapon->melee);
         card.class_index = packet->killer_class >= 0 ? packet->killer_class : 0;
         if (death) {

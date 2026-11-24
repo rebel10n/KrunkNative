@@ -3375,8 +3375,8 @@ static void hud_readable_time(const int ms, char *out, const size_t size) {
 // and ours right (banner, class level of our account, name), "[key] to Report" in between;
 // without one "You Died". Below, the life's stats (Time Survived, Shots Fired, Accuracy, Kills,
 // Score) from NET_PACKET_DEATH_INFO; a value the server did not send shows v7's "Unknown".
-// Not ported: the rainbowText class of animated rarities (KrunkNative's store table has no
-// rarity animate flag).
+// The killer's [name] is rainbowText when that skin's rarity animates and rarityAnim is on
+// (deob-10.0.7.js:273175: Unobtainable only, same as the kill-feed unbox line).
 static void hud_death_banner(char *out, const size_t size, size_t *len, const char *url) {
     if (!url || !url[0]) return;
     hb_append(out, size, len, "<img class=\"death-row-bottom-bg\" src=\"");
@@ -3421,9 +3421,11 @@ static void hud_death_html(const Client *client, const HudKillCard *card, char *
     const int h2h = hud_h2h_find(card->killer, 0);
     const int my_class = me ? me->class_index : client->menu_class_index;
     const char *color = card->weapon_color && card->weapon_color[0] ? card->weapon_color : "rgba(255,255,255,0.7)";
+    const int rainbow = card->weapon_rainbow && !client_render_settings()->disable_rarity_anim;
     hb_append(out, size, &len, "\n\t\t\t<div class=\"death-ui-bottom\" id='deathUIBottom'>\n\t\t\t\t<div class=\"death-column-empty\"></div>"
                                "\n\t\t\t\t<div class=\"death-column\" style=\"justify-content: end;\">\n\t\t\t\t\t<div class=\"death-row-left\">"
-                               "\n\t\t\t\t\t\t<div class=\"death-row-weapon\">\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text\" style=\"color:");
+                               "\n\t\t\t\t\t\t<div class=\"death-row-weapon\">\n\t\t\t\t\t\t\t<div class=\"death-row-weapon-text%s\" style=\"color:",
+              rainbow ? " rainbowText" : "");
     hb_append_escaped(out, size, &len, color);
     hb_append(out, size, &len, "\">["); // v10.0.7: no "Thrown " (its info.pj is read off a boolean, :227490)
     hb_append_escaped(out, size, &len, card->weapon ? card->weapon : "");
