@@ -12,6 +12,7 @@
  * goes back to the author (the fee does not).
  */
 #include "db_procs.h"
+#include "brain.h" /* brain_utf16_prefix: the compose box counts characters */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,12 +49,8 @@ static kn_db_result *run_post_create(kn_dbconn *c, int n, const char *const *p) 
         if (funds < prize + fee) return dbx_finish(&x, kn_db_result_user_error("SOCIAL_INSUFFICIENT_FUNDS"));
         if (db_add_funds_ex(&x, me, -(prize + fee), "giveaway", "post", 0, fee, &funds) < 0) return dbx_finish(&x, NULL);
     }
-    /* the body is cut at max_len bytes on a UTF-8 boundary */
-    size_t len = strlen(text);
-    if ((int64_t) len > max_len) {
-        len = (size_t) max_len;
-        while (len > 0 && ((unsigned char) text[len] & 0xC0) == 0x80) len--;
-    }
+    /* the compose box (deob-10.0.7.js:141216) counts characters, not bytes */
+    const size_t len = brain_utf16_prefix(text, (size_t) max_len);
     char *body = malloc(len + 1);
     if (!body) return dbx_finish(&x, kn_db_result_user_error("SOCIAL_CREATE_FAILED"));
     memcpy(body, text, len);

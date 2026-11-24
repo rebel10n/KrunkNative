@@ -415,7 +415,12 @@ async def scenario(names):
     long_id = r["data"]["post_id"] if st == 200 else 0
     st, got = await A.gapi("GET", "/social/post/%d" % long_id)
     check(st == 200 and got["data"]["post"]["txt"] == "q" * 500, "a post stops at 500 characters (deob-10.0.7.js:141216): %s" % (len((got.get("data") or {}).get("post", {}).get("txt") or "")))
-    q("DELETE FROM feed_posts WHERE id IN (?, ?)", pad, long_id)
+    st, r = await A.gapi("POST", "/social/post", {"type": 0, "text": "é" * 600})
+    acc_id = r["data"]["post_id"] if st == 200 else 0
+    st, got = await A.gapi("GET", "/social/post/%d" % acc_id)
+    check(st == 200 and got["data"]["post"]["txt"] == "é" * 500,
+          "a post of accented letters stops at 500 characters, not 500 bytes (deob-10.0.7.js:141216): %s" % (len((got.get("data") or {}).get("post", {}).get("txt") or "")))
+    q("DELETE FROM feed_posts WHERE id IN (?, ?, ?)", pad, long_id, acc_id)
     st, r = await B.gapi("GET", "/social/feed?tab=hot")
     check(st == 200 and r["data"]["posts"][0]["pid"] == pid and r["data"]["posts"][0]["dlk"] == 1, "hot tab: the liked post first")
 
