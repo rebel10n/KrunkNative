@@ -162,7 +162,7 @@ handler by handler. Every gap is fixed unless its row says otherwise; the differ
 | Challenges | 3 | a real challenge completed mid-match end to end; the mid-match UPDATE_CHALLENGES_PROGRESS after each event's chgC (`challenge_progress_reported`, :180731-180741, :180925-180934, :225206-225215); a mid-match challenge's Junk into the Rewards tab (:225219) | official daily BPP values (none exist locally) | `challenge_mid_match_e2e`, `brain_progress_sqlite` / `_mysql`, `season_test`, `chal_card_e2e`, `krunker_challenges_e2e.py` |
 | Account | 3 | skin makers (`player_skinmaker`, :115136) and the krunker.io account's `tw_twitchname` / `player_skinmaker` (setData [23] / [42]) reach getSkins; a Twitch link or unlink updates the streamer items at once | none | `v10_customize_e2e.py` |
 | Map editor | 27 | entities and archetypes; Publish Game and Publish Asset as v10 sends them (`uploadM`, `plm`, migration 0403 `map_mobile`); multiplayer co-editing (windows 16 / 17, `#mp-chat`); the inspector, T-key picker and AI Rarity Chances; settings, history, resets, view resolution and object visuals; Tools and Quick GUI as v10 binds them, v10's own quirks included (E10:6610-20982, IDX:6124-15193, CFG:4406-9215) | `publish_ui_e2e`'s Burg template (`assets/maps/burg_new.json` is in no checkout) | `panels_e2e`, `inspector_check`, `objects_e2e`, `windows_check`, `tools_check`, `logic_parity`, `io_e2e`, `entities_e2e`, `mp_e2e`, `publish_e2e`, `asset_upload_test`, `brain_editor_rooms`, `editor_serialize_test` |
-| Mods, replays, streams, Twitch | 18 | the Mod Manager's cards, favourites, header, mod view, `#modLInfo` texts, `?mod=`, Reset Mods, Ctrl+/; the stream thumbnails as images, event tags and the promo without Twitch; v10's Twitch link, unlink and drops popups; a same-map replay seek (:18566-18600, :97248-97966, :108350-108478, :146848-148720, :201934-201954, :209629-209632, :218751-218932, :223416-223459, :225733-226475, :228180-228245, :229274-229551) | the replay viewer's texts and actions (`hud_replay.c`), the Demos list and copyDemoLink (`hud_votekick.c`) and the streams overlay (`v10_menu.c`): menu agent | `mod_pack_test`, `brain_streams`, `brain_streams_e2e`, `brain_v10_api_mods`, `brain_v10_social_e2e`, `brain_hub_creator_e2e`, `demo_test`, `kpd_replay_vote_e2e.py` |
+| Mods, replays, streams, Twitch | 18 | the Mod Manager's cards, favourites, header, mod view, `#modLInfo` texts, `?mod=`, Reset Mods, Ctrl+/; the stream thumbnails as images, event tags and the promo without Twitch; v10's Twitch link, unlink and drops popups; a same-map replay seek (:18566-18600, :97248-97966, :108350-108478, :146848-148720, :201934-201954, :209629-209632, :218751-218932, :223416-223459, :225733-226475, :228180-228245, :229274-229551) | none: round 13 closed the replay viewer, Demos / Reviewers and the streams overlay | `mod_pack_test`, `brain_streams`, `brain_streams_e2e`, `brain_v10_api_mods`, `brain_v10_social_e2e`, `brain_hub_creator_e2e`, `demo_test`, `kpd_replay_vote_e2e.py`, `menu_sources_e2e` |
 | Loading, captcha, anti-cheat, ads | 7 | the map card's mode in capitals (:226159); the game socket's challenge on v10's Security Challenge card (ALTCHA 1.0.6, :98801-98984, :119735-119741); a hack-flagged login's BANNED popup and the fart_0 sounds (:216841-216855, :200724-200746); showAd's onShow after the ad (:229900-229912). v10.0.7 rotates no loading tips | Box Office's guest hosting card (`servers_ui.c`): menu agent | `v10_loading_test`, `kn_captcha_test`, `krunker_link_test`, `krunker_host_custom_test`, `brain_captcha_game_e2e`, `krunker_official_e2e` (native runs), `native_auth_e2e`, `captcha_e2e.py`, `loading_screens_e2e` |
 | Tests | 2 | the web e2e tests drive the checkout's own `dist/web` before `KN_WEB_DIST`; `html_anim` counts the ALTCHA spinner | none | `brain_email_web_e2e`, `html_anim_test` |
 
@@ -209,3 +209,37 @@ For the menu agent:
   - `hud_endscreen_v10.c`: the double-XP button has no `doubleXPButton` class (:210089).
   - Check that `classPreviewCanvas` hides while a map loads (:228626).
   - `loading_switch_e2e` still waits for "offline: playing map N", which `offline.c` no longer prints.
+
+## Round 13: the K.P.D. replay and streams leftovers (2026-11-24)
+
+The replay viewer and its two officer lists were compared again with `deob-10.0.7.js:223066-223076,
+223195-223260, 229603-229844, 27443-27479`. The streams overlay was checked against its own Svelte
+templates and derived stores at `:146840-146866, 148350-148490, 148536-148744`. The remaining differences
+are closed:
+
+- The bar says RESOLVE, HACKER? and SUSPECT; the loading cards, KPD Demo Review popup, copy title and
+  Vote Failed text are v10's. A vote answer with no `myv` clears the old vote. Voting without a session
+  reaches the API and shows its answer rather than a client-only sign-in message. The first round start
+  alone clears popups. Exit Replay is `app_reload` (`location.reload()` on web, a native re-exec).
+- `openDemoLink` shows the body's error, "Demo not found", or the request-catch text as appropriate;
+  `?ct=` is present and URL-encoded only when a call token exists.
+- Demos and Reviewers call `/kpd/demos?off&q` and `/kpd/reviewers` directly, through the official gapi
+  when an official game is active. The grouped HTTP responses are normalized to the existing policeRes
+  renderer, including each group's ban flag; only a non-banned suspect gets the guest tag. Stale answers
+  and the 15 s failure path are kept in check.
+- `copyDemoLink` copies `<origin>/?demo=<tok>&sus=<ct>`, shows `check`, and restores `content_copy`
+  after 1250 ms.
+- The streams overlay has no `.streams-body` wrapper; its plain grid also uses `featured-grid`, and the
+  promo belongs inside its grid (including the expanded rest row). `regularStreams` is empty when there
+  are no featured streams, so two ordinary streams no longer get a More button. Only featured cards draw
+  event chips / `has-event`; thumbnail children follow v10's viewer, language, drops, event order. Only
+  `static-cdn.jtvnw.net` uses the brain's thumbnail proxy; other hosts keep their direct URL.
+- A hack-flagged premium login keeps its ad slots: v10 returns for the BANNED popup before the premium
+  hide (:216877-216881). The Double XP button no longer carries a non-v10 `doubleXPButton` class
+  (:210089); the native CSS uses its id attribute instead.
+
+Tests: `kpd_phone_test` (grouped HTTP lists, errors, group / guest flags, copy feedback),
+`kpd_replay_vote_e2e.py` (RESOLVE -> HACKER? -> vote, and reload-on-exit), `menu_sources_e2e` (the
+unfeatured and featured / rest structures, thumbnail order and proxy hosts), `native_auth_e2e` (the
+premium hack flag), `double_xp_e2e`, `v10_endscreen_e2e`, and the three replay uidiff scenarios. The
+replay scenarios' KN regression baselines were re-rendered for the intended v10 text.
