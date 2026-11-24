@@ -358,6 +358,13 @@ async def scenario(names):
     await A.send(["ict", b_id, "a" * 513])
     f = await A.recv_until(lambda f: f[0] == "chf")
     check(f and f[1] is False, "a hub chat past 512 characters is refused")
+    await A.send(["ict", b_id, "   "])
+    f = await A.recv_until(lambda fr: fr[0] == "chf")
+    check(f and f[1] is False, "a hub chat of spaces is not sent")
+    await A.send(["ict", b_id, "  hub hello  "])
+    f = await A.recv_until(lambda fr: fr[0] == "chf")
+    row = q("SELECT body FROM chat_messages WHERE sender_id = ? ORDER BY id DESC LIMIT 1", a_id)
+    check(f and f[1] is True and row and row[0][0] == "hub hello", "a hub chat is stored trimmed")
 
     # --- search
     st, r = await C.gapi("GET", "/players/search?q=%s&limit=20" % an[:6])

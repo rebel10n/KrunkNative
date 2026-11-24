@@ -420,9 +420,17 @@ static void chat_sent(SocialSession *s, kn_db_result *res, void *extra) {
 /* ["ict", peerId, text] -> ["chf", true] | ["chf", false, err] */
 void sh_chat_send(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) return;
-    const char *txt = fa_str(f, 2);
+    /* the same trim as a direct message (msg:send): a line of spaces is not a message */
+    const char *raw = fa_str(f, 2);
+    while (raw && (*raw == ' ' || *raw == '\n' || *raw == '\t' || *raw == '\r')) raw++;
+    size_t n = raw ? strlen(raw) : 0;
+    while (n && (raw[n - 1] == ' ' || raw[n - 1] == '\n' || raw[n - 1] == '\t' || raw[n - 1] == '\r')) n--;
+    char text[2048];
+    if (n >= sizeof text) n = sizeof text - 1;
+    if (raw && n) memcpy(text, raw, n);
+    text[n] = 0;
     const int64_t peer = fa_int(f, 1, 0);
-    if (!text_ok(txt, g_acct.chat_max_len > 0 ? g_acct.chat_max_len : 512) || peer <= 0 || peer == s->account_id) {
+    if (!text_ok(text, g_acct.chat_max_len > 0 ? g_acct.chat_max_len : 512) || peer <= 0 || peer == s->account_id) {
         social_send_n(s, "chf", 2, cJSON_CreateFalse(), cJSON_CreateString("Message not Sent"));
         return;
     }
@@ -430,7 +438,7 @@ void sh_chat_send(SocialSession *s, const cJSON *f) {
     ChatSend *c = calloc(1, sizeof *c);
     if (!c) return;
     c->a = peer;
-    snprintf(c->text, sizeof c->text, "%s", txt);
+    snprintf(c->text, sizeof c->text, "%s", text);
     social_query(s,
                  /* a staff chat ban (feature_bans 'chat', in force) refuses the line: no row, chf false */
                  SQL(.pg = "INSERT INTO chat_messages (sender_id, receiver_id, body) SELECT $1, id, $3 FROM accounts WHERE id = $2 "
@@ -442,7 +450,7 @@ void sh_chat_send(SocialSession *s, const cJSON *f) {
                             "AND (SELECT count(*) FROM chat_messages WHERE sender_id = $1 AND created_at > {ago:60}) < 30 "
                             "AND NOT EXISTS (SELECT 1 FROM feature_bans WHERE account_id = $1 AND feature = 'chat' AND revoked_at IS NULL "
                             "AND (expires_at IS NULL OR expires_at > {now}))"),
-                 KN_DB_ARGS(me_str(s, me), acct_itoa(p, peer), txt), chat_sent, c);
+                 KN_DB_ARGS(me_str(s, me), acct_itoa(p, peer), c->text), chat_sent, c);
 }
 
 /* ------------------------------------------------------------------ clans */
