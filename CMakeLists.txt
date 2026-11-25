@@ -1343,7 +1343,8 @@ else ()
                    shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c
                    shared/src/season.c shared/src/voice.c shared/src/social.c shared/src/ks/ks_net_official.c)
     target_include_directories(krunker_link_test PRIVATE client/include shared/include)
-    target_link_libraries(krunker_link_test PRIVATE cJSON m)
+    # Threads: on MinGW clock_gettime and pthread_mutex_* live in winpthread, which nothing else pulls in here
+    target_link_libraries(krunker_link_test PRIVATE cJSON Threads::Threads m)
     target_compile_definitions(krunker_link_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}") # tools/krunker/build.json (a live build)
     add_test(NAME krunker_link_test COMMAND krunker_link_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # kn_captcha_test (client/include/kn_captcha.h): Box Office's captcha in the client: the brain's ALTCHA challenge
@@ -1351,7 +1352,7 @@ else ()
     add_executable(kn_captcha_test client/tests/kn_captcha_test.c client/src/net/kn_captcha.c client/src/net/krunker_altcha.c
                    shared/src/auth_join.c)
     target_include_directories(kn_captcha_test PRIVATE client/include shared/include)
-    target_link_libraries(kn_captcha_test PRIVATE cJSON m)
+    target_link_libraries(kn_captcha_test PRIVATE cJSON Threads::Threads m)
     add_test(NAME kn_captcha_test COMMAND kn_captcha_test)
 
     # ranked_route_test (client/include/ranked_route.h): the Ranked popup's backend rule (the connected server's)
@@ -1388,7 +1389,7 @@ else ()
     # pass over a whole inventory and draws a page of its matches, not every one (v10_market.c ct_side)
     add_executable(market_trade_list_test client/tests/market_trade_list_test.c client/src/ui/market_trade_list.c)
     target_include_directories(market_trade_list_test PRIVATE client/include client/src/viewer shared/include)
-    target_link_libraries(market_trade_list_test PRIVATE cJSON m)
+    target_link_libraries(market_trade_list_test PRIVATE cJSON Threads::Threads m)
     add_test(NAME market_trade_list_test COMMAND market_trade_list_test)
 
     # creation_vote_test (client/src/ui/creation_vote.c): the menu's map / mod vote: the toggle, the rendered
@@ -1578,7 +1579,7 @@ else ()
                    client/src/net/krunker_link_world.c client/src/net/krunker_link_lobby.c client/src/net/krunker_link_script.c client/src/net/krunker_link_prophunt.c client/src/net/krunker_link_s2c.c client/src/net/krunker_sounds.c client/src/net/krunker_link_trade.c shared/src/ks/ks_net_official.c
                    client/src/net/krunker_altcha.c client/src/ui/player_names.c)
     target_include_directories(krunker_sync_test PRIVATE client/include)
-    target_link_libraries(krunker_sync_test PRIVATE m)
+    target_link_libraries(krunker_sync_test PRIVATE Threads::Threads m)
     if (WIN32)
         target_link_libraries(krunker_sync_test PRIVATE ws2_32) # shared/src/net.c
     endif ()

@@ -147,7 +147,7 @@ static void load_owner_account(void) {
     cJSON_Delete(account);
 }
 
-static int near(const float a, const double b) { return fabs((double) a - b) < 1e-5; }
+static int approx_eq(const float a, const double b) { return fabs((double) a - b) < 1e-5; }
 
 static void test_named_copies_reach_a_joiner(void) {
     memset(g_clients, 0, sizeof(g_clients));
@@ -191,7 +191,7 @@ static void test_named_copies_reach_a_joiner(void) {
         NetSkinCopiesPacketV2 p;
         memcpy(&p, body, sizeof(p));
         CHECK(p.v1.seed[0] == skin_copy_seed(502, 1, 77.0), "the named copy's seed (got %d)", p.v1.seed[0]);
-        CHECK(near(p.wear[0], 0.45), "the named copy's wear (got %f)", p.wear[0]);
+        CHECK(approx_eq(p.wear[0], 0.45), "the named copy's wear (got %f)", p.wear[0]);
         CHECK(p.wear[1] < 0.0f, "no secondary: no wear");
         CHECK(p.wear[2] < 0.0f, "the named melee copy has no wear, the first copy's is not used (got %f)", p.wear[2]);
         // an older client reads the V1 prefix (28 bytes): the same uid and seeds
@@ -213,7 +213,7 @@ static void test_named_copies_reach_a_joiner(void) {
         }
         CHECK(bod >= 0 && p.v1.style[bod] == 2 && p.wear[bod] < 0.0f, "the named body copy's style 2, and no wear (style %d wear %f)",
               bod >= 0 ? p.v1.style[bod] : -9, bod >= 0 ? p.wear[bod] : -9.0f);
-        CHECK(hat >= 0 && p.v1.style[hat] == 0 && near(p.wear[hat], 0.2), "the plain hat: no style, the first copy's wear (wear %f)",
+        CHECK(hat >= 0 && p.v1.style[hat] == 0 && approx_eq(p.wear[hat], 0.2), "the plain hat: no style, the first copy's wear (wear %f)",
               hat >= 0 ? p.wear[hat] : -9.0f);
     }
 
@@ -227,7 +227,7 @@ static void test_named_copies_reach_a_joiner(void) {
     CHECK(accounts_worn_copy(owner_conn, SKIN_COPY_SLOT_PRIMARY, TOPO) == NULL, "a gone copy is not worn");
     accounts_skin_paints(owner_conn, &owner->skins, &paints);
     CHECK(paints.primary.color == 0x112233, "a gone copy: the first painted copy (got %06x)", paints.primary.color);
-    CHECK(near(accounts_worn_wear(owner_conn, SKIN_COPY_SLOT_PRIMARY, TOPO), 0.05), "a gone copy: the first copy's wear");
+    CHECK(approx_eq(accounts_worn_wear(owner_conn, SKIN_COPY_SLOT_PRIMARY, TOPO), 0.05), "a gone copy: the first copy's wear");
     owner_conn->worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 503; // the melee's copy on the primary
     CHECK(accounts_worn_copy(owner_conn, SKIN_COPY_SLOT_PRIMARY, TOPO) == NULL, "a copy of another index is not worn");
     accounts_skin_paints(owner_conn, &owner->skins, &paints);
@@ -235,11 +235,11 @@ static void test_named_copies_reach_a_joiner(void) {
     owner_conn->worn_copies = no_copies(); // an older client: no NET_EXT_KN_SKIN_COPY_IDS
     accounts_skin_paints(owner_conn, &owner->skins, &paints);
     CHECK(paints.primary.color == 0x112233 && paints.melee.color == 0x778899, "no copy ids: the plain-index rule for each slot");
-    CHECK(near(accounts_worn_wear(owner_conn, SKIN_COPY_SLOT_MELEE, MELEE), 0.7), "no copy ids: the first worn melee copy's wear");
+    CHECK(approx_eq(accounts_worn_wear(owner_conn, SKIN_COPY_SLOT_MELEE, MELEE), 0.7), "no copy ids: the first worn melee copy's wear");
     // the copy follows its index to another slot (cosmetics_route): any slot holding the index names it
     owner_conn->worn_copies.skin[SKIN_COPY_SLOT_HEAD] = BODY, owner_conn->worn_copies.copy_id[SKIN_COPY_SLOT_HEAD] = 505;
     const ServerSkinCopy *moved = accounts_worn_copy(owner_conn, SKIN_COPY_SLOT_BODY, BODY);
-    CHECK(moved && moved->id == 505 && moved->style == 1 && near(moved->wear, 0.9), "a copy named on another slot of the same index");
+    CHECK(moved && moved->id == 505 && moved->style == 1 && approx_eq(moved->wear, 0.9), "a copy named on another slot of the same index");
     owner_conn->worn_copies = saved;
 }
 
