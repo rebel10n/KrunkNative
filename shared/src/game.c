@@ -545,6 +545,7 @@ void game_start_round(Game *game) {
     game->round_seconds_sent = -1;
     game->round_endless = 0;
     game->end_timer = 0.0f;
+    game->end_order_count = 0;
     // finishInit: loadInTimer = isServer && !isSandbox ? loadInTime : 0 (deob-10.0.7.js:193804)
     game->load_in_timer = game->server && !game->is_sandbox ? GAME_LOAD_IN_TIME : 0.0f;
     game->kill_count = 0;
@@ -637,7 +638,24 @@ void game_send_end_late(Game *game, const int uid) {
 
     Player *sorted[GAME_END_ROWS_MAX];
     ModeWinner winner;
-    const size_t count = game_end_order(game, sorted, &winner);
+    size_t count = game_end_order(game, sorted, &winner);
+    // the rows in the round end's order (sorted before onPreEnd changed the scores: Zombies gives everyone the same), then
+    // anyone who came after it
+    if (game->end_order_count) {
+        Player *all[GAME_END_ROWS_MAX];
+        size_t n = 0;
+        for (size_t i = 0; i < game->end_order_count && i < GAME_END_ROWS_MAX; i++) {
+            Player *player = game_find_player(game, game->end_order_uids[i]);
+            if (player) all[n++] = player;
+        }
+        for (size_t i = 0; i < count && n < GAME_END_ROWS_MAX; i++) {
+            size_t k = 0;
+            while (k < n && all[k] != sorted[i]) k++;
+            if (k == n) all[n++] = sorted[i];
+        }
+        memcpy(sorted, all, n * sizeof(*sorted));
+        count = n;
+    }
 
     NetEndPacket packet;
     memset(&packet, 0, sizeof(packet));
@@ -646,8 +664,13 @@ void game_send_end_late(Game *game, const int uid) {
     packet.winner_uid = winner.player ? winner.player->uid : -1;
     game_fill_board_from((const Player *const *) sorted, count, &packet.board);
     for (size_t i = 0; i < count && i < GAME_LEADERBOARD_MAX; i++) packet.rewards[i] = sorted[i]->reward;
+    // the end table's other packets, as game_end_round sends them, to this peer: ZOMBIE_STATS (Zombies' zombies and rounds
+    // cells), the skin rewards, the END, then END_STATS, the END_ROWs past 16 and MODE_END (mode_send_end). With the END
+    // alone a late joiner's table had the board's 16 rows and the default columns.
+    if (game->mode && game->mode->config.id == MODE_ID_ZOM) zombies_send_end_stats_to(game, uid);
     game_send_end_rewards(game, uid);
     game_send(game, uid, NET_PACKET_END, &packet, sizeof(packet));
+    if (game->mode) mode_send_end_to(game, uid, winner, sorted, count);
     game_send_match_votes(game, uid); // WP-E: the vote cards of this end screen
 }
 
@@ -681,6 +704,8 @@ void game_end_round(Game *game) {
     // found again by uid (a removed player's Player is freed).
     int sorted_uids[GAME_END_ROWS_MAX];
     for (size_t i = 0; i < count; i++) sorted_uids[i] = sorted[i]->uid;
+    memcpy(game->end_order_uids, sorted_uids, count * sizeof(*sorted_uids)); // onPreEnd's ZOMBIE_STATS and a late END
+    game->end_order_count = count;
     const int winner_uid = winner.player ? winner.player->uid : -1;
     if (game->mode) mode_on_game_end(game);
     size_t kept = 0;

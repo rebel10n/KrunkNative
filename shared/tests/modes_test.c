@@ -15,6 +15,7 @@
 #include <map_catalog.h> // the official Raid maps (Khepri, Bastion)
 #include <net_ext.h>     // gmsg's countdown (NET_EXT_KN_OFFICIAL_COUNTDOWN)
 #include <mode_columns.h> // the bridge's copy of teams / endStats / leaderStats
+#include <zombies.h>      // NET_PACKET_ZOMBIE_STATS: the end table's zombies / rounds cells
 #include <ai.h>          // game_ai_free: the Raid maps' AIs
 #include <math.h>
 #include <stdio.h>
@@ -498,6 +499,82 @@ static void test_end_rows_40(Game *game) {
             extra += subtype == NET_EXT_KN_END_ROW;
     }
     CHECK(ended(game) && extra == 0, "16 players: no END_ROW (%d)", extra);
+}
+
+static int count_ext_to(const uint16_t want, const int uid) {
+    int n = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t subtype = 0, length = 0;
+        const uint8_t *body = NULL;
+        if (g_sent[i].type == NET_PACKET_EXT && g_sent[i].uid == uid &&
+            net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &length))
+            n += subtype == want;
+    }
+    return n;
+}
+
+// Zombies' endStats zombies / rounds (deob-10.0.7.js:105896) for every row: ZOMBIE_STATS (16 entries) lists the end
+// order's first 16, the END's board, and the rows past 16 carry theirs in NET_EXT_KN_END_ROW. A late END (a player who
+// enters during the end screen) gets the same packets as the round's end did: ZOMBIE_STATS, END, END_STATS, the END_ROWs
+// and MODE_END.
+static void test_end_late_and_zombies(Game *game) {
+    printf("Running late end / Zombies end stats test...\n");
+    start_mode(game, MODE_ID_ZOM);
+    for (int uid = 1; uid <= 20; uid++) {
+        Player *p = add_player(game, uid, 0);
+        p->score = uid * 10; // the last 4 to join are the best 4
+        p->mode.ai_kills = uid;
+        p->mode.rounds = 1;
+    }
+    game_end_round(game);
+    const SentPacket *end = last_sent(NET_PACKET_END, 20);
+    const SentPacket *zs = last_sent(NET_PACKET_ZOMBIE_STATS, NET_TARGET_ALL);
+    NetEndPacket board;
+    NetZombieStatsPacket stats;
+    memset(&board, 0, sizeof(board));
+    memset(&stats, 0, sizeof(stats));
+    if (end) memcpy(&board, end->payload, sizeof(board));
+    if (zs) memcpy(&stats, zs->payload, sizeof(stats));
+    int missing = 0;
+    for (int i = 0; i < board.board.count; i++) {
+        int found = 0;
+        for (int k = 0; k < stats.count; k++)
+            if (stats.entries[k].uid == board.board.entries[i].uid && stats.entries[k].zombies == board.board.entries[i].uid) found = 1;
+        missing += !found;
+    }
+    CHECK(end && zs && board.board.count == 16 && stats.count == 16 && missing == 0,
+          "Zombies: ZOMBIE_STATS has every row of the END's board (%d missing)", missing);
+    int rows = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t subtype = 0, length = 0;
+        const uint8_t *body = NULL;
+        if (g_sent[i].type != NET_PACKET_EXT || !net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &length) ||
+            subtype != NET_EXT_KN_END_ROW)
+            continue;
+        NetEndRowPacket row;
+        memcpy(&row, body, sizeof(row));
+        rows += row.zombies == row.uid && row.rounds == 1;
+    }
+    CHECK(rows == 4, "Zombies: the 4 rows past 16 carry their zombies and rounds (%d)", rows);
+
+    // a late END for uid 7: the same table, to that peer only
+    g_sent_count = 0;
+    game_send_end_late(game, 7);
+    const SentPacket *late = last_sent(NET_PACKET_END, 7);
+    const SentPacket *late_zs = last_sent(NET_PACKET_ZOMBIE_STATS, 7);
+    const SentPacket *late_me = last_sent(NET_PACKET_MODE_END, 7);
+    NetEndPacket late_board;
+    NetZombieStatsPacket late_stats;
+    memset(&late_board, 0, sizeof(late_board));
+    memset(&late_stats, 0, sizeof(late_stats));
+    if (late) memcpy(&late_board, late->payload, sizeof(late_board));
+    if (late_zs) memcpy(&late_stats, late_zs->payload, sizeof(late_stats));
+    CHECK(late && late_board.board.count == 16 && !memcmp(&late_board.board, &board.board, sizeof(board.board)),
+          "a late END: the round end's board, in its order (onPreEnd gave everyone the same score)");
+    CHECK(late_zs && late_stats.count == 16 && !memcmp(&late_stats, &stats, sizeof(stats)), "a late END: ZOMBIE_STATS to that peer");
+    CHECK(late_me && count_ext_to(NET_EXT_KN_END_STATS, 7) == 1 && count_ext_to(NET_EXT_KN_END_ROW, 7) == 4 &&
+              count_ext_to(NET_EXT_KN_END_ROW, NET_TARGET_ALL) == 0,
+          "a late END: END_STATS, the 4 END_ROWs and MODE_END to that peer (%d rows)", count_ext_to(NET_EXT_KN_END_ROW, 7));
 }
 
 // ------------------------------------------------------------------ objectives
@@ -2448,6 +2525,7 @@ int main(void) {
     test_tdm(&game);
     test_end_stats(&game);
     test_end_rows_40(&game);
+    test_end_late_and_zombies(&game);
     test_swap_team(&game);
     test_point(&game);
     test_king(&game);

@@ -298,7 +298,7 @@ _Static_assert(NET_END_STATS_TEAMS == MODE_TEAMS && NET_END_STATS_MAX == NET_MOD
                sizeof(((NetEndStatsPacket *) 0)->team_flags[0]) == MODE_TEXT_SIZE, "NetEndStatsPacket follows the mode tables");
 
 // NET_EXT_KN_END_STATS: the end data MODE_END has no field for (net_ext.h), its rows in the same order
-static void mode_send_end_stats(Game *game, Player **sorted, const size_t count) {
+static void mode_send_end_stats(Game *game, const int target, Player **sorted, const size_t count) {
     const GameMode *mode = game->mode;
     NetEndStatsPacket body;
     memset(&body, 0, sizeof(body));
@@ -318,7 +318,7 @@ static void mode_send_end_stats(Game *game, Player **sorted, const size_t count)
     }
     uint8_t buffer[NET_EXT_HEADER_SIZE + sizeof(body)];
     const uint16_t n = net_ext_pack(buffer, sizeof(buffer), NET_EXT_KN_END_STATS, &body, sizeof(body));
-    if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buffer, n);
+    if (n) game_send(game, target, NET_PACKET_EXT, buffer, n);
 }
 
 // MODE_END's stats of one player (NetModeStat order); NET_EXT_KN_END_ROW carries the same array for the rows past 16
@@ -343,7 +343,7 @@ _Static_assert(NET_END_ROW_STATS == NET_MODE_STAT_COUNT && NET_END_ROWS_MAX == G
                "NetEndRowPacket follows MODE_END's entry and the end order's length");
 
 // NET_EXT_KN_END_ROW: the end table's rows past MODE_END's 16 (net_ext.h), one packet each, in the end order
-static void mode_send_end_rows(Game *game, Player **sorted, const size_t count) {
+static void mode_send_end_rows(Game *game, const int target, Player **sorted, const size_t count) {
     for (size_t i = NET_MODE_END_MAX; i < count && i < NET_END_ROWS_MAX; i++) {
         const Player *player = sorted[i];
         if (!player) continue;
@@ -361,13 +361,17 @@ static void mode_send_end_rows(Game *game, Player **sorted, const size_t count) 
         mode_end_stats_fill(player, row.stats);
         uint8_t buffer[NET_EXT_HEADER_SIZE + sizeof(row)];
         const uint16_t n = net_ext_pack(buffer, sizeof(buffer), NET_EXT_KN_END_ROW, &row, sizeof(row));
-        if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buffer, n);
+        if (n) game_send(game, target, NET_PACKET_EXT, buffer, n);
     }
 }
 
 void mode_send_end(Game *game, const ModeWinner winner, Player **sorted, const size_t count) {
-    mode_send_end_stats(game, sorted, count);
-    mode_send_end_rows(game, sorted, count);
+    mode_send_end_to(game, NET_TARGET_ALL, winner, sorted, count);
+}
+
+void mode_send_end_to(Game *game, const int target, const ModeWinner winner, Player **sorted, const size_t count) {
+    mode_send_end_stats(game, target, sorted, count);
+    mode_send_end_rows(game, target, sorted, count);
 
     NetModeEndPacket packet;
     memset(&packet, 0, sizeof(packet));
@@ -385,7 +389,7 @@ void mode_send_end(Game *game, const ModeWinner winner, Player **sorted, const s
         mode_end_stats_fill(player, entry->stats);
     }
 
-    game_send(game, NET_TARGET_ALL, NET_PACKET_MODE_END, &packet, sizeof(packet));
+    game_send(game, target, NET_PACKET_MODE_END, &packet, sizeof(packet));
 }
 
 int mode_leader_stat_value(const Player *player, const char *key) {

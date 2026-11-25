@@ -122,6 +122,8 @@ void zombies_round_start(Game*);           // finishInit: machines from the map,
 void zombies_tick(Game*, float delta);     // seconds: updatePowerups (#8), airDrop.update / sync (#14), mystery boxes / krum machines (#21-22)
 void zombies_send_state(Game*, int uid);   // init syncData pwup / mybx / krm, the wave and the airdrops for a joiner
 void zombies_send_end_stats(Game*);        // NET_PACKET_ZOMBIE_STATS of every player (authority, game end)
+// The same to one target (a late END's peer): the end order's first 16 (Game.end_order_uids), then the others.
+void zombies_send_end_stats_to(Game*, int target);
 // Client mirror of every WP-H packet; `me` (the local player, may be NULL) takes the reserves /
 // sharing ones. 1 = a WP-H packet.
 int zombies_apply_packet(Game*, Player *me, int type, const void *payload, uint16_t length);
