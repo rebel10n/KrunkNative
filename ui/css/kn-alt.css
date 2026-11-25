@@ -166,9 +166,4 @@
 	line-height: 1.4;
 }
 
-/* client/src/ui/creation_vote.c: the menu's map / mod vote, the two thumbs at the row's right end */
-.kn-vote-pair {
-	float: right;
-	white-space: nowrap;
-}
 
