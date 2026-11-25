@@ -697,6 +697,33 @@ static void cmd_kpd(ChatCtx *c) {
     c->host->kpd_officer(c->host->user, c->sender, c->argv[0], on);
 }
 
+// Krunker v7.1.4 /xp <amount> and /kr <amount> (server/index.ts:3165-3171 and the ct handler 4272-4290): XP or KR
+// added to the sender's own account. v7's gate (requireHostOrDev: DEV peers and the custom host, perms on or off);
+// kn_brain's dev_grant then grants only to a developer account, so a host that is not a developer is told so and
+// nothing changes. The console has no account. The answer comes from the host once the coordinator replies.
+#define CHAT_GRANT_MAX 10000000 // services/brain/db_procs.h DEV_GRANT_MAX
+static void cmd_grant(ChatCtx *c, const int kr) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV)) return;
+    const char *arg = c->argc >= 1 ? c->argv[0] : "";
+    const long amount = arg[0] && all_digits(arg) && strlen(arg) <= 9 ? strtol(arg, NULL, 10) : 0;
+    if (c->argc != 1 || amount < 1 || amount > CHAT_GRANT_MAX) {
+        reply(c, "Usage: /%s <amount> (1 to %d)", kr ? "kr" : "xp", CHAT_GRANT_MAX);
+        return;
+    }
+    if (c->sender == CHAT_CMD_CONSOLE) {
+        reply(c, "The console has no account: run /%s in game.", kr ? "kr" : "xp");
+        return;
+    }
+    if (!c->host->dev_grant) {
+        reply(c, "No account service on this server.");
+        return;
+    }
+    c->host->dev_grant(c->host->user, c->sender, kr, (int) amount);
+}
+
+static void cmd_xp(ChatCtx *c) { cmd_grant(c, 0); }
+static void cmd_kr(ChatCtx *c) { cmd_grant(c, 1); }
+
 static int compare_ints(const void *a, const void *b) {
     const int x = *(const int *) a, y = *(const int *) b;
     return (x > y) - (x < y);
@@ -2701,6 +2728,8 @@ static const ChatCommand COMMANDS[] = {
     {{"unban", NULL, "<accountId|name|id>", "unban an account", CHAT_PERM_DEV}, cmd_unban},
     {{"kpd", NULL, "<account> on|off | apps", "grant or revoke K.P.D officer, or list the K.P.D applications", CHAT_PERM_DEV}, cmd_kpd},
     {{"bans", NULL, "", "list banned account ids", CHAT_PERM_DEV}, cmd_bans},
+    {{"xp", NULL, "<amount>", "add XP to your own account (developer accounts)", CHAT_PERM_HOST_DEV}, cmd_xp},
+    {{"kr", NULL, "<amount>", "add KR to your own account (developer accounts)", CHAT_PERM_HOST_DEV}, cmd_kr},
     {{"ip", NULL, "<name|id>", "show a player's IP", CHAT_PERM_DEV}, cmd_ip},
     {{"banip", NULL, "<name|id|ip>", "ban an IP in this lobby", CHAT_PERM_DEV}, cmd_banip},
     {{"unbanip", NULL, "<ip>", "unban an IP", CHAT_PERM_DEV}, cmd_unbanip},

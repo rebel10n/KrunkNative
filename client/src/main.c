@@ -39,6 +39,7 @@
 #include <rt.h> // --rt-selftest: the ray tracer's CPU BVH against brute force (client/src/rt/rt_selftest.c)
 #include <rt.h> // Box Office ray tracing: rt_frame / rt_begin_world / rt_end_world (client/src/rt/)
 #include <nav_overlay.h>
+#include <ent_bbox.h> // the console's ent_bbox overlay (ent_bbox.c)
 #include <map_environment.h> // v7 environment zones, tone mapping, ocean (map_environment.c)
 #include <env_map.h> // v10.0.3 GLB reflections: getEnvMap (env_map.c)
 #include <ocean.h>
@@ -1254,6 +1255,7 @@ int main(int argc, char **argv) {
     ai_render_reset(&INSTANCE); // AI meshes in the world scene (ai_render.c)
     nav_overlay_fini(); // show_navmeshes: waits for a running build, GL buffers, the line program
     replay_hitbox_fini(); // the replay's hitbox outlines (replay_hitbox.c)
+    ent_bbox_fini();      // the console's ent_bbox overlay (ent_bbox.c)
     om_build_fini();    // the Object Manager overlay's GL buffers (om_gizmo.c)
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
     rt_fini();     // ray tracing targets, programs, BVH tables (rt.h)
@@ -2937,6 +2939,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         rt_shafts_composite(); // rtShafts: the traced sun shafts over the world, before its effects and the viewmodel (rt_pass.c)
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
         nav_overlay_render(client); // show_navmeshes: nav areas + connections, over the world (nav_overlay.c)
+        ent_bbox_render(client);    // ent_bbox: the players' and map objects' movement boxes (ent_bbox.c)
         replay_hitbox_render(client); // a K.P.D replay's hitbox outlines (replay_hitbox.c)
         om_build_render(client);    // Object Manager: the Physics Gun's beam, the btools' box and handles (om_build.c)
         gpu_timer_mark(GPU_PASS_VFX);

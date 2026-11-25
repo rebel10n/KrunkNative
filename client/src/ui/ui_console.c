@@ -30,6 +30,7 @@
 #include <ai.h>
 #include <app_mode.h> // editor: app_route_url_target
 #include <nav_overlay.h>
+#include <ent_bbox.h> // ent_bbox: the movement boxes overlay
 #include <object_manager.h> // give: weapon / item names
 #include <target_select.h>  // give: a leading or trailing selector (target_is_selector)
 #include <player_accounts.h> // bot_kick / bot_kill: a bot is a player the server sent NET_PLAYER_INFO_BOT for
@@ -436,6 +437,7 @@ static const ConArg A_KPD[] = {{"account|apps", ARG_STRING, 0}, {"on|off", ARG_S
 static const ConArg A_BANIP[] = {{"name|id|ip", ARG_STRING, 1}};
 static const ConArg A_IP[] = {{"ip", ARG_STRING, 1}};
 static const ConArg A_AMOUNT[] = {{"amount", ARG_NUMBER, 1}};
+static const ConArg A_GRANT[] = {{"amount", ARG_NUMBER, 0}}; // Krunker v7.1.4 xp / kr
 static const ConArg A_GAME[] = {{"text", ARG_STRING, 1}};
 // Krunker v7.1.4 bots (mod/devConsole.ts registrations; shared/src/chat_commands.c runs them)
 static const ConArg A_BOT_ADD[] = {{"count", ARG_NUMBER, 1}, {"tfue|autoRespawn|key=value", ARG_STRING, 1}};
@@ -1544,6 +1546,13 @@ static void cmd_show_navmeshes(const int argc, char **argv, const char *rest) {
     nav_overlay_show(con_client());
 }
 
+// ent_bbox [on|off] (v7.1.4 registerLocal "ent_bbox", devConsole.ts:1392): the players' and map objects' movement
+// boxes over the world; no argument toggles (ent_bbox.c)
+static void cmd_ent_bbox(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    ent_bbox_command(con_client(), argc, argv);
+}
+
 // the game transport (WebRTC / WebTransport / WebSocket, UDP / TCP), its session counters and
 // why a transport was skipped (net_notes.c client_net_info)
 static void cmd_netinfo(const int argc, char **argv, const char *rest) {
@@ -1669,6 +1678,7 @@ static void register_commands(void) {
     register_dev("class", ARGS(A_CLASS), "switch your class now: its loadout and health, and the secondary weapon", cmd_class);
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
+    register_local("ent_bbox", ARGS(A_ON_OFF), "draw player and object movement boxes in 3D (no arg toggles)", cmd_ent_bbox);
     register_dev("rt_debug", ARGS(A_RT_DEBUG), "overlay a ray tracing intermediate: bvh, normals, visibility, history, ao, local, refl, motion, gi (off to clear)", cmd_rt_debug);
     register_dev("rt_materials_reload", NULL, 0, "re-read assets/materials/rt_materials.json (ray-tracing material classes)", cmd_rt_materials_reload);
     register_dev("rt_mode", ARGS(A_RT_MODE), "show or set Ray Tracing: 0 off (Krunker's frame), 1 shadows, 2 + AO, 3 + reflections", cmd_rt_mode);
@@ -1717,6 +1727,8 @@ static void register_commands(void) {
     register_server("unbanip", ARGS(A_IP), "unban an IP");
     register_server("ipbans", NO_ARGS, "list banned IPs");
     register_server("score", ARGS(A_AMOUNT), "add score (default +100)");
+    register_server("xp", ARGS(A_GRANT), "add XP to your own account (developer accounts)");
+    register_server("kr", ARGS(A_GRANT), "add KR to your own account (developer accounts)");
     register_server("summon", ARGS(A_NAME), "spawn a Soul Sanctum AI by name (no arg lists summonable names)");
     register_server("game", ARGS(A_GAME), "send a game command");
     register_server("bot", ARGS(A_BOT_ADD), "spawn player-targeting auto-respawn bots (tfue=off for full-strength bots)");
@@ -2285,7 +2297,7 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         if (arg == 0) con_words(c, prefix, WORDS("on", "off", "held"));
     } else if (!strcmp(cmd, "bot_type")) {
         if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
-    } else if (!strcmp(cmd, "show_navmeshes")) {
+    } else if (!strcmp(cmd, "show_navmeshes") || !strcmp(cmd, "ent_bbox")) {
         if (arg == 0) con_words(c, prefix, ON_OFF);
     } else if (!strcmp(cmd, "rt_debug")) {
         if (arg == 0) con_words(c, prefix, WORDS("bvh", "normals", "visibility", "history", "ao", "local", "refl", "motion", "gi", "off"));

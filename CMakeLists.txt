@@ -996,6 +996,16 @@ else ()
         target_link_libraries(nav_overlay_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
     add_test(NAME nav_overlay_test COMMAND nav_overlay_test)
+    # ent_bbox_test (Krunker v7.1.4 console ent_bbox): the GL-free movement-box geometry (client/src/ent_bbox_geom.c)
+    # against the movement code's own boxes (shared/src/player.c player_object_movement_bounds / player_movement_bounds)
+    add_executable(ent_bbox_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/src/ent_bbox_geom.c client/include/ent_bbox_geom.h
+                   client/tests/ent_bbox_test.c)
+    target_include_directories(ent_bbox_test PRIVATE client/include)
+    target_link_libraries(ent_bbox_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(ent_bbox_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME ent_bbox_test COMMAND ent_bbox_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # prize_wheel_test (v10.0.3 map prize wheels): the spinner list, its GameObject and the type 9 prompt
     # (shared/src/map_spinners.c, interact.c) and the GL-free canvas layout (client/src/prize_wheel_geom.c)
     add_executable(prize_wheel_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/src/prize_wheel_geom.c client/include/prize_wheel_geom.h
@@ -1022,6 +1032,7 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(target_select_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    add_test(NAME target_select_test COMMAND target_select_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # navgen_test: the Krunker v7.1.4 generated nav mesh (shared/src/navgen.c) against v7's navgen.ts
     add_executable(navgen_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/navgen_test.c)
@@ -1690,6 +1701,11 @@ else ()
             add_test(NAME chat_actions_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/chat_actions_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(chat_actions_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # ent_bbox_e2e: the console's ent_bbox (Krunker v7.1.4 devConsole.ts:1392) draws the movement boxes over the
+            # world in a headless sandbox client, and `ent_bbox off` takes them away (client/tests/ent_bbox_e2e.py)
+            add_test(NAME ent_bbox_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/ent_bbox_e2e.py
+                     ${CMAKE_BINARY_DIR} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set_tests_properties(ent_bbox_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;e2e")
             # player_rank_flag_e2e: v10.0.7's rankedRank / flagIndex (NET_EXT_KN_PLAYER_RANK_FLAG) on the Tab board and the end
             # table, and the end table's player cell, in the rendered document (client/tests/player_rank_flag_e2e.py)
             add_test(NAME player_rank_flag_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/player_rank_flag_e2e.py

@@ -66,6 +66,7 @@ silent (only the `] line` echo), as in the mod.
 | rot / rotation | `rotation: yaw=… pitch=… xDire=…` | same |
 | ping | overwritten by the server command | same (it is the server `/ping`) |
 | show_navmeshes [off] | v7.1.4: the nav mesh visualizer (below) | same (v7.1.4 command; v3.1.1 has none) |
+| ent_bbox [on\|off] | v7.1.4 (`mod/devConsole.ts:1392`): the entity bounding-box overlay | same (v7.1.4 command; v3.1.1 and v10.0.7 have none): the movement boxes the collision code tests (`player_movement_bounds` / `player_object_movement_bounds`, shared/src/player.c) as 3D lines over the world, depth test and fog off, rebuilt every frame. Green: your own box (third person only; in first person the camera is inside it); yellow: the other live players and bots; magenta: the map objects that stop a player; orange: the walk-through volumes the movement loop still tests (zones, jump pads, triggers). Objects without a collider, inactive or destroyed ones and complex-collision objects are not drawn. No argument toggles; `off` / `0` / `clear` hides. Answers `ent_bbox: on (N player boxes, M object boxes)` / `ent_bbox: off` (client/src/ent_bbox.c, ent_bbox_geom.c; ent_bbox_test, ent_bbox_e2e) |
 | tool_snap [units\|off] | – | Krunker Box Office: the Tool Gun's / Physics Gun's grid step (0.1 to 100 units, or off), the Object Manager's Snap field; no argument prints it. Client-local (stored as `kn_omSnapStep`), so no target selector |
 | thirdperson / firstperson | – (Source engine commands) | Krunker Box Office: the over-the-shoulder camera (doc/v7/decisions.md "Third person"). `thirdperson` asks the server (`/thirdperson on`); it switches when the grant arrives ("Third Person - Enabled") or prints the refusal (public / ranked servers, custom games whose host has `knTPCam` off). `firstperson` goes back at once. Also the Controls bind "Third Person" (unbound by default) |
 
@@ -90,6 +91,7 @@ io.send wrapper). The other commands run in the offline game's chat handler. `/b
 | ban | name\|id | dev | account ban + close 4003 | ✔ "Banned X (account N)." when server_bin has accounts (the host's ban_account callback); guests: "Disconnected X, but no account id was available to persist a ban." |
 | unban | accountId\|name\|id | dev | "Unbanned account N." / "Account N was not banned." / "No valid account id to unban." | ✔ (the list is always empty) |
 | bans | – | dev | "Banned accounts (n): …" / "Ban list is empty." | ✔ "Ban list is empty." |
+| xp, kr | amount (1 to 10000000) | host / dev (v7.1.4 `requireHostOrDev`) | Krunker v7.1.4 (`server/index.ts:3165-3171`, ct 4272-4290): adds XP / KR to the sender's own account | ✔ online: kn_brain's `dev_grant` grants only to a developer account, so a custom host that is not one is told "Only developers can grant XP" / "… KR". "Added 5000 XP (level 2)" / "Added 250 KR (now 250 KR)"; XP is player_score, KR is player_funds with a kr_transactions row (`admin`, `dev_grant`), moderation_log keeps both; no purchase path. A guest: "Sign in to an account first"; the console: "The console has no account: run /kr in game."; a signed-in sender on a server without a coordinator (offline): "No account service on this server." (shared/tests/target_select_test.c, services/brain/tests/dev_grant_test.py, server/tests/dev_grant_e2e.py) |
 | ip | name\|id | dev | "name: addr" / "(no address)" | ✔ |
 | banip | name\|id\|ip | dev | IP ban + close 4003; refusals for your own IP | ✔ (connections from the IP are refused on accept) |
 | unbanip | ip | dev | "IP unbanned: x" / "IP was not banned: x" | ✔ |
@@ -579,7 +581,7 @@ and adds completion for arguments:
 | give | 1: the Object Manager's weapons (the Tool Gun too) and giveable items, 2: player names |
 | bot_type | nextbot / tfue |
 | bot_mimic, bot_stop | on / off |
-| show_navmeshes | on / off |
+| show_navmeshes, ent_bbox | on / off |
 | bot_difficulty | easy / normal / hard / max |
 | bot, bot_add, bot_place, bot_config | tfue, autoRespawn and common `key=` options |
 

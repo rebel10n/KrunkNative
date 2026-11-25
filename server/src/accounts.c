@@ -1176,6 +1176,109 @@ int accounts_kpd_apps(const int requester) {
     return 1;
 }
 
+// ------------------------------------------------------------------ /xp and /kr (Krunker v7.1.4)
+//
+// v7.1.4's /xp and /kr (server/index.ts:3165-3171, the ct handler 4272-4290) add XP or KR to the sender's own
+// account. Here they are kn_brain's op dev_grant (services/brain/db_accounts.c run_dev_grant), which grants only
+// to a developer account: the command's host / dev gate (chat_commands.c) lets a custom lobby's host through,
+// the brain refuses one that is not a developer. The answer is the sender's chat; the connection's level and KR
+// follow (PLAYER_INFO on a level change), the account's social sockets get "ua" from the brain.
+#define ACC_GRANT_PENDING 4
+#define ACC_GRANT_TIMEOUT_S 10.0f
+static struct {
+    uint32_t rid;
+    int conn_id;
+    int64_t account_id;
+    int kr;
+    int amount;
+    float since;
+} g_grant_pending[ACC_GRANT_PENDING];
+
+int accounts_dev_grant(const int requester, const int kr, const int amount) {
+    ClientConnection *client = requester >= 0 ? acc_client_by_id(requester) : NULL;
+    if (!client) return 0; // the console has no account (chat_commands.c tells it)
+    if (client->acct.account_id <= 0) {
+        acc_chat_to(client, "Sign in to an account first");
+        return 0;
+    }
+    int slot = -1;
+    for (int i = 0; i < ACC_GRANT_PENDING && slot < 0; i++)
+        if (!g_grant_pending[i].rid) slot = i;
+    if (!g_acc.brain || !brain_linked() || slot < 0) {
+        acc_chat_to(client, slot < 0 && g_acc.brain ? "The account service is busy, try again" : "No account service on this server");
+        return 0;
+    }
+    const uint32_t rid = brain_next_rid();
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", "dev_grant");
+    cJSON *args = cJSON_AddObjectToObject(frame, "args");
+    cJSON_AddNumberToObject(args, "actor", (double) client->acct.account_id);
+    cJSON_AddStringToObject(args, "kind", kr ? "kr" : "xp");
+    cJSON_AddNumberToObject(args, "amount", amount);
+    if (brain_post(frame, 0) != 0) { // brain_post consumed the frame
+        acc_chat_to(client, "The account service is unreachable right now");
+        return 0;
+    }
+    g_grant_pending[slot].rid = rid;
+    g_grant_pending[slot].conn_id = client->id;
+    g_grant_pending[slot].account_id = client->acct.account_id;
+    g_grant_pending[slot].kr = kr;
+    g_grant_pending[slot].amount = amount;
+    g_grant_pending[slot].since = g_server->now;
+    return 1;
+}
+
+// The dev_grant answer: the requester's line ("Added 500 KR (now 1500 KR)" / "Added 5000 XP (level 12)") or the
+// brain's refusal; a connection of the account here takes the new level and KR. -> 1 when it was ours.
+static int acc_handle_grant_reply(const cJSON *frame) {
+    const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
+    if (!cJSON_IsNumber(rid)) return 0;
+    for (int i = 0; i < ACC_GRANT_PENDING; i++) {
+        if (!g_grant_pending[i].rid || g_grant_pending[i].rid != (uint32_t) rid->valuedouble) continue;
+        const int kr = g_grant_pending[i].kr, amount = g_grant_pending[i].amount;
+        const int64_t account_id = g_grant_pending[i].account_id;
+        ClientConnection *client = acc_client_by_id(g_grant_pending[i].conn_id);
+        g_grant_pending[i].rid = 0;
+        const cJSON *err = cJSON_GetObjectItem(frame, "err");
+        const cJSON *data = cJSON_GetObjectItem(frame, "data");
+        char text[128];
+        if (cJSON_IsString(err) && err->valuestring[0]) {
+            server_log("[accounts] %s %d for account %lld refused: %s", kr ? "kr" : "xp", amount, (long long) account_id, err->valuestring);
+            if (client) acc_chat_to(client, err->valuestring);
+            return 1;
+        }
+        const cJSON *level = cJSON_GetObjectItem(data, "level"), *funds = cJSON_GetObjectItem(data, "funds");
+        server_log("[accounts] dev grant: %d %s to account %lld", amount, kr ? "KR" : "XP", (long long) account_id);
+        for (size_t c = 0; c < g_server->client_count; c++) {
+            ClientConnection *other = &g_server->clients[c];
+            if (other->acct.account_id != account_id) continue;
+            const int old_level = other->acct.level;
+            if (cJSON_IsNumber(level)) other->acct.level = level->valueint;
+            if (cJSON_IsNumber(funds)) other->acct.funds = funds->valueint;
+            if (other->acct.level != old_level) acc_broadcast_info(other);
+        }
+        if (kr) snprintf(text, sizeof(text), "Added %d KR (now %d KR)", amount, cJSON_IsNumber(funds) ? funds->valueint : 0);
+        else snprintf(text, sizeof(text), "Added %d XP (level %d)", amount, cJSON_IsNumber(level) ? level->valueint : 0);
+        if (client) acc_chat_to(client, text);
+        return 1;
+    }
+    return 0;
+}
+
+// No answer after ACC_GRANT_TIMEOUT_S (the link dropped with the frame on it): the requester is told, the slot freed;
+// a late answer finds no slot. Whether the grant landed then is the account's own (the header shows it).
+static void acc_grant_expire(const float now) {
+    for (int i = 0; i < ACC_GRANT_PENDING; i++) {
+        if (!g_grant_pending[i].rid || now - g_grant_pending[i].since < ACC_GRANT_TIMEOUT_S) continue;
+        g_grant_pending[i].rid = 0;
+        ClientConnection *client = acc_client_by_id(g_grant_pending[i].conn_id);
+        server_log("[accounts] no answer from the brain for a %s grant: released", g_grant_pending[i].kr ? "kr" : "xp");
+        if (client) acc_chat_to(client, "The account service did not answer");
+    }
+}
+
 // A grant / revoke landed: a connection of that account here follows at once (the officer flag the
 // cases go by, the player info); its client sees the officer view with its next account data.
 static void acc_kpd_officer_live(const int64_t account_id, const int on) {
@@ -4503,6 +4606,8 @@ static void acc_handle_frame(cJSON *frame) {
         // the account's active challenges (v10.0.7's mid-match CHALLENGE_COMPLETED)
     } else if (!strcmp(type, "acct-r") && acc_handle_owned_reply(frame)) {
         // owned_skins: the inventory again after a strip (an item from mid-session)
+    } else if (!strcmp(type, "acct-r") && acc_handle_grant_reply(frame)) {
+        // v7.1.4 /xp and /kr: dev_grant replies (the requester's line, the connection's level and KR)
     } else if (!strcmp(type, "acct-r") && acc_handle_junk_reply(frame)) {
         // the Junk wallet: junk_credit replies (the finder's line, doc/v10/junk.md)
     } else if (!strcmp(type, "acct-r") && acc_handle_guest_reply(frame)) {
@@ -4623,6 +4728,7 @@ void accounts_tick(const float now) {
     acc_tick_custom();
     acc_sync_game_host();
     acc_kpd_expire(now);
+    acc_grant_expire(now);
 
     if (g_acc.push_at && now >= g_acc.push_at) acc_push_lobby_now();
     if (now >= g_acc.next_snapshot) {

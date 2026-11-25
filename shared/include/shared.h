@@ -1756,6 +1756,11 @@ int game_start_bombardment(struct Game_t*, Player*); // streaks.js Bombardment.a
 float player_hitbox_pad_w(const Player*);           // hitboxPadW: game hitBoxPad + class hbS
 float player_hitbox_pad_h(const Player*);           // hitboxPadH: game hitBoxPad + class hbH
 float player_hurtbox_scale(const Player*);          // v10 hurtboxScale: game hurtboxScale x class hurtboxScale (0 reads as 1)
+// The boxes player_do_map_collisions tests (shared/src/player.c): an object's movement box (jump pads p.y -+ max(sy, 3),
+// cylinders min(sx, sz) / 2, CUSTOM_ASSET / TRIGGER s * hbw / hbh) and the player's own (scale + class hbS sideways, from
+// the feet to height + class hbH). The developer console's ent_bbox draws them (client/src/ent_bbox.c).
+void player_object_movement_bounds(const Object*, vec3 *min, vec3 *max);
+void player_movement_bounds(const Player*, vec3 *min, vec3 *max);
 int player_class_model(const Player*);              // the class config mdl (0 default)
 // Hit zones of a hit at world height `hit_y` on `target` (players.js shoot): head when within
 // headScale * headMlt of the top of the box `base_y + adjusted_height`, legs below legHeight
