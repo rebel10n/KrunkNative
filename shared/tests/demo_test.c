@@ -4,6 +4,7 @@
 #include <demo.h>
 #include <net_ext.h>
 #include <shared.h>
+#include <social_v7.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,7 +132,106 @@ static int find_chat_and_info(void *user, const uint8_t type, uint8_t *payload, 
     return 1;
 }
 
+static void chat(DemoBuf *b, const int32_t uid, const NetChatKind kind, const char *name, const char *text) {
+    NetChatPacket c;
+    memset(&c, 0, sizeof(c));
+    c.uid = uid;
+    c.kind = (uint8_t) kind;
+    snprintf(c.name, sizeof(c.name), "%s", name);
+    snprintf(c.text, sizeof(c.text), "%s", text);
+    frame(b, NET_PACKET_CHAT, &c, sizeof(c));
+}
+
+// every chat line of a record, "name|text" joined by ";" (CHAT, SCRIPT_CHAT, CHAT_V7 with its account, CHAT_NAMES' sender)
+static int list_chat(void *user, const uint8_t type, uint8_t *payload, const uint16_t length) {
+    char *out = user;
+    char line[400] = "";
+    if (type == NET_PACKET_CHAT && length >= sizeof(NetChatPacket)) {
+        NetChatPacket c;
+        memcpy(&c, payload, sizeof(c));
+        snprintf(line, sizeof(line), "%s|%s;", c.name, c.text);
+    } else if (type == NET_PACKET_SCRIPT_CHAT && length >= sizeof(NetScriptChatPacket)) {
+        NetScriptChatPacket s;
+        memcpy(&s, payload, sizeof(s));
+        snprintf(line, sizeof(line), "script %s|%s;", s.chat.name, s.chat.text);
+    } else if (type == NET_PACKET_CHAT_V7 && length >= sizeof(NetChatV7Packet)) {
+        NetChatV7Packet v;
+        memcpy(&v, payload, sizeof(v));
+        snprintf(line, sizeof(line), "v7 %d %s|%s;", (int) v.account_id, v.chat.name, v.chat.text);
+    } else if (type == NET_PACKET_EXT && length == NET_EXT_HEADER_SIZE + sizeof(NetChatNamesPacket) &&
+               (payload[0] | payload[1] << 8) == NET_EXT_KN_CHAT_NAMES) {
+        NetChatNamesPacket n;
+        memcpy(&n, payload + NET_EXT_HEADER_SIZE, sizeof(n));
+        snprintf(line, sizeof(line), "names %s|%s;", n.sender.name, n.names[0].name);
+    }
+    if (strlen(out) + strlen(line) < 1024) strcat(out, line);
+    return 1;
+}
+
+// hideIdentities' "ch" rule (deob-10.0.7.js:201759-201781): a sender with an account in the rosters is
+// Player_<sid>, anything else (a server line, a guest) "Player"; the text is never rewritten
+static void test_chat_lines(void) {
+    DemoBuf out = {0}, f = {0};
+    demo_write_header(&out, "{\"v\":1}");
+    spawn(&f, 1, 1, "Signed");
+    spawn(&f, 2, 1, "Guest_77");
+    NetPlayerInfoPacket signed_in = {.uid = 1, .account_id = 501};
+    frame(&f, NET_PACKET_PLAYER_INFO, &signed_in, sizeof(signed_in));
+    NetPlayerInfoPacket guest = {.uid = 2, .account_id = 0};
+    frame(&f, NET_PACKET_PLAYER_INFO, &guest, sizeof(guest));
+    record(&out, 0, DEMO_REC_KEYFRAME, &f);
+    chat(&f, -1, NET_CHAT_SERVER, "Server", "Signed joined the game"); // a server line, its name and the one in its text
+    chat(&f, 0, NET_CHAT_SERVER, "", "Claimed 5 KR");                // "ch" 0, null, text, 2 (an airdrop's)
+    chat(&f, 1, NET_CHAT_PLAYER, "Signed", "hi");
+    chat(&f, 2, NET_CHAT_PLAYER, "Guest_77", "hello");
+    NetScriptChatPacket script;
+    memset(&script, 0, sizeof(script));
+    script.chat.uid = -1;
+    script.chat.kind = NET_CHAT_SERVER;
+    snprintf(script.chat.name, sizeof(script.chat.name), "GameScript");
+    snprintf(script.chat.text, sizeof(script.chat.text), "wave 2");
+    frame(&f, NET_PACKET_SCRIPT_CHAT, &script, sizeof(script));
+    NetChatV7Packet v7;
+    memset(&v7, 0, sizeof(v7));
+    v7.account_id = 501;
+    v7.chat.uid = 1;
+    snprintf(v7.chat.name, sizeof(v7.chat.name), "Signed");
+    snprintf(v7.chat.text, sizeof(v7.chat.text), "v7 line");
+    frame(&f, NET_PACKET_CHAT_V7, &v7, sizeof(v7));
+    NetChatNamesPacket names;
+    memset(&names, 0, sizeof(names));
+    names.sender.uid = 2;
+    snprintf(names.sender.name, sizeof(names.sender.name), "Guest_77");
+    names.count = 1;
+    names.names[0].uid = 1;
+    snprintf(names.names[0].name, sizeof(names.names[0].name), "Signed");
+    snprintf(names.text, sizeof(names.text), "nice one $");
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(names)];
+    frame(&f, NET_PACKET_EXT, ext, net_ext_pack(ext, sizeof(ext), NET_EXT_KN_CHAT_NAMES, &names, sizeof(names)));
+    record(&out, 1000, DEMO_REC_STREAM, &f);
+
+    Demo d;
+    char err[64] = "";
+    CHECK(demo_parse(&d, out.data, out.length, err, sizeof(err)));
+    demo_anonymize(&d);
+    char lines[1024] = "";
+    demo_frames_each(d.records[1].bytes, d.records[1].length, list_chat, lines);
+    const char *want = "Player|Signed joined the game;"
+                       "Player|Claimed 5 KR;"
+                       "Player_1|hi;"
+                       "Player|hello;"
+                       "script Player|wave 2;"
+                       "v7 0 Player_1|v7 line;"
+                       "names Player|Signed;";
+    CHECK(!strcmp(lines, want));
+    if (strcmp(lines, want)) fprintf(stderr, "demo_test: chat lines after anonymize: %s\n", lines);
+    demo_free(&d);
+    demo_buf_free(&out);
+    demo_buf_free(&f);
+}
+
 int main(void) {
+    test_chat_lines();
     DemoBuf a = {0}, b = {0};
     build(&a);
     build(&b);

@@ -88,8 +88,11 @@ size_t demo_suspect_segments(const Demo *demo, int32_t suspect_uid, DemoSegment 
 // clampToSegments (:201739-201751): t inside a span stays, else the nearest span edge.
 uint32_t demo_clamp_to_segments(const DemoSegment *segments, size_t count, uint32_t t_ms);
 
-// hideIdentities (:201752-201782): every SPAWN name and chat sender becomes "Player_<uid>", every
-// PLAYER_INFO loses its account id, level, clan and account flags (a bot keeps its bot bit). In place.
+// hideIdentities (:201752-201782): every SPAWN name becomes "Player_<uid>"; every chat line's sender (CHAT,
+// SCRIPT_CHAT, CHAT_V7, a bot's CHAT_NAMES; server lines too) becomes "Player_<uid>" of the player whose
+// PLAYER_INFO had the sender's account, or "Player" when none did (a server line, a guest), and a CHAT_V7
+// loses its account id; chat text is left as it is. Every PLAYER_INFO loses its account id, level, clan and
+// account flags (a bot keeps its bot bit). In place.
 void demo_anonymize(Demo *demo);
 
 // The meta's suspect (resolveSuspectSid, :201666-201690): the call whose token is call_token, else the
