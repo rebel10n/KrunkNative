@@ -34,6 +34,19 @@ static int64_t row_count(const cJSON *rows, const int skin, const char *stat) {
     return -1;
 }
 
+// the count of the row for `skin` / `stat` on copy `copy` (0: a row with no "copy", the index's first owned entry), -1 none
+static int64_t row_copy_count(const cJSON *rows, const int skin, const char *stat, const int32_t copy) {
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        const cJSON *s = cJSON_GetObjectItemCaseSensitive(r, "skin"), *st = cJSON_GetObjectItemCaseSensitive(r, "stat");
+        const cJSON *c = cJSON_GetObjectItemCaseSensitive(r, "copy");
+        const int32_t id = cJSON_IsNumber(c) ? (int32_t) c->valuedouble : 0;
+        if (cJSON_IsNumber(s) && s->valueint == skin && cJSON_IsString(st) && !strcmp(st->valuestring, stat) && id == copy)
+            return (int64_t) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "count"));
+    }
+    return -1;
+}
+
 int main(void) {
     printf("Running the counter skin table...\n");
     CHECK(skin_counters_stat_of(VCORE_01) == skin_stat_index("kills"), "V-CORE 01 counts kills (the default stat)");
@@ -106,6 +119,11 @@ int main(void) {
     CHECK(row_count(rows, VCORE_01, "kills") == 2, "V-CORE 01: two kills (%lld)", (long long) row_count(rows, VCORE_01, "kills"));
     CHECK(row_count(rows, VCORE_03, "jumps") == 2, "V-CORE 03: the melee's two jumps (%lld)", (long long) row_count(rows, VCORE_03, "jumps"));
     CHECK(cJSON_GetArraySize(rows) == 2, "nothing else counted (%d rows)", cJSON_GetArraySize(rows));
+    // a plain-index slot counts on the entry its base is from, so the brain adds to the copy a reload reads the base from
+    CHECK(row_copy_count(rows, VCORE_01, "kills", 1000002) == 2, "V-CORE 01's row names copy 1000002, the base's entry (%lld)",
+          (long long) row_copy_count(rows, VCORE_01, "kills", 1000002));
+    CHECK(row_copy_count(rows, VCORE_03, "jumps", 0) == 2, "V-CORE 03's base is its stack: no copy in the row (%lld)",
+          (long long) row_copy_count(rows, VCORE_03, "jumps", 0));
     cJSON_Delete(rows);
     skin_counters_bases(&client, &player->skins, base, NULL);
     CHECK(base[0] == 122 && base[2] == 11, "the take folded the counts into the bases (%d %d)", base[0], base[2]);
@@ -165,6 +183,9 @@ int main(void) {
     game_count_skin_stat(&server.game, player, 18, "kills", 2);
     rows = skin_counters_take(&client, 1);
     CHECK(row_count(rows, VCORE_01, "kills") == 2, "the two kills are taken (%lld)", (long long) row_count(rows, VCORE_01, "kills"));
+    // v10.0.7's row is {skinId: the copy's id} (deob-10.0.7.js:191922): the brain adds it to copy 3002, not the index
+    CHECK(row_copy_count(rows, VCORE_01, "kills", 3002) == 2 && cJSON_GetArraySize(rows) == 1, "one row, on copy 3002 (%lld, %d rows)",
+          (long long) row_copy_count(rows, VCORE_01, "kills", 3002), cJSON_GetArraySize(rows));
     cJSON_Delete(rows);
     skin_counters_bases(&client, &player->skins, base, NULL);
     CHECK(base[0] == 9, "the take adds to the named copy: 7 + 2 (%d)", base[0]);
@@ -173,7 +194,45 @@ int main(void) {
     CHECK(base[0] == 120, "the other copy keeps its own 120 (%d)", base[0]);
     client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 9999;
     skin_counters_bases(&client, &player->skins, base, NULL);
-    CHECK(base[0] == 122, "a copy the account no longer has: the plain-index rule, the index's count with the take (%d)", base[0]);
+    CHECK(base[0] == 120, "a copy the account no longer has: the plain-index rule, the first counted copy's 120 (%d)", base[0]);
+
+    printf("Running a match on two copies of one skin...\n");
+    // a slot naming copy 3002, then a respawn with the plain index: v10 keeps one skinStats entry per copy (:176205), so the
+    // take has a row for each copy and each copy counts on from its own total
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 3002;
+    game_count_skin_stat(&server.game, player, 18, "kills", 2);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 0;
+    game_count_skin_stat(&server.game, player, 18, "kills", 3);
+    rows = skin_counters_take(&client, 1);
+    CHECK(cJSON_GetArraySize(rows) == 2 && row_copy_count(rows, VCORE_01, "kills", 3002) == 2 &&
+              row_copy_count(rows, VCORE_01, "kills", 3001) == 3,
+          "two rows: 2 on copy 3002, 3 on 3001 (the plain index's base entry) (%d rows: %lld, %lld)", cJSON_GetArraySize(rows),
+          (long long) row_copy_count(rows, VCORE_01, "kills", 3002), (long long) row_copy_count(rows, VCORE_01, "kills", 3001));
+    cJSON_Delete(rows);
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 123, "the plain index: 120 + 3 (%d)", base[0]);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 3002;
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 11, "copy 3002: 9 + 2 (%d)", base[0]);
+    cJSON_Delete(account);
+
+    printf("Running a plain index with no count yet...\n");
+    // no entry has a count: the base entry is the first (the stack), so its row carries no copy and the named copy keeps 0
+    account = cJSON_Parse("{\"skins\":[{\"ind\":7937,\"cnt\":2,\"st\":1},{\"ind\":7937,\"cnt\":1,\"st\":0,\"id\":3005,"
+                          "\"m\":{\"paint\":\"#112233\"}}]}");
+    accounts_load_skins(&client, account);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 0;
+    game_count_skin_stat(&server.game, player, 18, "kills", 4);
+    rows = skin_counters_take(&client, 1);
+    CHECK(row_copy_count(rows, VCORE_01, "kills", 0) == 4 && cJSON_GetArraySize(rows) == 1, "the stack's row carries no copy (%lld)",
+          (long long) row_copy_count(rows, VCORE_01, "kills", 0));
+    cJSON_Delete(rows);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 3005;
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 0, "copy 3005 has none of the stack's 4 (%d)", base[0]);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 0;
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 4, "the plain index reads the stack's 4 (%d)", base[0]);
     cJSON_Delete(account);
 
     cJSON_Delete(skins);

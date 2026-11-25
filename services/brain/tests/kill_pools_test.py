@@ -11,7 +11,9 @@ Covers: a game server's welcome carries the feed's game events running now (not 
 one), in v10's fields; editing the feed pushes "game-events" with the new set at the next ping; a final
 commit with itemRewards [{id, quantity}] adds them to the inventory (skin_transactions source
 "killpool"); the same match committed again adds nothing; a commit's items stop at 30; an unknown skin
-or a bad quantity is skipped; a game server's named give_skin (ref) is granted once per ref (v10.0.7 lost raid drops).
+or a bad quantity is skipped; a game server's named give_skin (ref) is granted once per ref (v10.0.7 lost raid drops); counter skins' skinStats
+rows count on the copy they name (0406), a row without one on the index's first owned entry, and 0406 moves an
+older brain's per-index counts onto that entry.
 """
 import asyncio
 import json
@@ -194,7 +196,35 @@ def count(account_id, skin):
     return int(rows[0]) if rows else 0
 
 
-async def scenario(port, feed):
+def owned_entries(od, skin):
+    """The owned list's entries of store index `skin` as {copy id (0 the stack): m}."""
+    return {r.get("id", 0): r.get("m") or {} for r in od.get("skins", []) if isinstance(r, dict) and r.get("ind") == skin}
+
+
+def copy_ids(account_id, skin):
+    return [int(v) for v in query("SELECT copy_id FROM skin_copies WHERE account_id = %d AND skin_id = %d ORDER BY copy_id" %
+                                  (account_id, skin)) or []]
+
+
+def legacy_setup():
+    """On a schema before 0406 (SQL only: this brain reads skin_stats.copy_id): an account with 0365's per-index counts.
+    V-CORE 01 (7937) has an unpainted unit next to two copies, so the owned list showed the count on its stack; V-CORE 03
+    (7939) is one copy only, so on that copy."""
+    name = "kpleg" + str(os.getpid() % 100000)
+    query("INSERT INTO accounts (username, password_hash) VALUES ('%s', 'x')" % name)
+    ids = query("SELECT id FROM accounts WHERE username = '%s'" % name)
+    account = int(ids[0]) if ids else 0
+    check(account > 0, "a pre-0406 account (%s)" % ids)
+    query("INSERT INTO inventory (account_id, skin_id, count) VALUES (%d, 7937, 3)" % account)
+    query("INSERT INTO inventory (account_id, skin_id, count) VALUES (%d, 7939, 1)" % account)
+    for skin in (7937, 7937, 7939):
+        query("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES (%d, %d, '#dc3c3c', NULL)" % (account, skin))
+    query("INSERT INTO skin_stats (account_id, skin_id, stat, count) VALUES (%d, 7937, 'kills', 50)" % account)
+    query("INSERT INTO skin_stats (account_id, skin_id, stat, count) VALUES (%d, 7939, 'jumps', 6)" % account)
+    return account
+
+
+async def scenario(port, feed, legacy):
     now = time.time()
     async with Node(port) as node:
         got = node.welcome.get("gameEvents")
@@ -279,8 +309,9 @@ async def scenario(port, feed):
                      {"skin": 7937, "stat": "kills", "count": 2}, {"skin": 7939, "stat": "kills", "count": 0}]
             await node.commit("m3", dict(player, itemRewards=[], skinStats=stats))
 
-            def skin_stat(skin, stat):
-                rows = query("SELECT count FROM skin_stats WHERE account_id = %d AND skin_id = %d AND stat = '%s'" % (account, skin, stat))
+            def skin_stat(skin, stat, copy=0, who=None):
+                rows = query("SELECT count FROM skin_stats WHERE account_id = %d AND skin_id = %d AND copy_id = %d AND stat = '%s'" %
+                             (who or account, skin, copy, stat))
                 return int(rows[0]) if rows else 0
             for _ in range(50):
                 if skin_stat(7939, "jumps") == 4:
@@ -298,6 +329,58 @@ async def scenario(port, feed):
                     break
                 await asyncio.sleep(0.1)
             check(skin_stat(7939, "jumps") == 7, "a second match adds to it (%d)" % skin_stat(7939, "jumps"))
+
+            # v10.0.7 adds a count to the copy that counted it (takeSkinStats' skinId is the copy's id,
+            # deob-10.0.7.js:191914-191936; 0406): a row naming a copy lands on it, a row without one (an older game server,
+            # a plain-index slot) on the index's first owned entry (the stack while there are unpainted units), and a copy
+            # the account does not hold of that skin is skipped
+            query("INSERT INTO inventory (account_id, skin_id, count) VALUES (%d, 7937, 3)" % account)
+            for _ in range(2):
+                query("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES (%d, 7937, '#dc3c3c', NULL)" % account)
+            c1, c2 = copy_ids(account, 7937)
+            other = copy_ids(legacy, 7937)[0]
+            rows = [{"skin": 7937, "copy": c2, "stat": "kills", "count": 5}, {"skin": 7937, "stat": "kills", "count": 2},
+                    {"skin": 7937, "copy": 424242, "stat": "kills", "count": 3}, {"skin": 7937, "copy": other, "stat": "kills", "count": 4},
+                    {"skin": 7937, "copy": "x", "stat": "kills", "count": 6}]
+            await node.commit("m5", dict(player, itemRewards=[], skinStats=rows))
+            for _ in range(50):
+                if skin_stat(7937, "kills", c2) == 5:
+                    break
+                await asyncio.sleep(0.1)
+            check(skin_stat(7937, "kills", c2) == 5 and skin_stat(7937, "kills", c1) == 0,
+                  "a row naming copy %d lands on it, not on copy %d (%d, %d)" % (c2, c1, skin_stat(7937, "kills", c2), skin_stat(7937, "kills", c1)))
+            check(skin_stat(7937, "kills", 0) == 2, "a row with no copy lands on the stack, the index's first entry (%d)" % skin_stat(7937, "kills", 0))
+            total = query("SELECT sum(count) FROM skin_stats WHERE account_id = %d AND skin_id = 7937" % account)
+            check(total == ["7"] and skin_stat(7937, "kills", other, legacy) == 0,
+                  "a copy that is no copy, another account's copy and a non-number copy are skipped (total %s)" % total)
+            ow = await node.acct("owned_skins", {"id": account})
+            entries = owned_entries(ow.get("data") if isinstance(ow.get("data"), dict) else {}, 7937)
+            check(entries.get(c2, {}).get("kills") == 5 and entries.get(0, {}).get("kills") == 2 and "kills" not in entries.get(c1, {}),
+                  "the owned list: copy %d's m.kills 5, the stack's 2, copy %d none (%s)" % (c2, c1, entries))
+            # every unit painted: a row with no copy goes on the lowest copy, and the stack's count follows it there
+            query("UPDATE inventory SET count = 2 WHERE account_id = %d AND skin_id = 7937" % account)
+            await node.commit("m6", dict(player, itemRewards=[], skinStats=[{"skin": 7937, "stat": "kills", "count": 1}]))
+            for _ in range(50):
+                if skin_stat(7937, "kills", c1) == 1:
+                    break
+                await asyncio.sleep(0.1)
+            check(skin_stat(7937, "kills", c1) == 1, "no stack: a row with no copy lands on the lowest copy %d (%d)" % (c1, skin_stat(7937, "kills", c1)))
+            ow = await node.acct("owned_skins", {"id": account})
+            entries = owned_entries(ow.get("data") if isinstance(ow.get("data"), dict) else {}, 7937)
+            check(entries.get(c1, {}).get("kills") == 3 and entries.get(c2, {}).get("kills") == 5 and 0 not in entries,
+                  "the owned list: copy %d's 1 and the gone stack's 2 on the first entry, copy %d keeps 5 (%s)" % (c1, c2, entries))
+
+            # 0406 on an older brain's rows: each per-index count moved onto the entry the owned list showed it on
+            l7937, l7939 = copy_ids(legacy, 7937), copy_ids(legacy, 7939)
+            check(skin_stat(7937, "kills", 0, legacy) == 50 and skin_stat(7939, "jumps", l7939[0], legacy) == 6,
+                  "0406: V-CORE 01's 50 kills on its stack, V-CORE 03's 6 jumps on its one copy %d (%d, %d)" %
+                  (l7939[0], skin_stat(7937, "kills", 0, legacy), skin_stat(7939, "jumps", l7939[0], legacy)))
+            ow = await node.acct("owned_skins", {"id": legacy})
+            od = ow.get("data") if isinstance(ow.get("data"), dict) else {}
+            e37, e39 = owned_entries(od, 7937), owned_entries(od, 7939)
+            check(e37.get(0, {}).get("kills") == 50 and all("kills" not in e37.get(c, {}) for c in l7937) and
+                  e39.get(l7939[0], {}).get("jumps") == 6,
+                  "0406: the owned list reads the same counts on the same entries (%s, %s)" % (e37, e39))
 
 
 def start_brain(env, log_path, extra):
@@ -320,7 +403,10 @@ def main():
         drop = pg + ["drop", SCHEMA]
     else:
         scratch = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "db_scratch.py"), ROOT]
-        r = subprocess.run(scratch + ["create", DRIVER, SCHEMA], capture_output=True)
+        # an empty database: with KN_TEST_MIGRATE db_scratch would run every migration, and the 0406 check seeds rows on
+        # the schema before 0406 first
+        r = subprocess.run(scratch + ["create", DRIVER, SCHEMA], capture_output=True,
+                           env={k: v for k, v in os.environ.items() if k != "KN_TEST_MIGRATE"})
         if r.returncode:
             print("kill pools test: %s unavailable: skipped" % DRIVER)
             sys.exit(r.returncode)
@@ -335,10 +421,24 @@ def main():
     log_path = os.path.join(work, "brain.log")
     proc = None
     try:
-        subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL,
+        # the schema before 0406 first (the migrations up to 0405), with per-index counts, then the rest
+        old = os.path.join(work, "migrations", DRIVER)
+        os.makedirs(old)
+        src = os.path.join(ROOT, "services", "db", "migrations", DRIVER)
+        for f in os.listdir(src):
+            if re.match(r"\d{4}_.*\.sql$", f) and int(f[:4]) < 406:
+                os.symlink(os.path.join(src, f), os.path.join(old, f))
+        oldenv = dict(env, KN_DATABASE_MIGRATIONS_DIR=os.path.join(work, "migrations"))
+        subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=oldenv, check=True, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+        legacy = legacy_setup()
+        # this tree's migrations by path: a config/config.json found above the tree (a worktree nested in a checkout)
+        # roots the default directory in that other checkout
+        newenv = dict(env, KN_DATABASE_MIGRATIONS_DIR=os.path.join(ROOT, "services", "db", "migrations"))
+        subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=newenv, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
         proc, port = start_brain(env, log_path, ["--brain.community.feed=" + feed])
-        asyncio.run(scenario(port, feed))
+        asyncio.run(scenario(port, feed, legacy))
     finally:
         if proc:
             proc.terminate()

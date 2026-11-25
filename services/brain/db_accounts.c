@@ -316,9 +316,14 @@ static const char *jstr(const cJSON *o, const char *k, char buf[64]) {
 
 static int64_t clamp0(int64_t v) { return v < 0 ? 0 : v; }
 
-/* v10.0.4 counter skins: the game server's takeSkinStats rows [{skin, stat, count}] (deob-10.0.4.js:191561-191585) added
- * to the account's skin_stats (0365), once per (match, account) like the rest of the commit. A row counts only a known stat
- * (SKIN_STATS, shared.h) on a skin the account owns, at most 100000 per match (a match cannot reach it honestly). */
+/* v10 counter skins: the game server's takeSkinStats rows [{skin, stat, count[, copy]}] added to the account's skin_stats
+ * (0365, 0406), once per (match, account) like the rest of the commit. A row counts only a known stat (SKIN_STATS,
+ * shared.h) on a skin the account owns, at most 100000 per match (a match cannot reach it honestly). v10.0.7 adds the count
+ * to the copy that counted it (the row's skinId is the copy's id, deob-10.0.7.js:191914-191936), so a row's copy must be
+ * one of the account's copies of that skin (one traded away mid-match is skipped). A row without a copy (a game server
+ * before 0406, or a slot that names no copy) goes on the index's first owned entry, where 0365 kept the count and
+ * db_owned_skins showed it: the stack (copy 0) when the account has unpainted units, else its lowest copy. PostgreSQL's
+ * kn_commit_stats (postgres/0406) does the same. */
 static void commit_skin_stats(Dbx *x, int64_t id, const cJSON *rows) {
     static const char *const stats[] = {"kills", "hskills", "aikills", "headshots", "hits", "shots", "jumps", "candy"};
     const cJSON *r;
@@ -326,20 +331,37 @@ static void commit_skin_stats(Dbx *x, int64_t id, const cJSON *rows) {
         const int64_t skin = jint(r, "skin", -1), count = jint(r, "count", 0);
         const cJSON *st = cJSON_GetObjectItemCaseSensitive(r, "stat");
         const char *stat = cJSON_IsString(st) ? st->valuestring : NULL;
+        const cJSON *cp = cJSON_GetObjectItemCaseSensitive(r, "copy");
         int known = 0;
         for (size_t i = 0; stat && i < sizeof(stats) / sizeof(stats[0]); i++) known |= !strcmp(stats[i], stat);
-        if (!known || skin < 0 || count < 1 || count > 100000) continue;
+        if (!known || skin < 0 || skin > 0x7fffffff || count < 1 || count > 100000) continue;
+        if (cp && !cJSON_IsNumber(cp) && !cJSON_IsNull(cp)) continue;
+        if (cJSON_IsNumber(cp) && cp->valuedouble > 9007199254740991.0) continue;
+        int64_t copy = cJSON_IsNumber(cp) ? (int64_t) cp->valuedouble : 0;
         if (!dbx_exists(x, SQL(.any = "SELECT 1 FROM inventory WHERE account_id = $1 AND skin_id = $2 AND count > 0"),
                         KN_DB_ARGS(I64S(id), I64S(skin))))
             continue;
+        if (copy > 0) {
+            if (!dbx_exists(x, SQL(.any = "SELECT 1 FROM skin_copies WHERE copy_id = $1 AND account_id = $2 AND skin_id = $3"),
+                            KN_DB_ARGS(I64S(copy), I64S(id), I64S(skin))))
+                continue;
+        } else {
+            copy = dbx_int(x,
+                SQL(.any = "SELECT CASE WHEN coalesce((SELECT count FROM inventory WHERE account_id = $1 AND skin_id = $2), 0)"
+                           " > (SELECT count(*) FROM skin_copies WHERE account_id = $1 AND skin_id = $2) THEN 0"
+                           " ELSE coalesce((SELECT min(copy_id) FROM skin_copies WHERE account_id = $1 AND skin_id = $2), 0) END"),
+                KN_DB_ARGS(I64S(id), I64S(skin)), 0);
+            if (dbx_failed(x)) return;
+        }
         dbx_exec(x,
-            SQL(.sqlite = "INSERT INTO skin_stats (account_id, skin_id, stat, count) VALUES ($1, $2, $3, $4)"
-                          " ON CONFLICT (account_id, skin_id, stat) DO UPDATE SET count = count + excluded.count",
-                .mysql = "INSERT INTO skin_stats (account_id, skin_id, stat, count) VALUES ($1, $2, $3, $4)"
+            SQL(.sqlite = "INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES ($1, $2, $3, $4, $5)"
+                          " ON CONFLICT (account_id, skin_id, copy_id, stat) DO UPDATE SET count = count + excluded.count",
+                .mysql = "INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES ($1, $2, $3, $4, $5)"
                          " ON DUPLICATE KEY UPDATE count = count + VALUES(count)",
-                .pg = "INSERT INTO skin_stats (account_id, skin_id, stat, count) VALUES ($1::int, $2::int, $3, $4::bigint)"
-                      " ON CONFLICT (account_id, skin_id, stat) DO UPDATE SET count = skin_stats.count + EXCLUDED.count"),
-            4, (const char *const[]){I64S(id), I64S(skin), stat, I64S(count)});
+                .pg = "INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count)"
+                      " VALUES ($1::int, $2::int, $3::bigint, $4, $5::bigint)"
+                      " ON CONFLICT (account_id, skin_id, copy_id, stat) DO UPDATE SET count = skin_stats.count + EXCLUDED.count"),
+            5, (const char *const[]){I64S(id), I64S(skin), I64S(copy), stat, I64S(count)});
     }
 }
 

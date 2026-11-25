@@ -3,7 +3,7 @@
 // deob-10.0.4.js:172726) counts one stat (attach.stat, "kills" by default, :106489-106492) with its weapon. The server is
 // the authority: countSkinStat's server branch adds to player.skinStats[copy] (:175889-175893), takeSkinStats saves them
 // with the match into the copy's m[stat] (:191561-191585), and a server-only stat (candy) is sent to the owner as
-// SKIN_STAT (:184308-184311). Box Office keeps the stat per store index (the brain's skin_stats, 0365).
+// SKIN_STAT (:184308-184311). Box Office keeps the stat per copy, as v10.0.7 does (the brain's skin_stats, 0365 / 0406).
 #include <server.h>
 #include <cJSON.h>
 
@@ -18,9 +18,10 @@ void skin_counters_load(ClientConnection *client, const cJSON *skins);
 void skin_counters_bases(const ClientConnection *owner, const PlayerSkins *skins, int32_t base[3], int32_t seed[3]);
 // NET_EXT_KN_SKIN_COPIES of `player` to `to` (an EXT peer), after its SKINS. Nothing when no worn copy has a base or a seed.
 void skin_counters_send(ClientConnection *to, const ClientConnection *owner, const Player *player);
-// takeSkinStats (deob-10.0.4.js:191561-191585): the counts since the last take as [{skin, stat, count}] (NULL none),
-// folded into each counter's base, when `save` (an account in a public-type game, not a hacker: the caller's check);
-// the counts are dropped either way (skinStats = {}).
+// takeSkinStats (deob-10.0.7.js:191914-191936): the counts since the last take as [{skin, copy, stat, count}] (NULL none),
+// one row per copy counted on (copy: the id a slot named, else the entry the index's base is from; left out for a stack),
+// folded into that copy and the counter's base, when `save` (an account in a public-type game, not a hacker: the caller's
+// check); the counts are dropped either way (skinStats = {}).
 cJSON *skin_counters_take(ClientConnection *client, int save);
 // countSkinStat (GameHooks.skin_stat) on the server's game.
 void skin_counters_install_game_hooks(Game *game);

@@ -918,6 +918,13 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_strike_economy_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/strike_economy_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        # commit_skin_stats and db_owned_skins run their own SQL per driver, and 0406 moves rows differently on each;
+        # no KN_TEST_MIGRATE: the test migrates to 0405 itself, seeds 0365 rows, then migrates the rest
+        add_test(NAME brain_kill_pools_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/kill_pools_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_kill_pools_${drv} PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77
+            ENVIRONMENT "KN_TEST_DB_DRIVER=${drv}" LABELS "knsvc;brain;db;killpools;${drv}")
         set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_turf_${drv} brain_storage_${drv} brain_kpd_${drv} brain_dev_grant_${drv} brain_progress_${drv} brain_season_${drv}
             brain_account_security_${drv} brain_economy_${drv} brain_strike_economy_${drv}
             PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
