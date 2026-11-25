@@ -82,7 +82,9 @@ static const char *current_map_name(void) {
 
 // The map storage is keyed by, or NULL with *err: v7 checks !dbClient, then defaultSetts in
 // production, then customMapData.n. The sandbox is v7's non-production server: any named map.
-// Online the lobby must host a published map (kn_brain checks the name against its catalogue).
+// Online the lobby must play with Force Default Settings (v10 `!this.defaultSetts && isProd`,
+// deob-10.0.7.js:192068 / 192221: a public lobby has none either), then host a published map
+// ("Missing map data"; kn_brain checks the name against its catalogue).
 static const char *storage_map(const int be, const char **err) {
     *err = NULL;
     if (be == BACKEND_NONE) {
@@ -90,8 +92,12 @@ static const char *storage_map(const int be, const char **err) {
         return NULL;
     }
     if (be == BACKEND_BRAIN && !g_st.sink) {
+        if (!accounts_default_setts()) {
+            *err = "Storage only supported on published maps";
+            return NULL;
+        }
         const char *published = accounts_published_map();
-        if (!published) *err = "Storage only supported on published maps";
+        if (!published) *err = "Missing map data";
         return published;
     }
     const char *name = current_map_name();

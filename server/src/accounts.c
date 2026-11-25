@@ -89,6 +89,7 @@ static struct {
     char webhook[COMP_WEBHOOK_URL_MAX + 1]; // the comp host's webhook ("" none): v10 game.webhook
     int webhook_posted;        // this match's match_end went out
     int kr_rewards;            // WP6: host option krRewards on that published map
+    int default_setts;         // v10 game.defaultSetts of the current custom game (game_config_default_setts)
 
     // bans file
     int ban_accounts[256];
@@ -2209,6 +2210,10 @@ const char *accounts_published_creator(void) {
     return accounts_published_map() ? g_acc.published_creator : "";
 }
 
+int accounts_default_setts(void) {
+    return g_acc.custom && g_acc.default_setts;
+}
+
 int accounts_kr_rewards(void) {
     return accounts_published_map() && g_acc.kr_rewards;
 }
@@ -4114,6 +4119,7 @@ static void acc_revert_custom(const char *why) {
     g_acc.webhook[0] = 0;
     memset(g_clan_war_claimed, 0, sizeof(g_clan_war_claimed));
     g_acc.kr_rewards = 0;
+    g_acc.default_setts = 0;
     accounts_configure_public(&g_server->game, g_acc.cli_map);
     net_change_map(-1, -1);
 }
@@ -4291,6 +4297,15 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
         cJSON_AddBoolToObject(request, "allowSpect", 0);
         cJSON_AddNumberToObject(request, "override", GAME_HOST_COMP);
     }
+    // v10 Force Default Settings (game_config_default_setts): the host's Game Settings / Advanced rows are dropped
+    // here too, so round 1 and the mode list come from the map's own config, as every later round does
+    const int default_setts = !ranked && host_index != GAME_HOST_COMP && game_config_default_setts(config);
+    const cJSON *map_config = custom_map ? cJSON_GetObjectItem(custom_map, "config") : NULL;
+    if (default_setts && request) {
+        cJSON *kept = game_config_without_host_settings(request);
+        cJSON_Delete(request);
+        request = kept;
+    }
     // Comp (ranked), Zombies and Raid hosts: setupGameConfig's overDat / forceDat / allowedDat
     cJSON *forced = ranked || host_index == GAME_HOST_ZOMBIES || host_index == GAME_HOST_RAID ? game_config_setup(host_index, request, NULL, ranked) : NULL;
     GameConfig game_config = *flavor_default_game_config(); // base: g_default_game_config
@@ -4335,8 +4350,8 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
 
     int *modes = NULL;
     size_t mode_count = 0;
-    cJSON *mode_list = cJSON_Duplicate(cJSON_GetObjectItem(forced ? forced : config, "modes"), 1);
-    const cJSON *single_mode = cJSON_GetObjectItem(config, "mode");
+    cJSON *mode_list = cJSON_Duplicate(cJSON_GetObjectItem(forced ? forced : default_setts ? map_config : config, "modes"), 1);
+    const cJSON *single_mode = default_setts ? NULL : cJSON_GetObjectItem(config, "mode");
     if (!cJSON_GetArraySize(mode_list) && cJSON_IsNumber(single_mode)) {
         cJSON_Delete(mode_list);
         mode_list = cJSON_CreateArray();
@@ -4358,13 +4373,21 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
         modes = calloc(1, sizeof(int));
         if (modes) modes[mode_count++] = MODE_ID_POINT; // the comp host's overDat modes [2]: Hardpoint
     }
+    if (default_setts && !mode_count) {
+        // a map config with no modes: Free for All, as v10's preset of such a map ticks it (autoHostMap's
+        // `modes.length || modes.push(0)`, deob-10.0.7.js:225364; the host window's mode 0, :219976)
+        modes = calloc(1, sizeof(int));
+        if (modes) modes[mode_count++] = MODE_ID_FFA;
+    }
 
     g_acc.custom = 1;
     memset(g_clan_war_claimed, 0, sizeof(g_clan_war_claimed)); // a new clan war: the sides are open again
     g_acc.custom_since = g_server->now;
-    // WP6: a hosted published map is v7's customMap played with defaultSetts: GAME.STORAGE, Save /
-    // Load Data and (host option krRewards, customGameConfig.js:438-445) KR rewards use its name.
-    // [KN] defaultSetts is not modelled: every hosted published map counts.
+    // WP6: a hosted published map is v7's customMap: GAME.STORAGE, Save / Load Data and (host option krRewards,
+    // customGameConfig.js:438-445) KR rewards use its name. v10 game.defaultSetts = !!cfg.defaultSetts
+    // (deob-10.0.7.js:229449) gates the storage (storageUpdt / getStoragePlayer :192068, :192221; Save Data :165647,
+    // Load Data :165813), so a host that turns Force Default Settings off gets none (ks_storage.c storage_map).
+    g_acc.default_setts = default_setts;
     char published[96] = "", published_creator[64];
     if (custom_map) acc_custom_map_name(config, published, sizeof(published), published_creator, sizeof(published_creator));
     snprintf(g_acc.published_map, sizeof(g_acc.published_map), "%s", published); // the bare name (storage key)

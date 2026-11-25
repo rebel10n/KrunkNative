@@ -988,6 +988,22 @@ cJSON *game_config_setup(const int host_index, const cJSON *requested, const cJS
     return cfg;
 }
 
+int game_config_default_setts(const cJSON *request) {
+    return gc_truthy(gc_item(request, "defaultSetts")) || gc_truthy(gc_item(request, "krRewards"));
+}
+
+cJSON *game_config_without_host_settings(const cJSON *request) {
+    cJSON *out = cJSON_IsObject(request) ? cJSON_Duplicate(request, 1) : cJSON_CreateObject();
+    if (!out) return NULL;
+    // createPrivateRoom reads every serverConfig row (customS<varN>) whatever the host type, so every key goes
+    size_t option_count;
+    const GameConfigOption *options = gc_server_options(&option_count);
+    for (size_t i = 0; i < option_count; i++) gc_set(out, options[i].var, NULL);
+    static const char *const rows[] = {"modes", "mode", "classes", "weps", "cls", "prks"};
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) gc_set(out, rows[i], NULL);
+    return out;
+}
+
 // ---------------------------------------------------------------- per-game state
 
 typedef struct GameConfigState {
@@ -1599,7 +1615,11 @@ void game_config_host(Game *game, const cJSON *request, const int host_index) {
     st->hosted = 1;
     st->host_index = host_index >= 0 && host_index < GAME_HOST_TYPE_COUNT ? host_index : GAME_HOST_CUSTOM;
     cJSON_Delete(st->request);
-    st->request = cJSON_IsObject(request) ? cJSON_Duplicate(request, 1) : NULL;
+    // Force Default Settings: the host's rows never reach a round, so game_apply_map_config plays the map's config
+    // (or the defaults) under the Server tab's keys. A comp host has no such switch (noCustM, deob-10.0.7.js:219950)
+    // and needs its tmSize / specSlots (ranked's roster).
+    const int defaults = !gc_host_comp(st->host_index) && game_config_default_setts(request);
+    st->request = !cJSON_IsObject(request) ? NULL : defaults ? game_config_without_host_settings(request) : cJSON_Duplicate(request, 1);
     st->base = game->config;
     if (gc_host_comp(st->host_index)) {
         // a comp host's defaults (the comp flag, test mode, host type): the base a round with no map config and
