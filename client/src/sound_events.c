@@ -216,14 +216,6 @@ static float distance2(const vec3 a, const vec3 b) {
 
 // ---------------------------------------------------------------- map ambience / emitters
 
-// JS truthiness of a map value
-static int json_truthy(const cJSON *json) {
-    if (!json || cJSON_IsNull(json) || cJSON_IsFalse(json)) return 0;
-    if (cJSON_IsNumber(json)) return cJSON_GetNumberValue(json) != 0;
-    if (cJSON_IsString(json)) return cJSON_GetStringValue(json)[0] != 0;
-    return 1;
-}
-
 // map.js SOUND_EMITTER -> MapManager.addEmitter -> SOUND.play3DL (deob-10.0.3.js:189196-189204,
 // :186572-186580): the sound is config.emitterSounds[es] (v10.0.3's 74; an index past it plays
 // emitterSounds[0]) or the user asset esa ("asset:<id>", user-assets/<id>/sound.mp3), with ev / er /
@@ -254,57 +246,6 @@ static void map_start_emitters(const Map *map) {
     }
 }
 
-// parseInt(text): leading blanks, a sign, "0x" hex, decimal digits; SOUND_AMBIENT_NAN without a digit
-static int js_parse_int(const char *text) {
-    const char *c = text;
-    while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r' || *c == '\v' || *c == '\f') c++;
-    int sign = 1;
-    if (*c == '-' || *c == '+') sign = *c++ == '-' ? -1 : 1;
-    int base = 10;
-    if (c[0] == '0' && (c[1] == 'x' || c[1] == 'X')) {
-        base = 16;
-        c += 2;
-    }
-    long long value = 0;
-    int digits = 0;
-    for (;; c++, digits++) {
-        const int d = *c >= '0' && *c <= '9' ? *c - '0' : base == 16 && *c >= 'a' && *c <= 'f' ? *c - 'a' + 10
-                    : base == 16 && *c >= 'A' && *c <= 'F' ? *c - 'A' + 10 : -1;
-        if (d < 0) break;
-        if (value < 0x7fffffffLL) value = value * base + d;
-    }
-    if (!digits) return SOUND_AMBIENT_NAN;
-    if (value > 0x7fffffffLL) value = 0x7fffffffLL;
-    return (int) (sign * value);
-}
-
-// parseInt of a map value
-static int ambient_parse_int(const cJSON *v) {
-    if (cJSON_IsNumber(v)) {
-        const double d = v->valuedouble;
-        if (!isfinite(d)) return SOUND_AMBIENT_NAN;
-        const double t = d < 0 ? ceil(d) : floor(d);
-        return t > 2147483647.0 ? 2147483647 : t < -2147483647.0 ? -2147483647 : (int) t;
-    }
-    if (!cJSON_IsString(v) || !v->valuestring) return SOUND_AMBIENT_NAN;
-    return js_parse_int(v->valuestring);
-}
-
-// The game start's soundscape (deob-10.0.7.js:193909-193915): `mode.ambInd || map.ambInd || 1`, a truthy map
-// ambIndC replacing it as a custom one, then the same switch as changeAmbient without a fade.
-static void map_ambient(const Map *map, const GameMode *mode, int *id, int *custom) {
-    const cJSON *amb = map && map->raw_data ? cJSON_GetObjectItem(map->raw_data, "ambInd") : NULL;
-    const cJSON *amb_c = map && map->raw_data ? cJSON_GetObjectItem(map->raw_data, "ambIndC") : NULL;
-    *custom = 0;
-    if (mode && mode->config.amb_ind) *id = mode->config.amb_ind;
-    else if (amb && json_truthy(amb)) *id = ambient_parse_int(amb);
-    else *id = 1;
-    if (amb_c && json_truthy(amb_c)) {
-        *id = ambient_parse_int(amb_c);
-        *custom = 1;
-    }
-}
-
 static void map_sounds_update(Client *client) {
     const Map *map = client->game.ready ? client->game.map : NULL;
     if (map == g_sound.map && client->game.current_map_index == g_sound.map_index) return;
@@ -315,8 +256,9 @@ static void map_sounds_update(Client *client) {
     nettspend_audio_reset(); // KrunkNative Nettspend: a laced state does not outlive its map
     if (!map) return;
 
+    // the game start's soundscape (deob-10.0.7.js:193909-193915): the map data's, switched without a fade
     int ambient, custom;
-    map_ambient(map, client->game.mode, &ambient, &custom);
+    sound_ambient_map(map->raw_data, client->game.mode ? client->game.mode->config.amb_ind : 0, &ambient, &custom, NULL);
     sound_events_change_ambient(ambient, custom, 0.0f);
     sound_ambient_play(ambient, custom, 0.0f); // the same soundscape again: no-op while its loop plays
 

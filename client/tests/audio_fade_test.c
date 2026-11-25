@@ -15,6 +15,7 @@
 //   audio_fade_test  (writes audio_fade_test.assets/ in the working directory; 77 without a null backend)
 #include <audio.h>
 #include <sound_ambient.h>
+#include <world.h> // world_environment_zone_at: the zone map_environment.c finds for the camera
 #include "../src/audio_miniaudio.h"
 
 #include <math.h>
@@ -131,13 +132,107 @@ static AudioVoiceFade voice(const char *name, const int index) {
     return v;
 }
 
+// The ENVIRONMENT_ZONE record of zone `index` (map_environment.c env_zone_raw: zones in file order)
+static const cJSON *zone_raw(const cJSON *map, const int index) {
+    int found = 0;
+    const cJSON *raw;
+    cJSON_ArrayForEach(raw, cJSON_GetObjectItem(map, "objects")) {
+        if (cJSON_GetObjectItem(raw, "i")->valueint == PREFAB_ENVIRONMENT_ZONE && found++ == index) return raw;
+    }
+    return NULL;
+}
+
+// map_environment_update's step: the camera's zone (the first one holding it), on a change the soundscape of
+// updateEnvironment(zone) (deob-10.0.7.js:228874-228882, :208559-208576)
+static int g_zone = -1;
+static void env_step(const Map *map, const cJSON *raw, const float x, const int mode_amb_ind) {
+    const vec3 camera = {x, 5.0f, 0.0f};
+    const int zone = world_environment_zone_at(map, camera);
+    if (zone == g_zone) return;
+    sound_ambient_environment(zone >= 0 ? zone_raw(raw, zone) : NULL, raw, mode_amb_ind);
+    g_zone = zone;
+    tick();
+}
+
+// v10's environment zones switch the soundscape: the zone's ambIndC as a custom one, else mode.ambInd || ambInd || 1,
+// over its parseInt'd ambFadeTime; the first zone holding the camera wins where they overlap; leaving every zone
+// gives the map's own soundscape over the map's ambFadeTime (1000 * (fade || 0), not parseInt'd)
+static void check_environment_zones(void) {
+    static const char *const JSON =
+        "{\"name\":\"zones\",\"spawns\":[[0,0,0]],\"ambInd\":5,\"ambFadeTime\":\"1.5\",\"objects\":["
+        "{\"i\":79,\"p\":[0,0,0],\"s\":[20,20,20],\"ambInd\":6,\"ambIndC\":\"4242\",\"ambFadeTime\":2.5},"
+        "{\"i\":79,\"p\":[15,0,0],\"s\":[20,20,20],\"ambInd\":6},"
+        "{\"i\":79,\"p\":[100,0,0],\"s\":[10,10,10],\"ambFadeTime\":\"soon\"}]}";
+    cJSON *raw = cJSON_Parse(JSON);
+    Map *map = raw ? map_init_ex(raw, 0) : NULL;
+    CHECK(map && map->env_zone_count == 3, "the test map's three zones (%zu)", map ? map->env_zone_count : 0);
+    if (!map) {
+        cJSON_Delete(raw);
+        return;
+    }
+    audio_set_volume(AUDIO_CAT_AMBIENT, 1.0f);
+    audio_stop_all(); // the silent loops the changeAmbient checks left
+    // the game start: the map's ambInd 5, no fade (sound_events.c)
+    int id = 0, custom = 0;
+    float fade = -1.0f;
+    sound_ambient_map(raw, 0, &id, &custom, &fade);
+    CHECK(id == 5 && !custom && near(fade, 1500.0f), "the map's soundscape: 5, its fade \"1.5\" = 1500 ms (%d %d %g)", id, custom, fade);
+    sound_events_change_ambient(id, custom, 0.0f);
+    tick();
+    CHECK(voices("ambient_5") == 1 && !voice("ambient_5", 0).faded, "ambient_5 from the game start");
+
+    // zone 0: ambIndC "4242" wins over its ambInd 6; ambFadeTime 2.5 parseInts to 2 s
+    env_step(map, raw, 0.0f, 0);
+    AudioVoiceFade a = voice("ambient_5", 0), c = voice("asset:4242", 0);
+    CHECK(a.faded && near(a.from, 0.12f) && near(a.to, 0.0f) && near(a.ms, 2000.0f) && !a.playing,
+          "entering zone 0: ambient_5 fades out over 2000 ms (%g)", a.ms);
+    CHECK(voices("asset:4242") == 1 && c.faded && near(c.from, 0.0f) && near(c.to, 0.12f) && near(c.ms, 2000.0f) && c.playing,
+          "entering zone 0: custom 4242 fades in over 2000 ms (%d %g)", voices("asset:4242"), c.ms);
+
+    // x = 7 is in zones 0 and 1: zone 0 comes first, nothing changes
+    env_step(map, raw, 7.0f, 0);
+    CHECK(g_zone == 0 && voices("ambient_6") == 0 && voice("asset:4242", 0).playing, "overlap: the first zone holds");
+
+    // zone 1 alone: no ambIndC, ambInd 6, no fade: the asset stops, ambient_6 plays at 0.3
+    env_step(map, raw, 20.0f, 0);
+    CHECK(g_zone == 1 && voices("asset:4242") == 0 && voices("ambient_6") == 1 && !voice("ambient_6", 0).faded &&
+              near(voice("ambient_6", 0).gain, 0.3f),
+          "zone 1: ambient_6 at once (%d %d)", voices("asset:4242"), voices("ambient_6"));
+
+    // no zone: the map's data, ambInd 5 over "1.5" s; ambient_5's silent loop is faded in with the new voice
+    env_step(map, raw, 50.0f, 0);
+    a = voice("ambient_6", 0);
+    CHECK(g_zone == -1 && a.faded && near(a.from, 0.3f) && near(a.to, 0.0f) && near(a.ms, 1500.0f), "leaving: ambient_6 fades out over 1500 ms");
+    CHECK(voices("ambient_5") == 2 && near(voice("ambient_5", 1).to, 0.12f) && near(voice("ambient_5", 1).ms, 1500.0f) &&
+              voice("ambient_5", 1).playing,
+          "leaving: the map's ambient_5 fades in over 1500 ms (%d)", voices("ambient_5"));
+
+    // zone 2: no ambInd key (1), ambFadeTime "soon" is NaN: ambient_1 at once
+    env_step(map, raw, 100.0f, 0);
+    CHECK(g_zone == 2 && voices("ambient_5") == 0 && voices("ambient_1") == 1 && !voice("ambient_1", 0).faded,
+          "zone 2: ambient_1, no fade (%d %d)", voices("ambient_5"), voices("ambient_1"));
+
+    // a mode with ambInd 7 (Stalker's kind) wins over a zone's ambInd, not over its ambIndC
+    env_step(map, raw, 20.0f, 7);
+    // (ambient_6's loop, faded out on leaving zone 1, still runs silent: Howler's fade never stops it)
+    CHECK(voices("ambient_7") == 1 && voices("ambient_1") == 0 && voices("ambient_6") == 1 && !voice("ambient_6", 0).playing,
+          "zone 1 under mode ambInd 7: ambient_7");
+    env_step(map, raw, 0.0f, 7);
+    CHECK(voices("asset:4242") == 1 && voice("ambient_7", 0).faded && !voice("ambient_7", 0).playing, "zone 0 under mode 7: still 4242");
+
+    map_fini(map);
+    free(map);
+    cJSON_Delete(raw);
+}
+
 static int check_change_ambient(void) {
     mkdir("audio_fade_test.assets", 0755);
     mkdir("audio_fade_test.assets/sound", 0755);
     mkdir("audio_fade_test.assets/user-assets", 0755);
     mkdir("audio_fade_test.assets/user-assets/4242", 0755);
     mkdir("audio_fade_test.assets/user-assets/7777", 0755);
-    static const char *const FILES[] = {"sound/ambient_3.mp3", "sound/ambient_5.mp3", "sound/ambient_6.mp3",
+    static const char *const FILES[] = {"sound/ambient_1.mp3", "sound/ambient_3.mp3", "sound/ambient_5.mp3", "sound/ambient_6.mp3",
+                                        "sound/ambient_7.mp3",
                                         "user-assets/4242/sound.mp3", "user-assets/7777/sound.mp3"};
     for (size_t i = 0; i < sizeof(FILES) / sizeof(FILES[0]); i++) {
         char path[256];
@@ -217,6 +312,7 @@ static int check_change_ambient(void) {
     sound_events_change_ambient(SOUND_AMBIENT_NAN, 1, 0.0f);
     tick();
     CHECK(voices("ambient_6") == 0, "NaN stops ambient_6");
+    check_environment_zones();
     audio_fini();
     return 1;
 }

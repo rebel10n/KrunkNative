@@ -304,7 +304,8 @@ static void test_basic_actions(void) {
     act->constant = 8; // the 9th key, "Tomb": 11
     fire(&g, a, 0);
     const Sent *amb = sent(NET_PACKET_AMBIENT_CHANGE, NET_TARGET_ALL, 0);
-    CHECK(amb && ((const NetAmbientPacket *) amb->payload)->ambient == 11, "61 Change Ambient Sound: soundScapes value");
+    CHECK(amb && amb->length == NET_AMBIENT_PACKET_V1_SIZE && ((const NetAmbientPacket *) amb->payload)->ambient == 11,
+          "61 Change Ambient Sound: soundScapes value, in the 4-byte form every client reads");
 
     // 19 Set Player Team clamps to 1..5; 18 swap
     act->action = TRIGGER_ACTION_SET_TEAM;

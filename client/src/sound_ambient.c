@@ -2,7 +2,9 @@
 // SOUND.stop / SOUND.fadeOut (client/src/audio.c).
 #include <sound_ambient.h>
 #include <audio.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static struct {
@@ -59,4 +61,108 @@ void sound_events_change_ambient(const int id, const int custom, const float fad
     g_ambient.id = id;
     g_ambient.custom = custom;
     sound_ambient_play(id, custom, fade_ms);
+}
+
+// JS truthiness of a map value
+static int json_truthy(const cJSON *json) {
+    if (!json || cJSON_IsNull(json) || cJSON_IsFalse(json)) return 0;
+    if (cJSON_IsNumber(json)) return cJSON_GetNumberValue(json) != 0;
+    if (cJSON_IsString(json)) return cJSON_GetStringValue(json)[0] != 0;
+    return 1;
+}
+
+// parseInt(text): leading blanks, a sign, "0x" hex, decimal digits; SOUND_AMBIENT_NAN without a digit
+static int js_parse_int(const char *text) {
+    const char *c = text;
+    while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r' || *c == '\v' || *c == '\f') c++;
+    int sign = 1;
+    if (*c == '-' || *c == '+') sign = *c++ == '-' ? -1 : 1;
+    int base = 10;
+    if (c[0] == '0' && (c[1] == 'x' || c[1] == 'X')) {
+        base = 16;
+        c += 2;
+    }
+    long long value = 0;
+    int digits = 0;
+    for (;; c++, digits++) {
+        const int d = *c >= '0' && *c <= '9' ? *c - '0' : base == 16 && *c >= 'a' && *c <= 'f' ? *c - 'a' + 10
+                    : base == 16 && *c >= 'A' && *c <= 'F' ? *c - 'A' + 10 : -1;
+        if (d < 0) break;
+        if (value < 0x7fffffffLL) value = value * base + d;
+    }
+    if (!digits) return SOUND_AMBIENT_NAN;
+    if (value > 0x7fffffffLL) value = 0x7fffffffLL;
+    return (int) (sign * value);
+}
+
+int sound_ambient_parse_int(const cJSON *v) {
+    if (cJSON_IsNumber(v)) {
+        const double d = v->valuedouble;
+        if (!isfinite(d)) return SOUND_AMBIENT_NAN;
+        const double t = d < 0 ? ceil(d) : floor(d);
+        return t > 2147483647.0 ? 2147483647 : t < -2147483647.0 ? -2147483647 : (int) t;
+    }
+    if (!cJSON_IsString(v) || !v->valuestring) return SOUND_AMBIENT_NAN;
+    return js_parse_int(v->valuestring);
+}
+
+// 1000 * (v || 0): JS ToNumber of a number, a numeric string or a bool; NaN is falsy, so 0
+static float js_fade_ms(const cJSON *v) {
+    double x = 0.0;
+    if (cJSON_IsNumber(v)) x = v->valuedouble;
+    else if (cJSON_IsTrue(v)) x = 1.0;
+    else if (cJSON_IsString(v) && v->valuestring) {
+        char *end = NULL;
+        x = strtod(v->valuestring, &end);
+        while (end && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end++;
+        if (!end || *end) x = 0.0; // Number("2s") is NaN
+    }
+    return isfinite(x) ? (float) (1000.0 * x) : 0.0f;
+}
+
+void sound_ambient_map(const cJSON *map, const int mode_amb_ind, int *id, int *custom, float *fade_ms) {
+    const cJSON *amb = cJSON_GetObjectItem(map, "ambInd");
+    const cJSON *amb_c = cJSON_GetObjectItem(map, "ambIndC");
+    *custom = 0;
+    if (mode_amb_ind) *id = mode_amb_ind;
+    else if (json_truthy(amb)) *id = sound_ambient_parse_int(amb);
+    else *id = 1;
+    if (json_truthy(amb_c)) {
+        *id = sound_ambient_parse_int(amb_c);
+        *custom = 1;
+    }
+    if (fade_ms) *fade_ms = js_fade_ms(cJSON_GetObjectItem(map, "ambFadeTime"));
+}
+
+// parseInt(v || 0) of a zone key (MapManager.addEnvironmentZone, deob-10.0.7.js:167125-167127)
+static int zone_int(const cJSON *zone, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(zone, key);
+    return json_truthy(v) ? sound_ambient_parse_int(v) : 0;
+}
+
+// A truthy int: neither 0 nor NaN
+static int int_truthy(const int v) { return v != 0 && v != SOUND_AMBIENT_NAN; }
+
+void sound_ambient_environment(const cJSON *zone, const cJSON *map, const int mode_amb_ind) {
+    int id, custom;
+    float fade_ms;
+    if (!zone) { // updateEnvironment(-1): {data: the map's own data}, its keys as the map file has them
+        sound_ambient_map(map, mode_amb_ind, &id, &custom, &fade_ms);
+        sound_events_change_ambient(id, custom, fade_ms);
+        return;
+    }
+    // addEnvironmentZone: ambInd = `null != ambInd ? parseInt(ambInd || 0) : 1`, ambIndC = parseInt(ambIndC || 0),
+    // ambFadeTime = parseInt(ambFadeTime || 0), whole seconds (a 2.5 s slider value fades over 2 s)
+    const cJSON *amb = cJSON_GetObjectItem(zone, "ambInd");
+    const int zone_amb = amb && !cJSON_IsNull(amb) ? zone_int(zone, "ambInd") : 1;
+    const int zone_amb_c = zone_int(zone, "ambIndC");
+    const int fade = zone_int(zone, "ambFadeTime");
+    // updateEnvironment: `mode.ambInd || data.ambInd || 1`, then a truthy ambIndC as a custom one
+    id = mode_amb_ind ? mode_amb_ind : int_truthy(zone_amb) ? zone_amb : 1;
+    custom = 0;
+    if (int_truthy(zone_amb_c)) {
+        id = zone_amb_c;
+        custom = 1;
+    }
+    sound_events_change_ambient(id, custom, int_truthy(fade) ? 1000.0f * (float) fade : 0.0f);
 }
