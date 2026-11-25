@@ -8,6 +8,7 @@
 #include "editor_internal.h"
 #include "editor_model.h"
 #include <html_ui.h>
+#include <map_catalog.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -283,18 +284,18 @@ const cJSON *ed_templates_get(void) {
 }
 
 int ed_load_quick(const int index, const int script, const int default_map) {
-    // window.loadQuick(i, script, defaultMap): import a template (its "data" map JSON string) or a
-    // default map (maps/<fileName>.json, here assets/maps/<fileName>.json)
+    // window.loadQuick(i, script, defaultMap): import a template (its "data" map JSON string) or a default map.
+    // v10 imports a default map from maps.getMap(i) (E10:20175-20184), GET /maps/<i> on the data client: the official
+    // map of mapIndex i, which is the catalogue's file (assets/maps/official/NN_<name>.json, pinned by its /maps/<i>
+    // answer in tools/krunker/maps.lock.json). defaultMaps' fileName ("burg_new") names no file.
     const cJSON *t = ed_templates_get();
     const cJSON *list = cJSON_GetObjectItemCaseSensitive(t, default_map ? "defaultMaps" : script ? "script" : "game");
     const cJSON *entry = cJSON_GetArrayItem(list, index);
     if (!entry) return 0;
     if (default_map) {
-        const char *file = ed_json_str(entry, "fileName", NULL);
-        if (!file) return 0;
-        char rel[256];
-        snprintf(rel, sizeof(rel), "maps/%s.json", file);
-        char *path = concat(assets_path(), rel);
+        const MapCatalogEntry *map = map_catalog_at((size_t) map_catalog_official_index(index));
+        if (!map || !map->path) return 0;
+        char *path = concat(assets_path(), map->path);
         unsigned char *buf = NULL;
         size_t len = 0;
         int ok = 0;

@@ -1701,6 +1701,11 @@ else ()
             add_test(NAME hub_text_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/hub_text_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(hub_text_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # editor_publish_ui_e2e: Test Game, the Templates window (the default map Burg from maps.getMap(0)), Welcome,
+            # Publishing Guide, the toolbar menus and Publish Asset's UV channels against v10 (tools/editor/publish_ui_e2e.py)
+            add_test(NAME editor_publish_ui_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/editor/publish_ui_e2e.py
+                     --bin $<TARGET_FILE:${CLIENT_BINARY}> WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set_tests_properties(editor_publish_ui_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "client;editor;e2e")
             # paint_picker_e2e: the owned card's paint popup (paint_picker.c, deob-10.0.7.js:108483-108814): the item viewer
             # with the picked paint drawn on the hat, locked paints, Paint over the social socket (kn_brain on sqlite)
             add_test(NAME paint_picker_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/paint_picker_e2e.py
