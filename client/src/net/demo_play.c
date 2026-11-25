@@ -12,11 +12,19 @@
 //   seek / _applySeek (:201918-201963)  clamp to the segments, the last keyframe at or before the target,
 //                               a re-init only for another map, the players removed and the keyframe's
 //                               re-added, then the state frames up to the target plus the last 3 kills
+//   initGame (:226167)          a map the client has not loaded is fetched (GET /maps/<id>), and the INIT
+//                               applies when it arrives; a failed fetch is dropped silently (an empty
+//                               catch), so the 20 s injectInit wait runs out and playback goes on
 // Box Office differences: Krunker's 33 ms setInterval is this per-frame pump (the same rule, a smoother
 // step); a seek's fast-forward leaves out STATE packets older than DEMO_SEEK_STATE_MS before the target
 // (they are overwritten by the later ones; Krunker applies them all), and its whitelist is written as the
-// transient list below (KN has more packet types than Krunker's whitelist names).
+// transient list below (KN has more packet types than Krunker's whitelist names). A Krunker demo's INIT
+// carries a custom map inline; a Box Office INIT names its map by MAP_INFO's hash and a live client asks
+// the game server for one it lacks (MAP_REQUEST), which no replay has. So every map of the demo the client
+// lacks is fetched before the first keyframe goes in, the way a published map is had for Play
+// (community_fetch: the brain's /api/map-data), and the demo's MAP_INFOs are pointed at that copy.
 #include <demo_play.h>
+#include <community_maps.h>
 #include <net_ext.h>
 #include <spectate.h>
 #include <klog.h>
@@ -27,6 +35,7 @@
 #define DEMO_WORLD_WAIT_S 20.0     // injectInit gives up waiting for the world after 20 s (:201843, 0x4e20)
 #define DEMO_SEEK_STATE_MS 1000u   // a seek's fast-forward applies the STATEs of the last second only
 #define DEMO_SEEK_KILLS 3          // _applySeek replays the last three kills (:201951)
+#define DEMO_MAPS_MAX 16           // maps fetched for one demo (a 150 s window rarely holds two)
 
 static const float k_speeds[] = {0.5f, 1.0f, 2.0f, 4.0f}; // :229783
 
@@ -46,6 +55,9 @@ static struct {
     double waiting_for;    // seconds spent waiting
     int round_started;     // onRoundStart: set when a world is reached, taken by hud_replay (menu down, follow the suspect)
     int ended_flag;
+    Client *client;
+    int fetching;          // map downloads still out; the first keyframe goes in when they are all back
+    unsigned fetch_gen;    // a download that answers after its replay stopped (or gave up) is ignored
     // what was left at the start, given back at the exit
     int had_session;
     int had_offline;
@@ -163,6 +175,71 @@ static int record_map_hash(const DemoRecord *r, uint32_t *hash) {
 static uint32_t g_current_map_hash; // currentMapId: the hash of the map the last INIT applied
 static int g_current_map_known;
 
+// ---------------------------------------------------------------- the demo's maps
+
+// What client_map_prepare_init finds an INIT's map in: the game's map list, the maps servers streamed
+static int client_has_map(const Client *client, const uint32_t hash) {
+    for (size_t i = 0; i < client->game.map_count; i++)
+        if (client->game.maps[i] && net_map_hash(client->game.maps[i], NULL, NULL) == hash) return 1;
+    for (size_t i = 0; i < client->net_map_cache_count; i++)
+        if (client->net_map_cache[i] && net_map_hash(client->net_map_cache[i], NULL, NULL) == hash) return 1;
+    return 0;
+}
+
+// start's injectInit: the first keyframe goes in (its INIT), the world wait already runs
+static void begin_playback(Client *client) {
+    const DemoRecord *kf = &g_play.demo.records[g_play.next - 1];
+    g_current_map_known = record_map_hash(kf, &g_current_map_hash);
+    feed_record(client, kf, 0, 0, 0);
+}
+
+static void map_fetch_settle(void) {
+    if (g_play.active && g_play.fetching > 0 && --g_play.fetching == 0) begin_playback(g_play.client);
+}
+
+typedef struct {
+    unsigned gen;
+    uint32_t hash;
+    char name[64];
+} MapFetch;
+
+static void on_map_fetched(void *user, const cJSON *json, const char *error) {
+    MapFetch *f = user;
+    if (f->gen == g_play.fetch_gen && g_play.active && g_play.fetching > 0) {
+        Client *client = g_play.client;
+        // the map list keeps it (and the session cache never evicts a listed map); the demo's MAP_INFOs then
+        // name its hash, which may differ from the recording server's copy (the server sanitises its own)
+        if (json && community_slot_of(&client->game.maps, &client->game.map_count, json) >= 0) {
+            demo_retarget_map(&g_play.demo, f->hash, net_map_hash(json, NULL, NULL));
+            printf("[replay] map %s fetched\n", f->name);
+        } else {
+            // initGame's catch is empty: the INIT waits for a map that never comes, injectInit's 20 s run out
+            fprintf(stderr, "[replay] map %s cannot be fetched: %s\n", f->name, error ? error : "no map");
+        }
+        map_fetch_settle();
+    }
+    free(f);
+}
+
+static void fetch_missing_maps(Client *client) {
+    g_play.fetch_gen++;
+    g_play.fetching = 1; // held while the requests go out: a cached map answers at once
+    DemoMap maps[DEMO_MAPS_MAX];
+    const size_t count = demo_maps(&g_play.demo, maps, DEMO_MAPS_MAX);
+    for (size_t i = 0; i < count; i++) {
+        if (client_has_map(client, maps[i].hash)) continue;
+        MapFetch *f = calloc(1, sizeof(*f));
+        if (!f) continue;
+        f->gen = g_play.fetch_gen;
+        f->hash = maps[i].hash;
+        snprintf(f->name, sizeof(f->name), "%s", maps[i].name);
+        g_play.fetching++;
+        printf("[replay] fetching map %s\n", f->name);
+        community_fetch(f->name, on_map_fetched, f);
+    }
+    map_fetch_settle();
+}
+
 // ---------------------------------------------------------------- start / stop
 
 int demo_play_active(void) { return g_play.active; }
@@ -239,17 +316,16 @@ int demo_play_start(Client *client, const uint8_t *data, const size_t length, co
     client->net_connected = 0;
     client->net_ping_ms = -1;
 
-    // start: the first keyframe, then play once its world is there
+    // start: the first keyframe once the demo's maps are here, then play once its world is there
     const int first = demo_first_keyframe(&g_play.demo);
-    const DemoRecord *kf = &g_play.demo.records[first];
-    g_current_map_known = record_map_hash(kf, &g_current_map_hash);
-    feed_record(client, kf, 0, 0, 0);
     g_play.next = (size_t) first + 1;
-    g_play.playhead = kf->t_ms;
+    g_play.playhead = g_play.demo.records[first].t_ms;
     g_play.playing = 1;
+    g_play.client = client;
     wait_world();
     printf("[replay] demo %s: %zu records, %u ms, suspect %d, %zu segment(s)\n", g_play.token[0] ? g_play.token : "(file)",
            g_play.demo.count, g_play.demo.duration_ms, g_play.suspect, g_play.segment_count);
+    fetch_missing_maps(client);
     return 1;
 }
 
@@ -287,6 +363,8 @@ int demo_play_start_file(Client *client, const char *path, const char *call_toke
 void demo_play_stop(Client *client) {
     if (!g_play.active) return;
     g_play.active = 0;
+    g_play.fetching = 0;
+    g_play.fetch_gen++;
     demo_free(&g_play.demo);
     memset(&g_play.demo, 0, sizeof(g_play.demo));
     client->replay = 0;
@@ -400,10 +478,24 @@ void demo_play_pump(Client *client, const float delta) {
     if (!g_play.active) return;
     if (g_play.waiting) {
         g_play.waiting_for += delta > 0.0f ? delta : 0.0f;
+        if (g_play.fetching > 0) {
+            if (g_play.waiting_for < DEMO_WORLD_WAIT_S) return;
+            // the 20 s cover the map's download too (initGame fetches inside injectInit's wait)
+            fprintf(stderr, "[replay] the demo's map did not arrive in %.0f s\n", DEMO_WORLD_WAIT_S);
+            g_play.fetch_gen++;
+            g_play.fetching = 0;
+            begin_playback(client);
+        }
         // the world: the INIT applied (no held INIT, no map download) and the map built
         const int ready = client->game.ready && !client->net_map_wait && !client_init_pending(client);
         if (!ready && g_play.waiting_for < DEMO_WORLD_WAIT_S) return;
         if (!ready) fprintf(stderr, "[replay] the demo's map did not load in %.0f s, playing on\n", DEMO_WORLD_WAIT_S);
+        else {
+            const int index = client->game.current_map_index;
+            const cJSON *map = index >= 0 && (size_t) index < client->game.map_count ? client->game.maps[index] : NULL;
+            const cJSON *name = cJSON_GetObjectItemCaseSensitive(map, "name");
+            printf("[replay] world: %s\n", cJSON_IsString(name) ? name->valuestring : "(unnamed map)");
+        }
         g_play.waiting = 0;
         g_play.round_started = 1; // onRoundStart (:229724-229731)
         return; // the first frame of the world: the roster is applied; play from the next one

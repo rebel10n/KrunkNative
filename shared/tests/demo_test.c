@@ -230,8 +230,68 @@ static void test_chat_lines(void) {
     demo_buf_free(&f);
 }
 
+static void map_info(DemoBuf *b, const int32_t index, const uint32_t hash, const char *name) {
+    NetMapInfoPacket m;
+    memset(&m, 0, sizeof(m));
+    m.map_index = index;
+    m.hash = hash;
+    m.size = 1234;
+    snprintf(m.name, sizeof(m.name), "%s", name);
+    frame(b, NET_PACKET_MAP_INFO, &m, sizeof(m));
+}
+
+static int find_map_hashes(void *user, const uint8_t type, uint8_t *payload, const uint16_t length) {
+    char *out = user;
+    if (type == NET_PACKET_MAP_INFO && length >= sizeof(NetMapInfoPacket)) {
+        NetMapInfoPacket m;
+        memcpy(&m, payload, sizeof(m));
+        snprintf(out + strlen(out), 64, "%08x;", (unsigned) m.hash);
+    }
+    return 1;
+}
+
+// the maps a replay may have to fetch (initGame's getMap, deob-10.0.7.js:226167): each INIT's map once, by the
+// published map's name when a CREATION_INFO follows it; a fetched copy takes over the hash
+static void test_maps(void) {
+    DemoBuf out = {0}, f = {0};
+    demo_write_header(&out, "{\"v\":1}");
+    map_info(&f, 3, 0xA1A1A1A1u, "A Rather Long Published Map Na"); // the JSON's name, cut short
+    NetCreationInfoPacket creation;
+    memset(&creation, 0, sizeof(creation));
+    creation.map_id = 42;
+    snprintf(creation.name, sizeof(creation.name), "A Rather Long Published Map Name Indeed");
+    snprintf(creation.creator, sizeof(creation.creator), "maker");
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(creation)];
+    frame(&f, NET_PACKET_EXT, ext, net_ext_pack(ext, sizeof(ext), NET_EXT_KN_CREATION_INFO, &creation, sizeof(creation)));
+    record(&out, 0, DEMO_REC_KEYFRAME, &f);
+    map_info(&f, 3, 0xA1A1A1A1u, "A Rather Long Published Map Na"); // the next keyframe: the same map
+    record(&out, 15000, DEMO_REC_KEYFRAME, &f);
+    map_info(&f, 0, 0xB2B2B2B2u, "Burg"); // a round change to a catalogue map: no published map
+    creation.map_id = 0;
+    creation.name[0] = 0;
+    frame(&f, NET_PACKET_EXT, ext, net_ext_pack(ext, sizeof(ext), NET_EXT_KN_CREATION_INFO, &creation, sizeof(creation)));
+    record(&out, 20000, DEMO_REC_STREAM, &f);
+
+    Demo d;
+    char err[64] = "";
+    CHECK(demo_parse(&d, out.data, out.length, err, sizeof(err)));
+    DemoMap maps[4];
+    CHECK(demo_maps(&d, maps, 4) == 2);
+    CHECK(maps[0].hash == 0xA1A1A1A1u && maps[0].published_id == 42 && !strcmp(maps[0].name, "A Rather Long Published Map Name Indeed"));
+    CHECK(maps[1].hash == 0xB2B2B2B2u && maps[1].published_id == 0 && !strcmp(maps[1].name, "Burg"));
+    CHECK(demo_maps(&d, maps, 1) == 1);
+    CHECK(demo_retarget_map(&d, 0xA1A1A1A1u, 0x0C0C0C0Cu) == 2);
+    char hashes[128] = "";
+    for (size_t i = 0; i < d.count; i++) demo_frames_each(d.records[i].bytes, d.records[i].length, find_map_hashes, hashes);
+    CHECK(!strcmp(hashes, "0c0c0c0c;0c0c0c0c;b2b2b2b2;"));
+    demo_free(&d);
+    demo_buf_free(&out);
+    demo_buf_free(&f);
+}
+
 int main(void) {
     test_chat_lines();
+    test_maps();
     DemoBuf a = {0}, b = {0};
     build(&a);
     build(&b);

@@ -95,6 +95,18 @@ uint32_t demo_clamp_to_segments(const DemoSegment *segments, size_t count, uint3
 // account flags (a bot keeps its bot bit). In place.
 void demo_anonymize(Demo *demo);
 
+// The maps a demo's INITs name (MAP_INFO), in the order they first come: the hash, and the name to fetch it
+// by (the published map's, from the CREATION_INFO after that INIT, else MAP_INFO's). Returns the count (<= max).
+typedef struct {
+    uint32_t hash;
+    int32_t published_id; // CREATION_INFO map_id, 0 when it named no published map
+    char name[64];
+} DemoMap;
+size_t demo_maps(Demo *demo, DemoMap *out, size_t max);
+// Every MAP_INFO naming map `from` names `to` instead (a fetched copy of the map whose JSON hashes to `to`), so
+// the client's INIT finds that copy by its hash. Returns how many MAP_INFOs changed. In place.
+size_t demo_retarget_map(Demo *demo, uint32_t from, uint32_t to);
+
 // The meta's suspect (resolveSuspectSid, :201666-201690): the call whose token is call_token, else the
 // first of suspects; -1 none.
 int32_t demo_resolve_suspect(const Demo *demo, const char *call_token);

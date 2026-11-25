@@ -1,6 +1,6 @@
 // K.P.D demo files (shared/include/demo.h, doc/v10/replays.md).
 #include <demo.h>
-#include <net_ext.h> // NET_EXT_KN_PLAYER_RANK_FLAG, NET_EXT_KN_PLAYER_TITLE, NET_EXT_KN_CHAT_NAMES
+#include <net_ext.h> // NET_EXT_KN_PLAYER_RANK_FLAG, NET_EXT_KN_PLAYER_TITLE, NET_EXT_KN_CHAT_NAMES, NET_EXT_KN_CREATION_INFO
 #include <social_v7.h> // NET_PACKET_CHAT_V7, NetChatV7Packet
 #include <shared.h>
 #include <cJSON.h>
@@ -376,6 +376,79 @@ void demo_anonymize(Demo *demo) {
     for (size_t i = 0; i < demo->count; i++) demo_frames_each(demo->records[i].bytes, demo->records[i].length, collect_account, accounts);
     for (size_t i = 0; i < demo->count; i++) demo_frames_each(demo->records[i].bytes, demo->records[i].length, anonymize_packet, accounts);
     free(accounts);
+}
+
+// ------------------------------------------------------------------ maps
+
+static void map_name_copy(char *out, const size_t size, const char *in, const size_t in_size) {
+    snprintf(out, size, "%.*s", (int) strnlen(in, in_size), in);
+}
+
+typedef struct {
+    DemoMap *out;
+    size_t max, count;
+    int map_info; // this record's MAP_INFO: its index in out, -1 none
+} MapScan;
+
+static int map_packet(void *user, const uint8_t type, uint8_t *payload, const uint16_t length) {
+    MapScan *s = user;
+    if (type == NET_PACKET_MAP_INFO && length >= sizeof(NetMapInfoPacket)) {
+        NetMapInfoPacket info;
+        memcpy(&info, payload, sizeof(info));
+        s->map_info = -1;
+        for (size_t i = 0; i < s->count; i++)
+            if (s->out[i].hash == info.hash) s->map_info = (int) i;
+        if (s->map_info < 0 && s->count < s->max) {
+            DemoMap *m = &s->out[s->count];
+            memset(m, 0, sizeof(*m));
+            m->hash = info.hash;
+            map_name_copy(m->name, sizeof(m->name), info.name, sizeof(info.name));
+            s->map_info = (int) s->count++;
+        }
+    } else if (type == NET_PACKET_EXT && length == NET_EXT_HEADER_SIZE + sizeof(NetCreationInfoPacket) &&
+               (payload[0] | payload[1] << 8) == NET_EXT_KN_CREATION_INFO && s->map_info >= 0) {
+        // the published map's own name: MAP_INFO's is the map JSON's "name", cut at 31 bytes
+        NetCreationInfoPacket info;
+        memcpy(&info, payload + NET_EXT_HEADER_SIZE, sizeof(info));
+        DemoMap *m = &s->out[s->map_info];
+        if (info.map_id > 0 && info.name[0]) {
+            m->published_id = info.map_id;
+            map_name_copy(m->name, sizeof(m->name), info.name, sizeof(info.name));
+        }
+    }
+    return 1;
+}
+
+size_t demo_maps(Demo *demo, DemoMap *out, const size_t max) {
+    MapScan s = {.out = out, .max = max, .map_info = -1};
+    for (size_t i = 0; out && i < demo->count; i++) {
+        s.map_info = -1; // CREATION_INFO follows its INIT in the same record (server/src/net.c net_send_init)
+        demo_frames_each(demo->records[i].bytes, demo->records[i].length, map_packet, &s);
+    }
+    return s.count;
+}
+
+typedef struct {
+    uint32_t from, to;
+    size_t changed;
+} MapRetarget;
+
+static int retarget_packet(void *user, const uint8_t type, uint8_t *payload, const uint16_t length) {
+    MapRetarget *r = user;
+    if (type != NET_PACKET_MAP_INFO || length < sizeof(NetMapInfoPacket)) return 1;
+    NetMapInfoPacket info;
+    memcpy(&info, payload, sizeof(info));
+    if (info.hash != r->from) return 1;
+    info.hash = r->to;
+    memcpy(payload, &info, sizeof(info));
+    r->changed++;
+    return 1;
+}
+
+size_t demo_retarget_map(Demo *demo, const uint32_t from, const uint32_t to) {
+    MapRetarget r = {.from = from, .to = to};
+    for (size_t i = 0; i < demo->count; i++) demo_frames_each(demo->records[i].bytes, demo->records[i].length, retarget_packet, &r);
+    return r.changed;
 }
 
 int32_t demo_resolve_suspect(const Demo *demo, const char *call_token) {
