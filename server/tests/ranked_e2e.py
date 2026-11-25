@@ -662,7 +662,9 @@ def run():
     NOTICE_NAME = "rk_queue"
     notice_token = secrets.token_hex(16)
     psql(f"SELECT kn_register('{NOTICE_NAME}', 'x', '127.0.0.1', '', 0, 0, '{notice_token}', 3600, 'e2e')")
-    back_public = wait_for(lambda: "back to the public rotation" in log("game.log"), timeout=20)
+    # the rated match's revert (accounts.c acc_revert_custom), not the cancelled first match's: that one already
+    # logged "back to the public rotation", and a watcher sent in on it was refused (Game in Progress) on CT 208
+    back_public = wait_for(lambda: "(ranked match over): back to the public rotation" in log("game.log"), timeout=20)
     check("the ranked lobby went back to the public rotation", bool(back_public))
     watcher = kn_proto.Conn("127.0.0.1", GAME_PORT)
     watcher.send(1, bytes([1, MINOR_V7, 0]))
