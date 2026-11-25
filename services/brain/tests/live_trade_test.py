@@ -208,6 +208,9 @@ async def scenario(port, db):
     give(db, A, 3, 1)
     give(db, A, UNTRADABLE, 1)
     copy = give_copy(db, A, 4, "#dc3c3c")
+    # a counter skin's counts (skin_stats, 0406): on the copy, and on the stack of skin 2
+    db.q("INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES ($1, 4, $2, 'kills', 77)", A, copy)
+    db.q("INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES ($1, 2, 0, 'kills', 12)", A)
     give(db, B, 5, 2)
     kr0 = sum(funds(db, i) for i in ids.values())
 
@@ -241,11 +244,18 @@ async def scenario(port, db):
         check(len(new) == 1 and new[0][1] == "#dc3c3c" and int(new[0][0]) != copy and count(db, B, 4) == 1,
               "B has the copy with its paint under a new copy id: %r" % new)
         new_id = int(new[0][0]) if new else 0
+        # v10 keeps a counter skin's count in the copy's m[stat] (takeSkinStats, deob-10.0.7.js:191932): it goes with the
+        # copy; the stack units' count stays with the stack the sender keeps
+        moved = db.q("SELECT account_id, copy_id, count FROM skin_stats WHERE skin_id = 4 AND stat = 'kills'")
+        check([[int(v) for v in r] for r in moved] == [[B, new_id, 77]], "the copy's 77 kills went to B's new copy: %r" % moved)
+        stack = db.q("SELECT account_id, copy_id, count FROM skin_stats WHERE skin_id = 2 AND stat = 'kills'")
+        check([[int(v) for v in r] for r in stack] == [[A, 0, 12]], "the stack's 12 kills stay with A's stack: %r" % stack)
         if res:
             check(sorted(res["a"]["removed"]) == sorted(["2", "2", "4:%d" % copy]) and res["a"]["added"] == ["5"],
                   "A's atrd lists: removed %r, added %r" % (res["a"]["removed"], res["a"]["added"]))
             check(sorted(res["b"]["added"]) == sorted(["2", "2", "4:%d" % new_id]) and res["b"]["removed"] == ["5"] and
-                  res["b"]["meta"].get(str(new_id), {}).get("paint") == "#dc3c3c", "B's lists and the new copy's meta: %r" % res["b"])
+                  res["b"]["meta"].get(str(new_id), {}).get("paint") == "#dc3c3c" and
+                  res["b"]["meta"].get(str(new_id), {}).get("kills") == 77, "B's lists and the new copy's meta: %r" % res["b"])
             owned_a = {s: n for s, n in res["a"]["owned"]}
             owned_b = {s: n for s, n in res["b"]["owned"]}
             check(owned_a.get(2) == 1 and owned_a.get(4) == 0 and owned_a.get(5) == 1 and owned_b.get(4) == 1 and owned_b.get(5) == 1,
