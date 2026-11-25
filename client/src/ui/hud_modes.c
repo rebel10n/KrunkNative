@@ -20,6 +20,7 @@
 #include <end_share.h>   // the end table's share / report buttons (deob-10.0.7.js:226776-226777)
 #include <game_config.h> // game_config_is_custom: no share button in a custom game
 #include <player_accounts.h>
+#include <end_cells.h>   // NET_EXT_KN_END_STATS / END_ROW: dmg, the rows past 16, the candy and time cells
 
 Player *client_find_player(Client*, int uid);                      // client/src/main.c
 void client_add_player_mesh(Client*, Player*, int render_you);      // client/src/main.c
@@ -100,19 +101,6 @@ void hud_modes_end_row(const NetOfficialEndRowPacket *row) {
 static const NetOfficialEndRowPacket *end_row(const int uid) {
     for (int i = 0; i < g_end_row_count; i++)
         if (g_end_rows[i].uid == uid) return &g_end_rows[i];
-    return NULL;
-}
-// NET_EXT_KN_END_STATS of our own server (before its MODE_END): the "dmg" cells, by uid
-static NetEndStatsPacket g_end_stats;
-
-void hud_modes_end_extras(const NetEndStatsPacket *stats) {
-    g_end_stats = *stats;
-    if (g_end_stats.count > NET_END_STATS_MAX) g_end_stats.count = NET_END_STATS_MAX;
-}
-
-static const NetEndStatsEntry *end_extras(const int uid) {
-    for (int i = 0; i < g_end_stats.count; i++)
-        if (g_end_stats.entries[i].uid == uid) return &g_end_stats.entries[i];
     return NULL;
 }
 static char g_scenario_message[NET_GAME_MESSAGE_SIZE]; // --render-scenario modeHud.gameMessage
@@ -603,7 +591,7 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
 void hud_modes_reset(Client *client) {
     mode_world_unload(client);
     g_end_row_count = 0;
-    memset(&g_end_stats, 0, sizeof(g_end_stats));
+    end_cells_reset();
     const int chat_seq = g_modes.chat_seq;
     memset(&g_modes, 0, sizeof(g_modes));
     g_modes.mode_id = -1;
@@ -773,7 +761,22 @@ static const NetModeEndEntry *hud_modes_end_entry(const int uid) {
     for (int i = 0; i < g_modes.end.count && i < NET_MODE_END_MAX; i++) {
         if (g_modes.end.entries[i].uid == uid) return &g_modes.end.entries[i];
     }
+    for (int i = 0; i < end_cells_more_count(); i++) { // a row past 16 (NET_EXT_KN_END_ROW)
+        const NetModeEndEntry *entry = end_cells_more_entry(i);
+        if (entry->uid == uid) return entry;
+    }
     return NULL;
+}
+
+// The end table's rows: MODE_END's (the first 16) and then the rows past 16, all in the server's end order
+static int hud_modes_end_row_count(void) {
+    if (!g_modes.end_valid) return 0;
+    const int first = g_modes.end.count < NET_MODE_END_MAX ? g_modes.end.count : NET_MODE_END_MAX;
+    return first + (first == NET_MODE_END_MAX ? end_cells_more_count() : 0);
+}
+
+static const NetModeEndEntry *hud_modes_end_row_entry(const int r) {
+    return r < NET_MODE_END_MAX ? &g_modes.end.entries[r] : end_cells_more_entry(r - NET_MODE_END_MAX);
 }
 
 // globalConfig.endForm and the plain Player fields of the endStats keys.
@@ -801,20 +804,9 @@ static void hud_modes_end_value(const Player *player, const NetModeEndEntry *ent
     else if (!strcmp(stat, "zombies")) snprintf(out, size, "%d", player->mode.ai_kills); // endForm.zombies: aiKills (NET_PACKET_ZOMBIE_STATS)
     else if (!strcmp(stat, "downs")) snprintf(out, size, "%u", player->deaths);         // endForm.downs: deaths
     else if (!strcmp(stat, "rounds")) snprintf(out, size, "%d", player->mode.rounds);   // player.rounds (NET_PACKET_ZOMBIE_STATS)
-    else if (!strcmp(stat, "dmg")) {                                      // endForm.dmg: round(dmgDealt) (NET_EXT_KN_END_STATS)
-        const NetEndStatsEntry *extras = end_extras(player->uid);
-        snprintf(out, size, "%d", extras ? (int) extras->dmg : 0);
-    }
-    else if (!strcmp(stat, "candy")) {                                    // Candy Heist statForm.candy (deob-10.0.7.js:106114-106118)
-        const int score = player->score;
-        snprintf(out, size, "%d", score >= 0 ? score / 10 : -((-score + 9) / 10));
-    }
-    else if (!strcmp(stat, "time")) {                                     // endForm.time: timer || "DNF"
-        const int tenths = s ? s[NET_MODE_STAT_TIME] - 1 : -1;            // UTILS.getTime(lastTimer, showMS): Race / Raid
-        if (tenths < 0) snprintf(out, size, "DNF");
-        else snprintf(out, size, "%02d:%02d.%d", tenths / 600 % 60, tenths / 10 % 60, tenths % 10);
-    }
-    else snprintf(out, size, "0");
+    // dmg (END_STATS), candy and time (Race "MM:SS.t", Raid "MM:SS"): end_cells.c, as the server and the bridge format them
+    else if (!end_cells_text(g_modes.end.mode_id, stat, player->uid, player->score, s ? s[NET_MODE_STAT_TIME] : 0, out, size))
+        snprintf(out, size, "0");
 }
 
 static const char *const k_default_end_stats[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL};
@@ -825,9 +817,9 @@ const char *const *hud_modes_end_stats(const Client *client) {
 }
 
 int hud_modes_end_rows(int *uids, const int max) {
-    if (!g_modes.end_valid) return 0;
+    const int rows = hud_modes_end_row_count();
     int n = 0;
-    for (int i = 0; i < g_modes.end.count && i < NET_MODE_END_MAX && n < max; i++) uids[n++] = g_modes.end.entries[i].uid;
+    for (int i = 0; i < rows && n < max; i++) uids[n++] = hud_modes_end_row_entry(i)->uid;
     return n;
 }
 
@@ -873,8 +865,9 @@ int hud_modes_end_table_html(const Client *client, char *html, const size_t size
     // v10:219638: localTeam = me.team || (spectating ? 1 : 0). A teamless (FFA) player's team is null
     // there, so `localTeam == team` is false and every other FFA row takes the enemy colour.
     const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
-    for (int r = 0; r < g_modes.end.count && r < NET_MODE_END_MAX && len + 2400 < size; r++) { // a row: its cells and the player cell's icons and URLs
-        const NetModeEndEntry *entry = &g_modes.end.entries[r];
+    const int row_count = hud_modes_end_row_count(); // every row of the end order: MODE_END's 16, then NET_EXT_KN_END_ROW's
+    for (int r = 0; r < row_count && len + 2400 < size; r++) { // a row: its cells and the player cell's icons and URLs
+        const NetModeEndEntry *entry = hud_modes_end_row_entry(r);
         const Player *player = client_find_player((Client *) client, entry->uid);
         // an official row prints its player even after it left (v10 :219871-219890: the row's own
         // [name, alias] cell and values); our own server's rows are all of present players
@@ -899,7 +892,7 @@ int hud_modes_end_table_html(const Client *client, char *html, const size_t size
         const char *color = player == client->me ? "#fff" : !left && player->team && local_team == player->team ? "rgba(255,255,255,0.6)" : MODES_TEAM_ENEMY;
 
         len += (size_t) snprintf(html + len, size - len, "<tr style='%s'><td style='color:#fff'>%d.</td>",
-                                 r + 1 >= g_modes.end.count ? "border-bottom:none" : "", r + 1);
+                                 r + 1 >= row_count ? "border-bottom:none" : "", r + 1);
         for (int i = 1; i < stat_count; i++) {
             if (!strcmp(stats[i], "name")) {
                 // the player cell (deob-10.0.7.js:226755-226764): flag, picture, link, clan, badges, rank. No profile link while

@@ -2156,6 +2156,7 @@ typedef struct {
 #define GAME_REGEN_TICK 0.5f        // players.tickPlayer ticker
 #define GAME_SCORE_CAP 13000        // players.score: public games cap the score
 #define GAME_LEADERBOARD_MAX 16     // players.syncLeaders: 16 rows
+#define GAME_END_ROWS_MAX 64        // endGame's end order has every player (no cap); NET_END_ROWS_MAX
 
 // ---- map-logic WP-B: v7.1.4 world runtime state of a game (shared/include/world.h)
 // The battle-royale zone (libs/Zone.js). The authority runs the circle; clients tween to each

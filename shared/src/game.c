@@ -485,7 +485,9 @@ static size_t game_sorted_players(Game *game, Player **out, const size_t max) {
     return count;
 }
 
-static void game_fill_board_from(const Player *const *sorted, const size_t count, NetLeaderboardPacket *board) {
+// The first 16 of `sorted`: the END's board has no room for more (NET_EXT_KN_END_ROW carries the rest of an end table).
+static void game_fill_board_from(const Player *const *sorted, size_t count, NetLeaderboardPacket *board) {
+    if (count > GAME_LEADERBOARD_MAX) count = GAME_LEADERBOARD_MAX;
     memset(board, 0, sizeof(*board));
     board->count = (uint8_t) count;
 
@@ -593,14 +595,15 @@ static void game_send_end(Game *game, Player *player, const ModeWinner winner, c
     game_send(game, player->uid, NET_PACKET_END, &packet, sizeof(packet));
 }
 
-// players.list.sort(mode.endSort || orderByScore), then the mode's winner.
+// players.list.sort(mode.endSort || orderByScore), then the mode's winner. The whole list is sorted (deob-10.0.7.js:195088):
+// taking the first 16 joined before sorting left a 40-player lobby's best players off the end table.
 static size_t game_end_order(Game *game, Player **sorted, ModeWinner *winner) {
     size_t count = 0;
-    for (size_t i = 0; i < game->player_count && count < GAME_LEADERBOARD_MAX; i++) {
+    for (size_t i = 0; i < game->player_count && count < GAME_END_ROWS_MAX; i++) {
         if (game->players[i]) sorted[count++] = game->players[i];
     }
     if (game->mode) mode_sort_players(game, sorted, count);
-    else count = game_sorted_players(game, sorted, GAME_LEADERBOARD_MAX);
+    else count = game_sorted_players(game, sorted, GAME_END_ROWS_MAX);
 
     *winner = (ModeWinner) {0, NULL, 0};
     if (game->mode) *winner = mode_pick_winner(game);
@@ -632,7 +635,7 @@ static void game_send_end_rewards(Game *game, const int target) {
 void game_send_end_late(Game *game, const int uid) {
     if (!game->ready || game->end_timer <= 0.0f) return;
 
-    Player *sorted[GAME_LEADERBOARD_MAX];
+    Player *sorted[GAME_END_ROWS_MAX];
     ModeWinner winner;
     const size_t count = game_end_order(game, sorted, &winner);
 
@@ -642,7 +645,7 @@ void game_send_end_late(Game *game, const int uid) {
     packet.next_round = (int32_t) ceilf(game->end_timer);
     packet.winner_uid = winner.player ? winner.player->uid : -1;
     game_fill_board_from((const Player *const *) sorted, count, &packet.board);
-    for (size_t i = 0; i < count; i++) packet.rewards[i] = sorted[i]->reward;
+    for (size_t i = 0; i < count && i < GAME_LEADERBOARD_MAX; i++) packet.rewards[i] = sorted[i]->reward;
     game_send_end_rewards(game, uid);
     game_send(game, uid, NET_PACKET_END, &packet, sizeof(packet));
     game_send_match_votes(game, uid); // WP-E: the vote cards of this end screen
@@ -670,13 +673,13 @@ void game_end_round(Game *game) {
     // order (deob-10.0.3.js:221647-221650, 221689, 221851-221880): Zombies' onPreEnd gives everyone the same score,
     // so a second sort would put its board back in join order. The winCondition and Raid's onEnd read the clock
     // left (gameTimerP: a "skip" end keeps it, deob-10.0.3.js:182870-182873, 118375, 118391), so it is cleared after.
-    Player *sorted[GAME_LEADERBOARD_MAX];
+    Player *sorted[GAME_END_ROWS_MAX];
     ModeWinner winner;
     size_t count = game_end_order(game, sorted, &winner);
     // onPreEnd may take players out: Zombies removes every bot (deob-10.0.3.js:119168-119172) and players.remove splices
     // them out of the sorted players.list, so the end table has the ones still in the game, in that order. They are
     // found again by uid (a removed player's Player is freed).
-    int sorted_uids[GAME_LEADERBOARD_MAX];
+    int sorted_uids[GAME_END_ROWS_MAX];
     for (size_t i = 0; i < count; i++) sorted_uids[i] = sorted[i]->uid;
     const int winner_uid = winner.player ? winner.player->uid : -1;
     if (game->mode) mode_on_game_end(game);
@@ -702,7 +705,7 @@ void game_end_round(Game *game) {
     NetLeaderboardPacket board;
     game_fill_board_from((const Player *const *) sorted, count, &board);
     int32_t rewards[GAME_LEADERBOARD_MAX] = {0};
-    for (size_t i = 0; i < count; i++) rewards[i] = sorted[i]->reward;
+    for (size_t i = 0; i < count && i < GAME_LEADERBOARD_MAX; i++) rewards[i] = sorted[i]->reward;
 
     // endData.ed's skin rewards reach every peer before its END (NET_EXT_KN_END_REWARD)
     game_send_end_rewards(game, NET_TARGET_ALL);

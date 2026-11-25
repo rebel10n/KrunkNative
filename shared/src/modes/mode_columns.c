@@ -1,6 +1,7 @@
-// The mode table's columns (mode_columns.h): data only, no game code, so server/bridge links it alone.
+// The mode table's columns (mode_columns.h): data and cell text, no game code, so server/bridge links it alone.
 #include <mode_columns.h>
 #include <stddef.h>
+#include <stdio.h>
 
 // config.endStats (deob-10.0.7.js:18314): every mode without its own endStats
 const char *const g_mode_end_stats_default[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL};
@@ -100,4 +101,20 @@ const char *const *mode_columns_end_stats(const int id) {
 const char *const *mode_columns_leader_stats(const int id) {
     const ModeColumns *c = mode_columns(id);
     return !c ? NULL : c->leader_stats ? c->leader_stats : g_mode_leader_stats_score;
+}
+
+int mode_columns_candy(const int score) {
+    // C division truncates toward 0; Math.floor takes -15 / 10 down to -2
+    return score >= 0 ? score / 10 : -((-score + 9) / 10);
+}
+
+void mode_columns_time_text(const int mode_id, const int time_stat, char *out, const size_t size) {
+    if (!out || !size) return;
+    if (time_stat <= 0) {
+        snprintf(out, size, "DNF");
+        return;
+    }
+    const int tenths = time_stat - 1;
+    if (mode_id == MODE_ID_RAID) snprintf(out, size, "%02d:%02d", tenths / 600 % 60, tenths / 10 % 60);
+    else snprintf(out, size, "%02d:%02d.%d", tenths / 600 % 60, tenths / 10 % 60, tenths % 10);
 }

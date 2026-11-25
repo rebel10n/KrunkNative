@@ -2301,23 +2301,69 @@ static int end_column_stat(const char *col) {
     return -1;
 }
 
-/* statForm.time: player.timer || "DNF" (deob-10.0.7.js:18319-18321). Race's timer is the round clock text when the player
- * finished (lastTimer, getTime with showMS: "MM:SS.t", :104868); Raid's onEnd gives getTime(ms) with no fraction ("MM:SS",
- * :105253; getTime :23928-23944). MODE_END's time is the tenths + 1, 0 for none. */
+/* statForm.time: player.timer || "DNF", Race "MM:SS.t", Raid "MM:SS" (mode_columns_time_text, as the KN client prints it).
+ * MODE_END's time is the tenths + 1, 0 for none. */
 static KrunkerValue end_time_cell(V10Out *o, int32_t mode_id, int32_t stat) {
     char text[32];
-    if (stat <= 0) return KRUNKER_V_STR("DNF");
-    const int tenths = stat - 1;
-    if (mode_id == MODE_ID_RAID) snprintf(text, sizeof text, "%02d:%02d", tenths / 600 % 60, tenths / 10 % 60);
-    else snprintf(text, sizeof text, "%02d:%02d.%d", tenths / 600 % 60, tenths / 10 % 60, tenths % 10);
+    mode_columns_time_text(mode_id, stat, text, sizeof text);
     return v10_text(o, (const uint8_t *)text, strlen(text));
+}
+
+/* one row of the end table, from the END's board and MODE_END (rows 0-15) or from a NET_EXT_KN_END_ROW (rows 16 on) */
+typedef struct EndRowIn {
+    int32_t uid, score, kills, deaths, reward;
+    int has_dmg, has_zombies;
+    int32_t dmg, zombies, rounds;
+    int has_stats;
+    int16_t stats[NET_MODE_STAT_COUNT];
+} EndRowIn;
+
+/* the row's cells, one per endStats column; 0 after a stop */
+static int end_row_cells(V10Out *o, int32_t mode_id, const char *const *cols, size_t nc, const EndRowIn *r,
+                         const V10PlayerName *names, size_t name_n, const V10EndExtras *extras, KrunkerValue *c) {
+    int32_t skin = 0;
+    for (size_t k = 0; extras && k < extras->skin_n; k++)
+        if (extras->skins[k].uid == r->uid) skin = extras->skins[k].skin;
+    for (size_t col = 0; col < nc; col++) {
+        const char *key = cols[col];
+        const int stat = end_column_stat(key);
+        if (!strcmp(key, "sid")) c[col] = KRUNKER_V_NUM(r->uid);
+        else if (!strcmp(key, "name")) {
+            const char *name = "";
+            for (size_t k = 0; k < name_n; k++)
+                if (names[k].uid == r->uid) { name = names[k].name; break; }
+            const KrunkerValue text = v10_text(o, (const uint8_t *)name, strlen(name));
+            const KrunkerValue cell_items[2] = {text, text};
+            c[col] = v10_arr(o, cell_items, 2);
+        } else if (!strcmp(key, "score") || !strcmp(key, "points")) c[col] = KRUNKER_V_NUM(r->score); /* points: score || 0 */
+        else if (!strcmp(key, "kills")) c[col] = KRUNKER_V_NUM(r->kills);
+        else if (!strcmp(key, "deaths") || !strcmp(key, "downs")) c[col] = KRUNKER_V_NUM(r->deaths); /* downs: deaths || 0 */
+        else if (!strcmp(key, "reward")) {
+            char kr[64];
+            if (r->reward) snprintf(kr, sizeof kr, "<span style='color:#F8C55C'>+%d</span> KR", (int)r->reward);
+            else snprintf(kr, sizeof kr, "NONE");
+            const KrunkerValue text = v10_text(o, (const uint8_t *)kr, strlen(kr));
+            const KrunkerValue pair[2] = {text, KRUNKER_V_NUM(skin)};
+            c[col] = skin > 0 ? v10_arr(o, pair, 2) : text;
+        } else if (!strcmp(key, "time")) c[col] = end_time_cell(o, mode_id, r->has_stats ? r->stats[NET_MODE_STAT_TIME] : 0);
+        else if (!strcmp(key, "dmg")) c[col] = KRUNKER_V_NUM(r->has_dmg ? r->dmg : 0); /* Math.round(dmgDealt || 0) */
+        else if (!strcmp(key, "zombies")) c[col] = KRUNKER_V_NUM(r->has_zombies ? r->zombies : 0); /* aiKills || 0 */
+        else if (!strcmp(key, "rounds")) c[col] = KRUNKER_V_NUM(r->has_zombies ? r->rounds : 0);
+        else if (!strcmp(key, "candy")) c[col] = KRUNKER_V_NUM(mode_columns_candy(r->score)); /* statForm.candy (:106114-106118) */
+        else if (stat >= 0) c[col] = KRUNKER_V_NUM(r->has_stats ? r->stats[stat] : 0);
+        else {
+            o->stop = "an endStats column the bridge does not map";
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /* endGame builds ed flat (deob-10.0.7.js:195246-195264): for each player in the end order, one value per endStats column,
  * the name column as [getName, getName], every other one through statForm or the shared formatters (:18315-18355), the
  * reward as "<span style='color:#F8C55C'>+N</span> KR" or "NONE", [that, skinReward] when a skin dropped (:195262). The
- * client walks it in steps of endStats.length (:226741-226790). The END's board is the end order (game_end_round) and
- * MODE_END lists the same players. */
+ * client walks it in steps of endStats.length (:226741-226790). The END's board is the first 16 of the end order
+ * (game_end_round), MODE_END lists the same players, and the END_ROWs the rest. */
 KrunkerValue v10_end_table(V10Out *o, const uint8_t *p, size_t n, const uint8_t *mode_end, size_t mode_end_n,
                            const V10PlayerName *names, size_t name_n, const V10EndExtras *extras) {
     if (n != END_SIZE) return KRUNKER_V_ARRAY(NULL, 0);
@@ -2331,59 +2377,50 @@ KrunkerValue v10_end_table(V10Out *o, const uint8_t *p, size_t n, const uint8_t 
     }
     const char *const *cols = mode_columns_end_stats(mode_id);
     const size_t nc = key_count(cols);
-    const size_t rc = p[END_BOARD_AT] < LEADER_MAX ? p[END_BOARD_AT] : LEADER_MAX;
+    const size_t board = p[END_BOARD_AT] < LEADER_MAX ? p[END_BOARD_AT] : LEADER_MAX;
+    /* the END_ROWs continue a full board only: they are its rows 16 and on */
+    const size_t more = board == LEADER_MAX && extras && extras->rows ? extras->row_n : 0;
+    const size_t rc = board + more;
     KrunkerValue *cells = rc ? v10_arena(o, rc * nc * sizeof *cells) : NULL;
     if (rc && !cells) return KRUNKER_V_ARRAY(NULL, 0);
     const NetEndStatsPacket *stats = extras ? extras->stats : NULL;
     const NetZombieStatsPacket *zombies = extras ? extras->zombies : NULL;
     for (size_t i = 0; i < rc; i++) {
-        const size_t at = END_BOARD_AT + 1 + i * 16;
-        const int32_t uid = rd_i32(p, at);
-        const int32_t score = rd_i32(p, at + 4), kills = rd_i32(p, at + 8), deaths = rd_i32(p, at + 12);
-        const uint8_t *entry = mode_end_entry(mode_end, uid);
-        const NetEndStatsEntry *extra = NULL;
-        for (int k = 0; stats && k < stats->count && k < NET_END_STATS_MAX; k++)
-            if (stats->entries[k].uid == uid) { extra = &stats->entries[k]; break; }
-        const NetZombieStatsEntry *zombie = NULL;
-        for (int k = 0; zombies && k < zombies->count && k < NET_MODE_END_MAX; k++)
-            if (zombies->entries[k].uid == uid) { zombie = &zombies->entries[k]; break; }
-        int32_t skin = 0;
-        for (size_t k = 0; extras && k < extras->skin_n; k++)
-            if (extras->skins[k].uid == uid) skin = extras->skins[k].skin;
-        KrunkerValue *c = &cells[i * nc];
-        for (size_t col = 0; col < nc; col++) {
-            const char *key = cols[col];
-            const int stat = end_column_stat(key);
-            if (!strcmp(key, "sid")) c[col] = KRUNKER_V_NUM(uid);
-            else if (!strcmp(key, "name")) {
-                const char *name = "";
-                for (size_t k = 0; k < name_n; k++)
-                    if (names[k].uid == uid) { name = names[k].name; break; }
-                const KrunkerValue text = v10_text(o, (const uint8_t *)name, strlen(name));
-                const KrunkerValue cell_items[2] = {text, text};
-                c[col] = v10_arr(o, cell_items, 2);
-            } else if (!strcmp(key, "score") || !strcmp(key, "points")) c[col] = KRUNKER_V_NUM(score); /* points: score || 0 */
-            else if (!strcmp(key, "kills")) c[col] = KRUNKER_V_NUM(kills);
-            else if (!strcmp(key, "deaths") || !strcmp(key, "downs")) c[col] = KRUNKER_V_NUM(deaths); /* downs: deaths || 0 */
-            else if (!strcmp(key, "reward")) {
-                const int32_t reward = rd_i32(p, END_REWARDS_AT + 4 * i);
-                char kr[64];
-                if (reward) snprintf(kr, sizeof kr, "<span style='color:#F8C55C'>+%d</span> KR", (int)reward);
-                else snprintf(kr, sizeof kr, "NONE");
-                const KrunkerValue text = v10_text(o, (const uint8_t *)kr, strlen(kr));
-                const KrunkerValue pair[2] = {text, KRUNKER_V_NUM(skin)};
-                c[col] = skin > 0 ? v10_arr(o, pair, 2) : text;
-            } else if (!strcmp(key, "time")) c[col] = end_time_cell(o, mode_id, mode_end_stat(entry, NET_MODE_STAT_TIME));
-            else if (!strcmp(key, "dmg")) c[col] = KRUNKER_V_NUM(extra ? extra->dmg : 0); /* Math.round(dmgDealt || 0) */
-            else if (!strcmp(key, "zombies")) c[col] = KRUNKER_V_NUM(zombie ? zombie->zombies : 0); /* aiKills || 0 */
-            else if (!strcmp(key, "rounds")) c[col] = KRUNKER_V_NUM(zombie ? zombie->rounds : 0);
-            else if (!strcmp(key, "candy")) c[col] = KRUNKER_V_NUM(floor(score / 10.0)); /* statForm.candy (:106114-106118) */
-            else if (stat >= 0) c[col] = KRUNKER_V_NUM(mode_end_stat(entry, (NetModeStat)stat));
-            else {
-                o->stop = "an endStats column the bridge does not map";
-                return KRUNKER_V_NIL;
-            }
+        EndRowIn r;
+        memset(&r, 0, sizeof r);
+        if (i < board) {
+            const size_t at = END_BOARD_AT + 1 + i * 16;
+            r.uid = rd_i32(p, at);
+            r.score = rd_i32(p, at + 4);
+            r.kills = rd_i32(p, at + 8);
+            r.deaths = rd_i32(p, at + 12);
+            r.reward = rd_i32(p, END_REWARDS_AT + 4 * i);
+            const uint8_t *entry = mode_end_entry(mode_end, r.uid);
+            r.has_stats = entry != NULL;
+            for (int s = 0; entry && s < NET_MODE_STAT_COUNT; s++) r.stats[s] = (int16_t)mode_end_stat(entry, (NetModeStat)s);
+            for (int k = 0; stats && k < stats->count && k < NET_END_STATS_MAX; k++)
+                if (stats->entries[k].uid == r.uid) { r.has_dmg = 1; r.dmg = stats->entries[k].dmg; break; }
+            for (int k = 0; zombies && k < zombies->count && k < NET_MODE_END_MAX; k++)
+                if (zombies->entries[k].uid == r.uid) {
+                    r.has_zombies = 1;
+                    r.zombies = zombies->entries[k].zombies;
+                    r.rounds = zombies->entries[k].rounds;
+                    break;
+                }
+        } else {
+            const NetEndRowPacket *row = &extras->rows[i - board];
+            r.uid = row->uid;
+            r.score = row->score;
+            r.kills = row->kills;
+            r.deaths = row->deaths;
+            r.reward = row->reward;
+            r.has_stats = r.has_dmg = r.has_zombies = 1;
+            r.dmg = row->dmg;
+            r.zombies = row->zombies;
+            r.rounds = row->rounds;
+            for (int s = 0; s < NET_MODE_STAT_COUNT && s < NET_END_ROW_STATS; s++) r.stats[s] = row->stats[s];
         }
+        if (!end_row_cells(o, mode_id, cols, nc, &r, names, name_n, extras, &cells[i * nc])) return KRUNKER_V_NIL;
     }
     return v10_arr(o, cells, (uint32_t)(rc * nc));
 }
@@ -2473,8 +2510,10 @@ void v10_map_end_team(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsP
                                   v10_arr(o, mdls, mdls_n)};
     const KrunkerValue end_data = v10_obj(o, keys, vals, 5);
     /* arg 3: mode.teams && (winner || endIndex == 3) ? winner : -1 (deob-10.0.7.js:195273): the winning team, -1 outside a
-     * team mode and for no winner (MODE_END's winner_team is -1 then) */
-    const KrunkerValue args[7] = {KRUNKER_V_NUM(0), did_win, end_data, KRUNKER_V_NUM(winner_team > 0 ? winner_team : -1), KRUNKER_V_NUM(0),
+     * team mode and for no winner (MODE_END's winner_team is -1 then). arg 4: this.endIndex, null unless endGame(3) ended the
+     * match (:195089; only a ranked lobby that failed to fill calls it, :195401-195419). KN has no such end: a ranked leaver's
+     * team plays short (accounts.c acc_ranked_on_leave), so every END is a null endIndex. */
+    const KrunkerValue args[7] = {KRUNKER_V_NUM(0), did_win, end_data, KRUNKER_V_NUM(winner_team > 0 ? winner_team : -1), KRUNKER_V_NIL,
                                   KRUNKER_V_NIL, KRUNKER_V_NIL};
     v10_push(o, "end", args, 7);
 }

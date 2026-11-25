@@ -1551,6 +1551,12 @@ else ()
     target_include_directories(game_time_test PRIVATE client/include shared/include)
     target_link_libraries(game_time_test PRIVATE m)
     add_test(NAME game_time_test COMMAND game_time_test)
+    # end_cells_test (client/src/ui/end_cells.c): the end table's dmg (NET_EXT_KN_END_STATS), candy and time cells and the
+    # rows past MODE_END's 16 (NET_EXT_KN_END_ROW), with the formatters the server and the v10 bridge share (mode_columns.c)
+    add_executable(end_cells_test client/tests/end_cells_test.c client/src/ui/end_cells.c shared/src/modes/mode_columns.c)
+    target_include_directories(end_cells_test PRIVATE client/include shared/include shared/lib/cJSON)
+    target_link_libraries(end_cells_test PRIVATE m)
+    add_test(NAME end_cells_test COMMAND end_cells_test)
     # player_names_test (client/src/ui/player_names.c): Hide player names: Player_<n> in the order the client first sees
     # the players (kept for the match, restarts on a new match), Player for the local player and the account, no clan
     add_executable(player_names_test client/tests/player_names_test.c client/src/ui/player_names.c)

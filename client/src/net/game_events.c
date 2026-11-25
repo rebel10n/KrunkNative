@@ -17,6 +17,7 @@
 #include <input_script.h> // input_script_enter_failed
 #include <strike_hud_fx.h>   // STRIKE_DMG_KEY_AI: the Strike damage numbers' bot key (events_strike_damage_number)
 #include <hud_modes.h>
+#include <end_cells.h> // NET_EXT_KN_END_STATS / END_ROW
 #include <html_ui.h>
 #include <limits.h> // INT_MIN: the kill-feed row takes the icon's own icnPad
 #include <ui_logic.h>
@@ -476,6 +477,22 @@ static void events_end_message(Client *client) {
     if (!message[0] || g_kpd_case || g_end_message_sent) return;
     g_end_message_sent = 1;
     client_chat_send(client, message);
+}
+
+// NET_EXT_KN_END_ROW, after the END: a row past the board's 16 gets what the board gives its rows (the END's values, its
+// reward and the local player's rank) and the cells ZOMBIE_STATS gives only its first 16.
+static void events_end_row(Client *client, const NetEndRowPacket *row) {
+    if (!end_cells_add_row(row)) return;
+    Player *player = events_find_player(client, row->uid);
+    if (player) {
+        player->score = row->score;
+        player->kills = (unsigned int) (row->kills > 0 ? row->kills : 0);
+        player->deaths = (unsigned int) (row->deaths > 0 ? row->deaths : 0);
+        player->reward = row->reward;
+        player->mode.ai_kills = row->zombies;
+        player->mode.rounds = row->rounds;
+    }
+    if (client->me && !client->net_end_rank && row->uid == client->me->uid) client->net_end_rank = row->index + 1;
 }
 
 static void events_end(Client *client, const NetEndPacket *packet) {
@@ -1634,10 +1651,15 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&notice, body, sizeof(notice));
                 events_ranked_notice(client, &notice);
             }
-            else if (subtype == NET_EXT_KN_END_STATS && body_length == sizeof(NetEndStatsPacket)) { // endData's dmg cells (hud_modes.c)
+            else if (subtype == NET_EXT_KN_END_STATS && body_length == sizeof(NetEndStatsPacket)) { // endData's dmg cells (end_cells.c)
                 NetEndStatsPacket end_stats;
                 memcpy(&end_stats, body, sizeof(end_stats));
-                hud_modes_end_extras(&end_stats);
+                end_cells_set_stats(&end_stats);
+            }
+            else if (subtype == NET_EXT_KN_END_ROW && body_length == sizeof(NetEndRowPacket)) { // the end table past 16 rows
+                NetEndRowPacket row;
+                memcpy(&row, body, sizeof(row));
+                events_end_row(client, &row);
             }
             else if (subtype == NET_EXT_KN_END_REWARD && body_length >= sizeof(NetEndRewardPacket)) { // endData.ed's [reward, skinReward]
                 NetEndRewardPacket reward;

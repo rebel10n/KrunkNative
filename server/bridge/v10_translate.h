@@ -299,10 +299,13 @@ typedef struct V10EndExtras {
     const NetZombieStatsPacket *zombies; /* NET_PACKET_ZOMBIE_STATS (Zombies' onPreEnd, before the ENDs): zombies, rounds */
     const V10EndSkin *skins;
     size_t skin_n;
+    const NetEndRowPacket *rows; /* NET_EXT_KN_END_ROW: rows 16 .. of the end order, in that order */
+    size_t row_n;
 } V10EndExtras;
-/* endData.ed of any mode: the END's board in its end order, one cell per endStats column of MODE_END's mode
- * (mode_columns.h), each as statForm or the shared formatters give it (deob-10.0.7.js:18315-18355, :195246-195264).
- * mode_end NULL: a free-for-all's table from the END alone. Stops (NIL) for a malformed MODE_END or a column it does not map. */
+/* endData.ed of any mode: every player in the end order (v10 has no cap, deob-10.0.7.js:195244-195264): the END's board
+ * (16 at most), then the END_ROWs, one cell per endStats column of MODE_END's mode (mode_columns.h), each as statForm or the
+ * shared formatters give it (:18315-18355). mode_end NULL: a free-for-all's table from the END alone. Stops (NIL) for a
+ * malformed MODE_END or a column it does not map. */
 KrunkerValue v10_end_table(V10Out *o, const uint8_t *p, size_t n, const uint8_t *mode_end, size_t mode_end_n,
                            const V10PlayerName *names, size_t name_n, const V10EndExtras *extras);
 /* END with the player's medals (NULL: none) and the end table (NULL: an empty ed, the table comes with a MODE_END).

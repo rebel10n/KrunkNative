@@ -220,6 +220,7 @@ typedef enum {
     NET_EXT_KN_SKIN_META = 0x81D1,  // S -> C NetSkinMetaPacket, with a player's SKINS: its worn copies' m (client/include/skin_meta.h)
     // 0x81E0 v10.0.7 endGame's end data that NET_PACKET_MODE_END has no room for (shared/src/modes/mode_net.c mode_send_end)
     NET_EXT_KN_END_STATS = 0x81E0, // S -> C NetEndStatsPacket, right before the round's NET_PACKET_MODE_END
+    NET_EXT_KN_END_ROW = 0x81E1,   // S -> C NetEndRowPacket, one per end table row past MODE_END's 16, after END_STATS
 } NetExtSubtype;
 
 // NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
@@ -989,6 +990,24 @@ typedef struct {
     NetEndStatsEntry entries[NET_END_STATS_MAX];  // in MODE_END's order
 } NetEndStatsPacket;
 _Static_assert(sizeof(NetEndStatsPacket) == 372, "NetEndStatsPacket: the wire body is 372 bytes");
+
+// NET_EXT_KN_END_ROW (S -> C, every EXT peer, after NET_EXT_KN_END_STATS and before NET_PACKET_MODE_END): v10.0.7's endGame
+// puts every player in endData.ed (deob-10.0.7.js:195244-195264, no cap), but the END's board and MODE_END hold 16 rows in a
+// layout old clients check by size. Rows 16 and on come one per packet, in the end order, with every cell the END, MODE_END,
+// END_STATS and ZOMBIE_STATS give a row of the first 16. A client that does not know the subtype draws the first 16 rows.
+#define NET_END_ROWS_MAX 64  // the whole end table: a hosted lobby's maxPlayers goes to 50 (game_config.c max_d), maxPS is 40
+#define NET_END_ROW_STATS 13 // NET_MODE_STAT_COUNT
+typedef struct {
+    int32_t index;                    // the row's place in the end order, 16 .. NET_END_ROWS_MAX - 1
+    int32_t uid;
+    int32_t score, kills, deaths;     // as the END's board has them
+    int32_t reward;                   // as the END's rewards[] (KR, 0 = "NONE")
+    int32_t dmg;                      // as NET_EXT_KN_END_STATS
+    int32_t zombies, rounds;          // as NET_PACKET_ZOMBIE_STATS (aiKills, rounds)
+    int16_t stats[NET_END_ROW_STATS]; // as MODE_END's entry (NetModeStat)
+    int16_t reserved;
+} NetEndRowPacket;
+_Static_assert(sizeof(NetEndRowPacket) == 64, "NetEndRowPacket: the wire body is 64 bytes");
 
 // NET_EXT_KN_SKIN_META (S -> C, every EXT peer): v10.0.7's worn items carry their copy's metadata m (getPlayerAddData's
 // skin entries {i, id, m}, read by iïîìîîï, deob-10.0.7.js:24335-24337): generateMeshData draws m.wear with the item's

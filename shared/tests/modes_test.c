@@ -439,6 +439,67 @@ static void test_end_stats(Game *game) {
     CHECK(candy == 12 && mode_leader_stat_value(c, "candy") == -2, "candy is floor(score / 10) (%d)", candy);
 }
 
+// A 40-player end (a hosted lobby's maxPS): endGame sorts the whole players.list and puts every player in endData.ed
+// (deob-10.0.7.js:195088, :195244-195264). The END's board and MODE_END keep the first 16 of that order; the rest go out as
+// NET_EXT_KN_END_ROW, one per row in order, between END_STATS and MODE_END.
+static void test_end_rows_40(Game *game) {
+    printf("Running 40-player end test...\n");
+    start_mode(game, MODE_ID_FFA);
+    for (int uid = 1; uid <= 40; uid++) {
+        Player *p = add_player(game, uid, 0);
+        p->score = uid * 10; // the last to join is the best
+        p->damage_dealt = (float) uid;
+        p->mode.objective_score = uid;
+    }
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(ended(game), "40 players: the round is over");
+    const SentPacket *end = last_sent(NET_PACKET_END, 40);
+    NetEndPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    if (end) memcpy(&packet, end->payload, sizeof(packet));
+    CHECK(end && packet.board.count == 16 && packet.board.entries[0].uid == 40 && packet.board.entries[15].uid == 25,
+          "the END's board is the top 16 of all 40 (first %d, last %d)", packet.board.entries[0].uid, packet.board.entries[15].uid);
+    CHECK(end_result_for(40) == 1 && end_result_for(16) == 0, "the best of all 40 wins (%d)", end_result_for(40));
+    const NetModeEndPacket mode_end = last_end();
+    CHECK(mode_end.count == 16 && mode_end.entries[0].uid == 40, "MODE_END: the same 16 rows (first %d)", mode_end.entries[0].uid);
+
+    int rows = 0, in_order = 1, stats_at = -1, first_row_at = -1, mode_end_at = -1;
+    NetEndRowPacket last;
+    memset(&last, 0, sizeof(last));
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t subtype = 0, length = 0;
+        const uint8_t *body = NULL;
+        if (g_sent[i].type == NET_PACKET_MODE_END && mode_end_at < 0) mode_end_at = i;
+        if (g_sent[i].type != NET_PACKET_EXT || !net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &length)) continue;
+        if (subtype == NET_EXT_KN_END_STATS && stats_at < 0) stats_at = i;
+        if (subtype != NET_EXT_KN_END_ROW || length != sizeof(NetEndRowPacket) || g_sent[i].uid != NET_TARGET_ALL) continue;
+        if (first_row_at < 0) first_row_at = i;
+        memcpy(&last, body, sizeof(last));
+        if (last.index != 16 + rows || last.uid != 40 - (16 + rows)) in_order = 0;
+        rows++;
+    }
+    CHECK(rows == 24 && in_order, "24 END_ROWs, rows 16..39 in the end order (%d, in order %d)", rows, in_order);
+    CHECK(stats_at >= 0 && stats_at < first_row_at && first_row_at < mode_end_at, "END_STATS, then the rows, then MODE_END (%d %d %d)",
+          stats_at, first_row_at, mode_end_at);
+    CHECK(last.uid == 1 && last.score == 10 && last.dmg == 1 && last.stats[NET_MODE_STAT_OBJECTIVE] == 1,
+          "the last row: uid 1, its score, dmg and objective (uid %d)", last.uid);
+
+    // 16 players or fewer: no END_ROW at all, so an end looks as it did to old clients
+    start_mode(game, MODE_ID_FFA);
+    for (int uid = 1; uid <= 16; uid++) add_player(game, uid, 0);
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    int extra = 0;
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t subtype = 0, length = 0;
+        const uint8_t *body = NULL;
+        if (g_sent[i].type == NET_PACKET_EXT && net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &length))
+            extra += subtype == NET_EXT_KN_END_ROW;
+    }
+    CHECK(ended(game) && extra == 0, "16 players: no END_ROW (%d)", extra);
+}
+
 // ------------------------------------------------------------------ objectives
 
 static void test_point(Game *game) {
@@ -2386,6 +2447,7 @@ int main(void) {
     test_ffa(&game);
     test_tdm(&game);
     test_end_stats(&game);
+    test_end_rows_40(&game);
     test_swap_team(&game);
     test_point(&game);
     test_king(&game);
