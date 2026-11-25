@@ -23,7 +23,8 @@
 #include "cJSON.h"
 #include "krunker_proto.h"
 #include "shared.h" /* NetInputPacket, NET_INPUT_* (the KN input frame) */
-#include "net_ext.h" /* NetPlayerMoveValsPacket (the l sendVals) */
+#include "net_ext.h" /* NetPlayerMoveValsPacket (the l sendVals), NetEndStatsPacket */
+#include "zombies.h" /* NetZombieStatsPacket (the Zombies end table's zombies / rounds) */
 
 /* ---- v10 labels (v10Translate.ts V10_OUT / V10_IN) */
 #define V10_OUT_LOAD "load"
@@ -286,12 +287,35 @@ typedef struct {
 KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n);
 /* NET 51 MODE_END (NetModeEndPacket): 1 when it is a free-for-all's, 0 another mode's, -1 malformed. */
 int v10_mode_end_is_ffa(const uint8_t *p, size_t n);
+/* MODE_END's mode id, -1 when the packet is not NetModeEndPacket's size or the mode table lacks the id. */
+int v10_mode_end_id(const uint8_t *p, size_t n);
+/* A skin endGame dropped for a player (NET_EXT_KN_END_REWARD): its reward cell is [reward text, skin]. */
+typedef struct V10EndSkin {
+    int32_t uid, skin;
+} V10EndSkin;
+/* What the server sends with an end besides END and MODE_END, each NULL / 0 when it did not come. */
+typedef struct V10EndExtras {
+    const NetEndStatsPacket *stats;      /* NET_EXT_KN_END_STATS, right before MODE_END: dmg, team scores and keys */
+    const NetZombieStatsPacket *zombies; /* NET_PACKET_ZOMBIE_STATS (Zombies' onPreEnd, before the ENDs): zombies, rounds */
+    const V10EndSkin *skins;
+    size_t skin_n;
+} V10EndExtras;
+/* endData.ed of any mode: the END's board in its end order, one cell per endStats column of MODE_END's mode
+ * (mode_columns.h), each as statForm or the shared formatters give it (deob-10.0.7.js:18315-18355, :195246-195264).
+ * mode_end NULL: a free-for-all's table from the END alone. Stops (NIL) for a malformed MODE_END or a column it does not map. */
+KrunkerValue v10_end_table(V10Out *o, const uint8_t *p, size_t n, const uint8_t *mode_end, size_t mode_end_n,
+                           const V10PlayerName *names, size_t name_n, const V10EndExtras *extras);
 /* END with the player's medals (NULL: none) and the end table (NULL: an empty ed, the table comes with a MODE_END).
- * endData.tms is null: getTeamScores' value outside a team mode, the only end table the bridge maps (free-for-all). */
+ * endData.tms is null (getTeamScores outside a team mode) and the winner team -1. */
 void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed);
 /* The same with endData.tms given (NULL: null), for a team mode's end (v10_end_team_scores). */
 void v10_map_end_tms(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed,
                      const KrunkerValue *tms);
+/* The same with END's winner team (argument 3, MODE_END's winner_team; -1 none). */
+void v10_map_end_team(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed,
+                      const KrunkerValue *tms, int32_t winner_team);
+/* endData.tms from NET_EXT_KN_END_STATS: exact keys, every team (0..5) and teamFlags. teams: the mode's `teams` (0: null). */
+KrunkerValue v10_end_team_scores_ext(V10Out *o, const NetEndStatsPacket *stats, int teams);
 /* endData.tms of the round's MODE_END (NetModeEndPacket: mode_id, winner_team, team_scores[2] @8): getTeamScores(true)
  * after endGame counted the round's winner. teams: the mode's `teams`. round_wins: teamRoundWins before this end by team
  * id (MODE_TEAMS entries, the last rds / MODE_SYNC_V7 numbers), NULL while it is null. flags: teamFlags[1] and [2] (the
@@ -416,11 +440,15 @@ KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *spawn, const V10Sk
 /* START_GAME ("start") for our own spawn: gameTimer, team, spectating, challMode, moveLock, 1, null, classIndex. */
 void v10_start_game(const V10Spawn *spawn, int32_t game_timer, int32_t chall_mode, KrunkerValue out[8]);
 
-/* LEADERBOARD (FFA only): the "7" rows, flat [uid, score, kills, deaths] per row. The rows are
- * copied into `rows` (room for 64 int32). Returns the row count via *count. */
+/* LEADERBOARD: the rows (uid, score, kills, deaths) are copied into `rows` (room for 64 int32), the count via *count. A
+ * mode whose leaderStats are score, kills, deaths (mode_columns.h) gets "7" here, flat [uid, score, kills, deaths] per row;
+ * any other mode's columns come with the LEADER_STATS that follows. A mode id the table lacks stops. */
 void v10_map_leaderboard(V10Out *o, const uint8_t *p, size_t n, int32_t mode_index, int32_t *rows, size_t *count);
-/* LEADER_STATS repeats the rows of the last LEADERBOARD: NULL when consumed, else the stop reason. */
-const char *v10_check_leader_stats(const uint8_t *p, size_t n, const int32_t *rows, size_t row_count, int have_rows);
+/* LEADER_STATS (NetLeaderStatsPacket) after that LEADERBOARD: the same uids, one value per leaderStats key. For the board's
+ * columns it is checked against the rows and sends nothing; for the others it is "7", flat [uid, ...values] per row
+ * (syncLeaders, deob-10.0.7.js:176107-176130). */
+void v10_map_leader_stats(V10Out *o, const uint8_t *p, size_t n, int32_t mode_index, const int32_t *rows, size_t row_count,
+                          int have_rows);
 
 /* ---- MODE_SYNC_V7, DOM_UPDATE, AI_SYNC_V7, AI_ADD_V7, STATE, CHAT_V7 */
 

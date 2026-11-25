@@ -1249,6 +1249,59 @@ int main(void) {
         CHECK(v10_bridge_untranslated("END") == 0 && v10_bridge_untranslated("MODE_END") == 0, "END and MODE_END are translated, the session goes on");
     }
 
+    // a team mode's end (Hardpoint): END, NET_EXT_KN_END_STATS, then MODE_END. The EXT sits between the held END and its
+    // MODE_END, so the bridge must keep holding the END. endData.tms lists every team key giveTeamScore made, with its flag
+    // (deob-10.0.7.js:193971-193985), and END arg 3 is the winning team in a team mode (:195273).
+    {
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;
+        endp[9] = 1;
+        w_i32(endp, 10, 1); w_i32(endp, 14, 9); w_i32(endp, 18, 2); w_i32(endp, 22, 3);
+        w_i32(endp, 266, 4);
+        native_send(&g_native, NET_PACKET_END, endp, sizeof endp);
+        NetEndStatsPacket es;
+        memset(&es, 0, sizeof es);
+        es.team_scores[1] = 0;   /* team 1 scored, then lost its points: the key stays */
+        es.team_scores[2] = 150;
+        es.team_score_keys = (1u << 1) | (1u << 2);
+        es.count = 1;
+        es.entries[0] = (NetEndStatsEntry){1, 777};
+        uint8_t ext[2 + sizeof es];
+        w_u16(ext, 0, NET_EXT_KN_END_STATS);
+        memcpy(ext + 2, &es, sizeof es);
+        native_send(&g_native, NET_PACKET_EXT, ext, sizeof ext);
+        NetModeEndPacket mend;
+        memset(&mend, 0, sizeof mend);
+        mend.mode_id = 2; /* Hardpoint */
+        mend.winner_team = 2;
+        mend.count = 1;
+        mend.entries[0].uid = 1;
+        mend.entries[0].stats[NET_MODE_STAT_OBJECTIVE] = 31;
+        native_send(&g_native, NET_PACKET_MODE_END, (const uint8_t *)&mend, sizeof mend);
+        WAIT_FOR(client_count("end") == 2);
+        KrunkerFrame ef;
+        CHECK(client_get("end", 1, &ef) && ef.argc == 7 && ef.args[2].type == KRUNKER_MAP, "a team end: one end after END, END_STATS and MODE_END");
+        if (ef.argc == 7) {
+            CHECK(vequal(&ef.args[3], &KRUNKER_V_NUM(2)), "a team end: arg 3 is the winning team (deob-10.0.7.js:195273)");
+            const KrunkerValue *ed = map_get(&ef.args[2], "ed");
+            /* Hardpoint's endStats: sid, name, score, kills, deaths, obj, dmg, reward (:104771) */
+            CHECK(ed && ed->type == KRUNKER_ARRAY && ed->len == 8 && vequal(&ed->u.items[5], &KRUNKER_V_NUM(31)) &&
+                      vequal(&ed->u.items[6], &KRUNKER_V_NUM(777)),
+                  "a team end: endData.ed has Hardpoint's 8 columns, obj from MODE_END and dmg from END_STATS");
+            const KrunkerValue *tms = map_get(&ef.args[2], "tms");
+            CHECK(tms && tms->type == KRUNKER_ARRAY && tms->len == 2 && tms->u.items[0].type == KRUNKER_ARRAY &&
+                      tms->u.items[0].len == 3 && vequal(&tms->u.items[0].u.items[0], &KRUNKER_V_NUM(1)) &&
+                      vequal(&tms->u.items[0].u.items[1], &KRUNKER_V_NUM(0)) && tms->u.items[0].u.items[2].type == KRUNKER_NIL &&
+                      tms->u.items[1].type == KRUNKER_ARRAY && tms->u.items[1].len == 3 &&
+                      vequal(&tms->u.items[1].u.items[0], &KRUNKER_V_NUM(2)) && vequal(&tms->u.items[1].u.items[1], &KRUNKER_V_NUM(150)),
+                  "a team end: endData.tms is [[1, 0, null], [2, 150, null]] from the team keys");
+        }
+        if (ef.argc) krunker_frame_free(&ef);
+        CHECK(v10_bridge_untranslated("END") == 0 && v10_bridge_untranslated("MODE_END") == 0 && v10_bridge_untranslated("EXT 0x81e0") == 0,
+              "a team end is translated, the session goes on");
+    }
+
     // ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet (the bytes of encodeEnter)
     KrunkerValue en_items[T_EN_LEN];
     for (int i = 0; i < T_EN_LEN; i++) en_items[i] = KRUNKER_V_NUM(-1);
