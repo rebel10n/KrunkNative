@@ -16,6 +16,10 @@
 
 #define V10_COPY_ID_BASE 1000000
 
+/* the refusal of a paint on an item without paintTargets (POST /items/:id/paint, the socket's "ip"). v10 shows the
+ * server's error.message (deob-10.0.7.js:108628-108629); the official text is not in the bundle. */
+#define V10_PAINT_NOT_PAINTABLE "That item cannot be painted."
+
 /* 1 when `index` is a paint: *color is its "#rrggbb" (NULL for a shader paint), *shader its shader id (-1 for a
  * colour paint). 0 otherwise. */
 int v10_paint_of(int64_t index, const char **color, int *shader);

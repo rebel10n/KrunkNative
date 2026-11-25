@@ -210,6 +210,10 @@ static void skins_load(void) {
                 k->wearable = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "wearable"));
                 const cJSON *styles = cJSON_GetObjectItemCaseSensitive(it, "styles");
                 k->styles = cJSON_IsArray(styles) ? cJSON_GetArraySize(styles) : 0; /* deob-10.0.7.js:108866 */
+                /* the client's Paint button and picker test !!paintTargets (deob-10.0.7.js:135288, 147902): true or a list of
+                 * mesh names, and in JavaScript an empty list is truthy too */
+                const cJSON *pt = cJSON_GetObjectItemCaseSensitive(it, "paintTargets");
+                k->paintable = (unsigned char) (cJSON_IsArray(pt) || cJSON_IsObject(pt) || json_truthy(pt));
                 k->qs_kr = (int) kn_json_int(it, "qsKR", 0);
                 k->funds = kn_json_int(it, "funds", 0);
                 k->title = (int) kn_json_int(it, "title", -1); /* blackM items: the title the purchase grants (deob-10.0.3.js:152763) */

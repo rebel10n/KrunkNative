@@ -143,6 +143,7 @@ typedef struct SkinInfo {
     unsigned char craftable;                     /* v10 craftable: the result of a Junkyard recipe (craft.c) */
     unsigned char wearable;                      /* v10.0.7 wearable: a spin mints it as an instance with a wear and serial */
     int styles;                                  /* v10.0.7 styles: how many (items.setStyle picks one, 0 the default) */
+    unsigned char paintable;                     /* v10 paintTargets set (true or a mesh list): items.setPaint applies to it */
     char lim_t[24];
     char lim_g[32];                              /* limG */
     char name[48];

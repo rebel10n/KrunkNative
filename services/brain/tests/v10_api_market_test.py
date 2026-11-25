@@ -559,6 +559,7 @@ def market_scenario(port, path):
 PAINT_RED = 7776         # a colour paint, #dc3c3c
 PAINT_SHADER = 7795      # a shader paint, shader 0
 PAINT_SHADER_B = 7796    # a shader paint, shader 1
+PAINT_ITEM = 7838        # Susanowo: paintTargets true (ITEM, skin 0, has none: v10 offers it no Paint button)
 
 
 def paint_scenario(port, path):
@@ -571,13 +572,15 @@ def paint_scenario(port, path):
     p_id, o_id = account_id(path, PAINTER), account_id(path, PAINT_OTHER)
     seed(path, [
         ("UPDATE players SET player_funds = 1000 WHERE player_id = ?", (p_id,)),
-        # three units of skin 0, and the paints: two red, two shader 0, one shader 1 (the caller)
-        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 3)", (p_id, ITEM)),
+        # three units of the paintable skin, and the paints: two red, two shader 0, one shader 1 (the caller)
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 3)", (p_id, PAINT_ITEM)),
         ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (p_id, PAINT_RED)),
         ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 2)", (p_id, PAINT_SHADER)),
         ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (p_id, PAINT_SHADER_B)),
-        # the other account owns one unit of skin 0 and one shader 0 (its own copy is never the caller's)
-        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (o_id, ITEM)),
+        # one unit of ITEM (no paintTargets): owned and unpainted, so only paintTargets refuses its paint
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (p_id, ITEM)),
+        # the other account owns one unit of the skin and one shader 0 (its own copy is never the caller's)
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (o_id, PAINT_ITEM)),
         ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (o_id, PAINT_SHADER)),
     ])
 
@@ -589,41 +592,44 @@ def paint_scenario(port, path):
         return next((x for x in rows if x.get("sid") == copy_id), None)
 
     def stack_row(rows):
-        return next((x for x in rows if x.get("i") == ITEM and "m" not in x and x.get("sid") == ITEM), None)
+        return next((x for x in rows if x.get("i") == PAINT_ITEM and "m" not in x and x.get("sid") == PAINT_ITEM), None)
 
     # the refusals first: a non-paint, an unknown item, a guest, and a paint the caller does not own
-    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": ITEM_B}, p_tok)
+    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_RED}, p_tok)
+    expect_error("paint: an item without paintTargets is refused (deob-10.0.7.js:135288, 147902)", st, r,
+                 "ITEM_PAINT_INVALID", 400, "That item cannot be painted.")
+    st, r = http(port, "POST", "/items/%d/paint" % PAINT_ITEM, {"item_id": PAINT_ITEM, "paint_item_id": ITEM_B}, p_tok)
     expect_error("paint: a non-paint is refused", st, r, "ITEM_PAINT_INVALID", 400, "That item is not a paint.")
     st, r = http(port, "POST", "/items/%d/paint" % NO_ITEM, {"item_id": NO_ITEM, "paint_item_id": PAINT_RED}, p_tok)
     expect_not_found("paint: an unknown item", st, r, "ITEMS_INVALID_ID")
-    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_RED})
+    st, r = http(port, "POST", "/items/%d/paint" % PAINT_ITEM, {"item_id": PAINT_ITEM, "paint_item_id": PAINT_RED})
     check("paint: a guest is refused (401)", st == 401, "HTTP %d" % st)
 
     # 1. an unpainted unit becomes a copy, painted red: the reply names the copy and its m
-    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_RED}, p_tok)
+    st, r = http(port, "POST", "/items/%d/paint" % PAINT_ITEM, {"item_id": PAINT_ITEM, "paint_item_id": PAINT_RED}, p_tok)
     d = data_of(r) or {}
     copy_a = d.get("copy_id")
     check("paint: an unpainted unit becomes a copy painted red (copy id, m, paints left)",
           st == 200 and is_int(copy_a) and copy_a >= 1000000 and d.get("m") == {"paint": "#dc3c3c"}
-          and d.get("count") == 1 and d.get("item_id") == ITEM, "HTTP %d %s" % (st, json.dumps(r)[:200]))
+          and d.get("count") == 1 and d.get("item_id") == PAINT_ITEM, "HTTP %d %s" % (st, json.dumps(r)[:200]))
     st, rows = owned_rows()
     row = copy_row(rows, copy_a)
     stack = stack_row(rows)
     check("market inventory: the painted copy is its own row, painted red, with no count",
-          row is not None and row.get("i") == ITEM and row.get("m") == {"paint": "#dc3c3c"} and "cnt" not in row,
+          row is not None and row.get("i") == PAINT_ITEM and row.get("m") == {"paint": "#dc3c3c"} and "cnt" not in row,
           json.dumps(rows)[:300])
     check("market inventory: the other copies of the skin keep no paint (the stack has 2)",
           stack is not None and stack.get("cnt") == 2 and "m" not in stack, json.dumps(rows)[:300])
 
     # 2. another unit becomes a second copy, painted shader 0
-    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_SHADER}, p_tok)
+    st, r = http(port, "POST", "/items/%d/paint" % PAINT_ITEM, {"item_id": PAINT_ITEM, "paint_item_id": PAINT_SHADER}, p_tok)
     copy_b = (data_of(r) or {}).get("copy_id")
     check("paint: a second unit becomes a copy painted with shader 0",
           st == 200 and is_int(copy_b) and copy_b != copy_a and data_of(r).get("m") == {"paintShader": 0},
           "HTTP %d %s" % (st, json.dumps(r)[:200]))
 
     # 3. repaint the first copy (a shader 1): only that copy changes
-    st, r = http(port, "POST", "/items/%d/paint" % copy_a, {"item_id": ITEM, "paint_item_id": PAINT_SHADER_B}, p_tok)
+    st, r = http(port, "POST", "/items/%d/paint" % copy_a, {"item_id": PAINT_ITEM, "paint_item_id": PAINT_SHADER_B}, p_tok)
     check("paint: a copy is repainted in place (same copy id)",
           st == 200 and data_of(r).get("copy_id") == copy_a and data_of(r).get("m") == {"paintShader": 1},
           "HTTP %d %s" % (st, json.dumps(r)[:200]))
@@ -636,14 +642,14 @@ def paint_scenario(port, path):
           json.dumps(rows)[:400])
 
     # 4. the last unpainted unit is painted; no unpainted unit is left for another paint
-    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_SHADER}, p_tok)
+    st, r = http(port, "POST", "/items/%d/paint" % PAINT_ITEM, {"item_id": PAINT_ITEM, "paint_item_id": PAINT_SHADER}, p_tok)
     check("paint: the last unpainted unit is painted", st == 200 and is_int((data_of(r) or {}).get("copy_id")), "HTTP %d" % st)
-    st, r = http(port, "POST", "/items/%d/paint" % ITEM, {"item_id": ITEM, "paint_item_id": PAINT_RED}, p_tok)
+    st, r = http(port, "POST", "/items/%d/paint" % PAINT_ITEM, {"item_id": PAINT_ITEM, "paint_item_id": PAINT_RED}, p_tok)
     check("paint: no unpainted unit left is refused (400)",
           st == 400 and "unpainted" in str(err_of(r).get("message", "")), "HTTP %d %s" % (st, json.dumps(r)[:200]))
     st, rows = owned_rows()
     check("the three painted copies are the caller's three units (no stack row left)",
-          stack_row(rows) is None and len([x for x in rows if x.get("i") == ITEM and "sid" in x and "m" in x]) == 3,
+          stack_row(rows) is None and len([x for x in rows if x.get("i") == PAINT_ITEM and "sid" in x and "m" in x]) == 3,
           json.dumps(rows)[:400])
 
     # 4b. the stack / copy flag: v10.0.3 reads st === 1 for a stack and st: 0 on a painted copy (official addSkin /
@@ -656,7 +662,7 @@ def paint_scenario(port, path):
           and copy_row(rows, copy_a) is not None and copy_row(rows, copy_a).get("st") == 0, json.dumps(rows)[:400])
 
     # 5. a copy is the caller's: another account's paint of it is refused, and the copy keeps its paint
-    st, r = http(port, "POST", "/items/%d/paint" % copy_b, {"item_id": ITEM, "paint_item_id": PAINT_SHADER}, o_tok)
+    st, r = http(port, "POST", "/items/%d/paint" % copy_b, {"item_id": PAINT_ITEM, "paint_item_id": PAINT_SHADER}, o_tok)
     check("paint: another account cannot paint the caller's copy (400)",
           st == 400 and err_of(r).get("message") == "You don't own that copy.", "HTTP %d %s" % (st, json.dumps(r)[:200]))
     st, rows = owned_rows()
@@ -664,8 +670,8 @@ def paint_scenario(port, path):
           and copy_row(rows, copy_b).get("m") == {"paintShader": 0}, json.dumps(rows)[:300])
 
     # 6. painted units are not sold through the stack: the destroy-all of the skin takes none
-    st, r = http(port, "POST", "/market/quick-sell", {"item_id": ITEM, "action": 2, "amount": 3}, p_tok)
-    left = query(path, "SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", (p_id, ITEM))
+    st, r = http(port, "POST", "/market/quick-sell", {"item_id": PAINT_ITEM, "action": 2, "amount": 3}, p_tok)
+    left = query(path, "SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", (p_id, PAINT_ITEM))
     check("quick sell takes no painted unit (the three units stay)", st != 200 and left and left[0][0] == 3,
           "HTTP %d %s" % (st, json.dumps(r)[:200]))
 
