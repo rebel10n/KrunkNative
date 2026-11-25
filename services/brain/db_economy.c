@@ -998,14 +998,26 @@ const kn_proc P_MARKET_ITEM = {"market_item", NULL, run_market_item};
 
 /* ------------------------------------------------------------------ trades */
 
-/* the painted copies of one side as the trade rows' units: {sid: copy id, i: skin, paint_color, paint_shader} */
+/* A copy's counter skin counts (skin_stats, 0406) as one JSON object, for a row's stats column: v10's trade window
+ * carries each offered copy's m, counts included (deob-10.0.7.js:111450-111456), and reads it back (:111239). */
+#define COPY_STATS_AGG_PG "json_object_agg(t.stat, t.count)::text"
+#define COPY_STATS_AGG_SQLITE "json_group_object(t.stat, t.count)"
+#define COPY_STATS_AGG_MYSQL "JSON_OBJECTAGG(t.stat, t.count)"
+
+/* the painted copies of one side as the trade rows' units: {sid: copy id, i: skin, paint_color, paint_shader, stats}.
+ * The sender's copy is escrowed with its counts (trade_copies.stats, 0407); the receiver's stays in its owner's
+ * skin_copies until the accept, so its counts are its skin_stats rows. */
+#define TRADE_COPY_ROWS(AGG)                                                                                        \
+    "SELECT copy_id AS sid, skin_id AS i, paint_color, paint_shader, wear, serial, name_tag AS nametag,"            \
+    " coalesce(stats, (SELECT " AGG " FROM skin_stats t WHERE t.copy_id = trade_copies.copy_id AND t.count > 0)) AS stats" \
+    " FROM trade_copies WHERE trade_id = $1 AND side = $2 ORDER BY copy_id"
 static cJSON *trade_copy_rows(Dbx *x, int64_t trade, const char *side) {
-    cJSON *a = dbx_rows(x, SQL(.any = "SELECT copy_id AS sid, skin_id AS i, paint_color, paint_shader, wear, serial,"
-                                     " name_tag AS nametag FROM trade_copies"
-                                     " WHERE trade_id = $1 AND side = $2 ORDER BY copy_id"),
+    cJSON *a = dbx_rows(x, SQL(.pg = TRADE_COPY_ROWS(COPY_STATS_AGG_PG), .sqlite = TRADE_COPY_ROWS(COPY_STATS_AGG_SQLITE),
+                               .mysql = TRADE_COPY_ROWS(COPY_STATS_AGG_MYSQL)),
                         KN_DB_ARGS(I64S(trade), side));
     return a ? a : cJSON_CreateArray();
 }
+#undef TRADE_COPY_ROWS
 
 /* Items of one side: "1,1,5," (skin id repeated count times, v7.1.4 sksell / skbuy). */
 static char *trade_side(Dbx *x, int64_t trade, const char *side) {
@@ -1086,11 +1098,16 @@ static cJSON *inventory_items(Dbx *x, const char *id) {
                    " AND c.skin_id = i.skin_id) AS c FROM inventory i WHERE i.account_id = $1 AND i.count > (SELECT count(*)"
                    " FROM skin_copies c WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) ORDER BY i.skin_id"),
         KN_DB_ARGS(id));
-    cJSON *k = dbx_rows(x,
-        SQL(.any = "SELECT skin_id AS i, 1 AS c, copy_id AS sid, paint_color, paint_shader, wear, serial, name_tag AS nametag"
-                   " FROM skin_copies"
-                   " WHERE account_id = $1 ORDER BY skin_id, copy_id"),
-        KN_DB_ARGS(id));
+    /* each copy's counts as its stats: the picker's m (deob-10.0.7.js:111455) */
+#define PICKER_COPIES(AGG)                                                                                          \
+    "SELECT k.skin_id AS i, 1 AS c, k.copy_id AS sid, k.paint_color, k.paint_shader, k.wear, k.serial,"             \
+    " k.name_tag AS nametag, (SELECT " AGG " FROM skin_stats t WHERE t.account_id = k.account_id"                    \
+    " AND t.skin_id = k.skin_id AND t.copy_id = k.copy_id AND t.count > 0) AS stats"                                 \
+    " FROM skin_copies k WHERE k.account_id = $1 ORDER BY k.skin_id, k.copy_id"
+    cJSON *k = dbx_rows(x, SQL(.pg = PICKER_COPIES(COPY_STATS_AGG_PG), .sqlite = PICKER_COPIES(COPY_STATS_AGG_SQLITE),
+                               .mysql = PICKER_COPIES(COPY_STATS_AGG_MYSQL)),
+                        KN_DB_ARGS(id));
+#undef PICKER_COPIES
     if (!a) a = cJSON_CreateArray();
     while (k && cJSON_GetArraySize(k) > 0) cJSON_AddItemToArray(a, cJSON_DetachItemFromArray(k, 0));
     cJSON_Delete(k);
