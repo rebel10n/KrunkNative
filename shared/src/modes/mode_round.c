@@ -528,11 +528,12 @@ static ModeWinner mode_rule_winner(Game *game) {
 
     // endGame sorts players.list in place by endSort / orderByScore before winCondition reads it
     // (deob-10.0.3.js:221647-221650, 221672): One in the Chamber's first player alive and Gun Game's tie at the
-    // top tier are the best ranked ones. KN keeps its join order and lends the winCondition a sorted view.
+    // top tier are the best ranked ones. KN keeps its join order and lends the winCondition a sorted view. The view has every
+    // player: cut at 16 before the sort, a 40-player lobby's winner was the best of the first 16 to join.
     if (mode->config.win_condition) {
-        Player *sorted[GAME_LEADERBOARD_MAX];
+        Player *sorted[GAME_END_ROWS_MAX];
         size_t count = 0;
-        for (size_t i = 0; i < game->player_count && count < GAME_LEADERBOARD_MAX; i++) {
+        for (size_t i = 0; i < game->player_count && count < GAME_END_ROWS_MAX; i++) {
             if (game->players[i]) sorted[count++] = game->players[i];
         }
         mode_sort_players(game, sorted, count);
@@ -551,9 +552,9 @@ static ModeWinner mode_rule_winner(Game *game) {
         return winner;
     }
 
-    Player *sorted[GAME_LEADERBOARD_MAX];
+    Player *sorted[GAME_END_ROWS_MAX];
     size_t count = 0;
-    for (size_t i = 0; i < game->player_count && count < GAME_LEADERBOARD_MAX; i++) {
+    for (size_t i = 0; i < game->player_count && count < GAME_END_ROWS_MAX; i++) {
         if (game->players[i]) sorted[count++] = game->players[i];
     }
     mode_sort_players(game, sorted, count);

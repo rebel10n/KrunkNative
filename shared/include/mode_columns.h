@@ -21,6 +21,14 @@ const char *const *mode_columns_end_stats(int id);
 // leaderStats with the default ["score"] (players.syncLeaders, deob-10.0.7.js:176110); NULL for an unknown id.
 const char *const *mode_columns_leader_stats(int id);
 
+// The cells the server, the KN client and the bridge all format, kept here so the three agree.
+// Candy Heist's statForm.candy: Math.floor((score || 0) / 10) (deob-10.0.7.js:106114-106118).
+int mode_columns_candy(int score);
+// statForm.time: player.timer || "DNF" (:18319-18321) from MODE_END's time stat (tenths + 1, 0 none). Race's timer is the
+// clock text when the player finished (lastTimer, getTime with showMS: "MM:SS.t", :104868); Raid's onEnd sets
+// getTime(ms) with no fraction ("MM:SS", :105253; getTime :23928-23944).
+void mode_columns_time_text(int mode_id, int time_stat, char *out, size_t size);
+
 extern const char *const g_mode_end_stats_default[];
 extern const char *const g_mode_end_stats_tdm[];
 extern const char *const g_mode_end_stats_point[];

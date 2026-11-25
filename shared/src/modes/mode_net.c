@@ -4,6 +4,7 @@
 // am. All leave through game_send (GameHooks.send).
 #include "mode_internal.h"
 #include <net_ext.h> // gmsg's countdown: NET_EXT_KN_OFFICIAL_COUNTDOWN
+#include <mode_columns.h> // the end table cells the bridge and the client format the same way
 #include <math.h>
 #include <string.h>
 
@@ -320,8 +321,53 @@ static void mode_send_end_stats(Game *game, Player **sorted, const size_t count)
     if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buffer, n);
 }
 
+// MODE_END's stats of one player (NetModeStat order); NET_EXT_KN_END_ROW carries the same array for the rows past 16
+static void mode_end_stats_fill(const Player *player, int16_t *stats) {
+    stats[NET_MODE_STAT_CAPS] = clamp16(player->mode.caps);
+    stats[NET_MODE_STAT_CONFIRMS] = clamp16(player->mode.confirms);
+    stats[NET_MODE_STAT_DENIES] = clamp16(player->mode.denies);
+    stats[NET_MODE_STAT_OBJECTIVE] = clamp16(player->mode.objective_score);
+    stats[NET_MODE_STAT_WEAPON_TIER] = clamp16(player->mode.weapon_tier);
+    stats[NET_MODE_STAT_SETBACKS] = clamp16(player->mode.setbacks);
+    stats[NET_MODE_STAT_MELEES] = clamp16(player->mode.melees);
+    stats[NET_MODE_STAT_CONVS] = clamp16(player->mode.convs);
+    stats[NET_MODE_STAT_LIVES] = clamp16(player->mode.lives);
+    stats[NET_MODE_STAT_ASSISTS] = clamp16((int) player->assists);
+    // getTime(lastTimer, showMS) keeps tenths: store them + 1 so 0 still means "DNF"
+    if (player->mode.has_timer) stats[NET_MODE_STAT_TIME] = clamp16((int) floorf(player->mode.timer * 10.0f + 0.0001f) + 1);
+    stats[NET_MODE_STAT_DEPOSITS] = clamp16(player->mode.deposits);
+    stats[NET_MODE_STAT_PICKUPS] = clamp16(player->mode.pickups);
+}
+
+_Static_assert(NET_END_ROW_STATS == NET_MODE_STAT_COUNT && NET_END_ROWS_MAX == GAME_END_ROWS_MAX,
+               "NetEndRowPacket follows MODE_END's entry and the end order's length");
+
+// NET_EXT_KN_END_ROW: the end table's rows past MODE_END's 16 (net_ext.h), one packet each, in the end order
+static void mode_send_end_rows(Game *game, Player **sorted, const size_t count) {
+    for (size_t i = NET_MODE_END_MAX; i < count && i < NET_END_ROWS_MAX; i++) {
+        const Player *player = sorted[i];
+        if (!player) continue;
+        NetEndRowPacket row;
+        memset(&row, 0, sizeof(row));
+        row.index = (int32_t) i;
+        row.uid = player->uid;
+        row.score = player->score;
+        row.kills = (int32_t) player->kills;
+        row.deaths = (int32_t) player->deaths;
+        row.reward = player->reward;
+        row.dmg = mode_leader_stat_value(player, "dmg");
+        row.zombies = player->mode.ai_kills;
+        row.rounds = player->mode.rounds;
+        mode_end_stats_fill(player, row.stats);
+        uint8_t buffer[NET_EXT_HEADER_SIZE + sizeof(row)];
+        const uint16_t n = net_ext_pack(buffer, sizeof(buffer), NET_EXT_KN_END_ROW, &row, sizeof(row));
+        if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buffer, n);
+    }
+}
+
 void mode_send_end(Game *game, const ModeWinner winner, Player **sorted, const size_t count) {
     mode_send_end_stats(game, sorted, count);
+    mode_send_end_rows(game, sorted, count);
 
     NetModeEndPacket packet;
     memset(&packet, 0, sizeof(packet));
@@ -336,20 +382,7 @@ void mode_send_end(Game *game, const ModeWinner winner, Player **sorted, const s
         if (!player) continue;
         NetModeEndEntry *entry = &packet.entries[packet.count++];
         entry->uid = player->uid;
-        entry->stats[NET_MODE_STAT_CAPS] = clamp16(player->mode.caps);
-        entry->stats[NET_MODE_STAT_CONFIRMS] = clamp16(player->mode.confirms);
-        entry->stats[NET_MODE_STAT_DENIES] = clamp16(player->mode.denies);
-        entry->stats[NET_MODE_STAT_OBJECTIVE] = clamp16(player->mode.objective_score);
-        entry->stats[NET_MODE_STAT_WEAPON_TIER] = clamp16(player->mode.weapon_tier);
-        entry->stats[NET_MODE_STAT_SETBACKS] = clamp16(player->mode.setbacks);
-        entry->stats[NET_MODE_STAT_MELEES] = clamp16(player->mode.melees);
-        entry->stats[NET_MODE_STAT_CONVS] = clamp16(player->mode.convs);
-        entry->stats[NET_MODE_STAT_LIVES] = clamp16(player->mode.lives);
-        entry->stats[NET_MODE_STAT_ASSISTS] = clamp16((int) player->assists);
-        // getTime(lastTimer, showMS) keeps tenths: store them + 1 so 0 still means "DNF"
-        if (player->mode.has_timer) entry->stats[NET_MODE_STAT_TIME] = clamp16((int) floorf(player->mode.timer * 10.0f + 0.0001f) + 1);
-        entry->stats[NET_MODE_STAT_DEPOSITS] = clamp16(player->mode.deposits);
-        entry->stats[NET_MODE_STAT_PICKUPS] = clamp16(player->mode.pickups);
+        mode_end_stats_fill(player, entry->stats);
     }
 
     game_send(game, NET_TARGET_ALL, NET_PACKET_MODE_END, &packet, sizeof(packet));
@@ -373,7 +406,7 @@ int mode_leader_stat_value(const Player *player, const char *key) {
     if (!strcmp(key, "dmg")) return (int) lroundf(player->damage_dealt);         // endForm.dmg: round(dmgDealt || 0)
     // Candy Heist's statForm.candy: Math.floor((score || 0) / 10) (deob-10.0.7.js:106114-106118); without it the
     // leaderboard's only column read 0
-    if (!strcmp(key, "candy")) return (int) floor(player->score / 10.0);
+    if (!strcmp(key, "candy")) return mode_columns_candy(player->score);
     return 0;
 }
 
