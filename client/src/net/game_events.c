@@ -1634,6 +1634,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&notice, body, sizeof(notice));
                 events_ranked_notice(client, &notice);
             }
+            else if (subtype == NET_EXT_KN_END_STATS && body_length == sizeof(NetEndStatsPacket)) { // endData's dmg cells (hud_modes.c)
+                NetEndStatsPacket end_stats;
+                memcpy(&end_stats, body, sizeof(end_stats));
+                hud_modes_end_extras(&end_stats);
+            }
             else if (subtype == NET_EXT_KN_END_REWARD && body_length >= sizeof(NetEndRewardPacket)) { // endData.ed's [reward, skinReward]
                 NetEndRewardPacket reward;
                 memcpy(&reward, body, sizeof(reward));

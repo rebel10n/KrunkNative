@@ -89,6 +89,7 @@ void mode_round_start(Game *game) {
     const GameModeConfig *config = &mode->config;
 
     memset(mode->team_scores, 0, sizeof(mode->team_scores));
+    mode->team_score_keys = 0;
     memset(mode->flag_info, 0, sizeof(mode->flag_info));
     memset(&mode->bomb, 0, sizeof(mode->bomb));
     mode->wait_timer_count = 0;
@@ -372,6 +373,7 @@ int mode_end_game(Game *game) {
     if (mode->best_of) {
         const int round_winner = mode_win_team(game, 1);
         memset(mode->team_scores, 0, sizeof(mode->team_scores));
+        mode->team_score_keys = 0; // teamScores = {}
         for (int t = 1; t < MODE_TEAMS; t++) mode_send_team_score(game, t); // "ts" (cleared)
         game->leaders_dirty = 1;
         mode->in_overtime = 0;
@@ -574,6 +576,7 @@ int mode_team_score(const Game *game, const int team) {
 void mode_team_score_add(Game *game, const int team, const int amount) {
     if (team <= 0 || team >= MODE_TEAMS) return;
     game->mode->team_scores[team] += amount;
+    game->mode->team_score_keys |= 1u << team;
     mode_send_team_score(game, team);
 }
 

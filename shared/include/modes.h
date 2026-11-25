@@ -447,6 +447,9 @@ typedef struct GameMode_t {
     GameModeConfig config;
 
     int team_scores[MODE_TEAMS];             // game.teamScores
+    // bit t: teamScores has key t. giveTeamScore adds a team's key the first time it scores, even when the score ends at 0
+    // (deob-10.0.7.js:193971-193974), and getTeamScores lists the keys (endData.tms, NET_EXT_KN_END_STATS)
+    unsigned team_score_keys;
     char flag_info[MODE_TEAMS][MODE_TEXT_SIZE]; // teamFlags: "AT BASE" / "AWAY" / carrier name
 
     ModeWaitTimer wait_timers[MODE_MAX_WAIT_TIMERS]; // game.waitTimers (copies)
