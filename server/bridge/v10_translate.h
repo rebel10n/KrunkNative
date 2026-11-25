@@ -285,8 +285,18 @@ typedef struct {
 KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n);
 /* NET 51 MODE_END (NetModeEndPacket): 1 when it is a free-for-all's, 0 another mode's, -1 malformed. */
 int v10_mode_end_is_ffa(const uint8_t *p, size_t n);
-/* END with the player's medals (NULL: none) and the end table (NULL: an empty ed, the table comes with a MODE_END). */
+/* END with the player's medals (NULL: none) and the end table (NULL: an empty ed, the table comes with a MODE_END).
+ * endData.tms is null: getTeamScores' value outside a team mode, the only end table the bridge maps (free-for-all). */
 void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed);
+/* The same with endData.tms given (NULL: null), for a team mode's end (v10_end_team_scores). */
+void v10_map_end_tms(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed,
+                     const KrunkerValue *tms);
+/* endData.tms of the round's MODE_END (NetModeEndPacket: mode_id, winner_team, team_scores[2] @8): getTeamScores(true)
+ * after endGame counted the round's winner. teams: the mode's `teams`. round_wins: teamRoundWins before this end by team
+ * id (MODE_TEAMS entries, the last rds / MODE_SYNC_V7 numbers), NULL while it is null. flags: teamFlags[1] and [2] (the
+ * "ufi" texts), NULL or "" none. NIL for a malformed MODE_END. */
+KrunkerValue v10_end_team_scores(V10Out *o, const uint8_t *mode_end, size_t n, int teams, const int32_t *round_wins,
+                                 const char *const *flags);
 /* NET 9 CHAT (NetChatPacket, 325 bytes): a v3 chat line as "ch" (mapChat). */
 void v10_map_chat(V10Out *o, const uint8_t *p, size_t n);
 /* ---- INPUT (q): the official client's input window -> NET_PACKET_INPUT_BATCH (111). Mirrors decodeInputBatch and
@@ -349,8 +359,12 @@ void v10_map_game_announcement(V10Out *o, const uint8_t *body, size_t n);
 
 /* ---- SKINS, SPAWN, the add record, START, LEADERBOARD, LEADER_STATS */
 
+/* NetSkinsPacket, or V2 with each worn skin's paint (patch 6): paint_color 0xRRGGBB and paint_shader per slot (primary,
+ * secondary, melee), -1 none. has_paint is 0 for a V1 SKINS (and a zeroed struct), so a slot carries no paint then. */
 typedef struct V10Skins {
     int32_t uid, primary, secondary, melee;
+    int32_t paint_color[3], paint_shader[3];
+    int has_paint;
 } V10Skins;
 int v10_parse_skins(const uint8_t *p, size_t n, V10Skins *out);
 
@@ -371,7 +385,8 @@ typedef struct V10Spawn {
 } V10Spawn;
 int v10_parse_spawn(const uint8_t *p, size_t n, V10Spawn *out);
 
-/* The add record (ADD_PLAYERS "0" arguments: the record, then 1). socket_id is our own player's id. */
+/* The add record (ADD_PLAYERS "0" arguments: the record, then 1). socket_id is our own player's id. A painted weapon
+ * slot (skins [12] and melee [19]) is {i: index, m: {paint, paintShader}}, the plain index otherwise. */
 KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *spawn, const V10Skins *skins, int has_skins, const char *socket_id);
 /* START_GAME ("start") for our own spawn: gameTimer, team, spectating, challMode, moveLock, 1, null, classIndex. */
 void v10_start_game(const V10Spawn *spawn, int32_t game_timer, int32_t chall_mode, KrunkerValue out[8]);

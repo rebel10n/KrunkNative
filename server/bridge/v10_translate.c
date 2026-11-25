@@ -1420,15 +1420,46 @@ void v10_map_game_announcement(V10Out *o, const uint8_t *body, size_t n) {
 
 /* ---- SKINS, SPAWN, the add record, START, LEADERBOARD, LEADER_STATS */
 
-/* NetSkinsPacket (16 bytes) or NetSkinsPacketV2 (40: + the paint of each skin, patch 6). The paint is not
- * sent on the v10 add record yet (doc/v10/paint-copy.md, gaps): only the indices are taken. */
+/* NetSkinsPacket (16 bytes) or NetSkinsPacketV2 (40: + PlayerSkinPaints, {color, shader} per slot, patch 6). The paint
+ * goes on the add record's weapon slots (v10_player_add_record). */
 int v10_parse_skins(const uint8_t *p, size_t n, V10Skins *out) {
     if (n != 16 && n != 40) return 0;
     out->uid = rd_i32(p, 0);
     out->primary = rd_i32(p, 4);
     out->secondary = rd_i32(p, 8);
     out->melee = rd_i32(p, 12);
+    out->has_paint = n == 40;
+    for (int k = 0; k < 3; k++) {
+        out->paint_color[k] = out->has_paint ? rd_i32(p, 16 + 8 * (size_t)k) : -1;
+        out->paint_shader[k] = out->has_paint ? rd_i32(p, 20 + 8 * (size_t)k) : -1;
+    }
     return 1;
+}
+
+/* A weapon slot of the add record. v10.0.7's getPlayerAddData sends player.skins and meleeIndex as the server holds them
+ * (deob-10.0.7.js:176753): an index, or an owned copy's {i, m} object. The client takes the index from i (iiîiîîî,
+ * :24322-24333) and the paint from m (iïîìîîï, :24335-24337): m.paint "#rrggbb" or a numeric m.paintShader
+ * (generateMeshes, :174108-174113 for the melee, :174190-174195 for a weapon). A plain index has no m: it shows no paint. */
+static KrunkerValue skin_slot(V10Out *o, int32_t index, const V10Skins *skins, int has_skins, int k) {
+    if (!has_skins) return KRUNKER_V_NUM(-1);
+    const int32_t color = skins->has_paint ? skins->paint_color[k] : -1, shader = skins->has_paint ? skins->paint_shader[k] : -1;
+    if (index < 0 || (color < 0 && shader < 0)) return KRUNKER_V_NUM(index);
+    const char *keys[2];
+    KrunkerValue vals[2];
+    uint32_t n = 0;
+    if (color >= 0) {
+        char hex[8];
+        snprintf(hex, sizeof hex, "#%06x", (unsigned)color & 0xffffffu);
+        keys[n] = "paint";
+        vals[n++] = v10_text(o, (const uint8_t *)hex, 7);
+    }
+    if (shader >= 0) {
+        keys[n] = "paintShader";
+        vals[n++] = KRUNKER_V_NUM(shader);
+    }
+    static const char *const slot_keys[2] = {"i", "m"};
+    const KrunkerValue slot_vals[2] = {KRUNKER_V_NUM(index), v10_obj(o, keys, vals, n)};
+    return v10_obj(o, slot_keys, slot_vals, 2);
 }
 
 /* NetSpawnPacket, protocol 1.3.1 with the WP-C and WP-F tails (150 bytes): see parseSpawn in v10Translate.ts. */
@@ -1472,7 +1503,8 @@ KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *s, const V10Skins 
     char sid[16];
     KrunkerValue f[V10_ADD_RECORD_FIELDS];
     snprintf(sid, sizeof sid, "%d", s->uid);
-    const KrunkerValue pair[2] = {KRUNKER_V_NUM(has_skins ? skins->primary : -1), KRUNKER_V_NUM(has_skins ? skins->secondary : -1)};
+    const KrunkerValue pair[2] = {skin_slot(o, has_skins ? skins->primary : -1, skins, has_skins, 0),
+                                  skin_slot(o, has_skins ? skins->secondary : -1, skins, has_skins, 1)};
     const KrunkerValue charms[2] = {KRUNKER_V_NUM(s->charm[0]), KRUNKER_V_NUM(s->charm[1])};
     const KrunkerValue nil = KRUNKER_V_NIL;
 
@@ -1495,7 +1527,7 @@ KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *s, const V10Skins 
     f[16] = KRUNKER_V_NUM(0); /* hack */
     f[17] = nil;              /* customLoadout */
     f[18] = KRUNKER_V_NUM(s->direction[1]); /* xDire: the yaw (the proxy reads direction[1] the same way) */
-    f[19] = KRUNKER_V_NUM(has_skins ? skins->melee : -1);
+    f[19] = skin_slot(o, has_skins ? skins->melee : -1, skins, has_skins, 2);
     f[20] = KRUNKER_V_NUM(s->skin_color < 0 ? -1 : skin_index_from_color(s->skin_color));
     f[21] = KRUNKER_V_NUM(-1); /* propID */
     f[22] = KRUNKER_V_NUM(s->attach_index);
@@ -2008,7 +2040,45 @@ KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10Player
     return v10_arr(o, rows, (uint32_t)rc);
 }
 
+#define MODE_END_TEAMS 6 /* MODE_TEAMS: team ids 0..5 (sdm multiTeam) */
+
+/* getTeamScores(true) at the match end: endData.tms = getTeamScores(!0) (deob-10.0.7.js:195217). getTeamScores
+ * (:193975-193985) is null outside a team mode; else [team, n, teamFlags[team] || null] for each key of teamRoundWins when
+ * it is set, else of teamScores. endGame counts a round's winner into teamRoundWins before that (:195051-195053; the bestOf
+ * branch :195040-195042), so a won round reads the round wins. A key of teamRoundWins exists once its team won a round,
+ * so a count above 0 is a key; teamScores keys are the teams that scored (giveTeamScore, :193971-193974), taken here as the
+ * nonzero ones (the rule of "ts", v10_map_mode_state). JS lists integer keys in ascending order. */
+KrunkerValue v10_end_team_scores(V10Out *o, const uint8_t *mode_end, size_t n, int teams, const int32_t *round_wins,
+                                 const char *const *flags) {
+    if (n < 16) return KRUNKER_V_NIL;
+    if (!teams) return KRUNKER_V_NIL;
+    const int32_t winner = rd_i32(mode_end, 4);
+    int32_t wins[MODE_END_TEAMS] = {0};
+    int has_wins = round_wins != NULL;
+    for (int t = 0; has_wins && t < MODE_END_TEAMS; t++) wins[t] = round_wins[t];
+    if (winner > 0 && winner < MODE_END_TEAMS) { /* getWinTeam 0 (a draw) counts nothing; KN sends -1 for it */
+        wins[winner]++;
+        has_wins = 1;
+    }
+    KrunkerValue rows[MODE_END_TEAMS];
+    uint32_t count = 0;
+    for (int t = 0; t < MODE_END_TEAMS; t++) {
+        const int32_t v = has_wins ? wins[t] : (t == 1 || t == 2) ? rd_i32(mode_end, 4 + 4 * (size_t)t) : 0;
+        if (v == 0) continue;
+        const char *flag = flags && (t == 1 || t == 2) ? flags[t - 1] : NULL;
+        const KrunkerValue row[3] = {KRUNKER_V_NUM(t), KRUNKER_V_NUM(v),
+                                     flag && flag[0] ? v10_text(o, (const uint8_t *)flag, strlen(flag)) : KRUNKER_V_NIL};
+        rows[count++] = v10_arr(o, row, 3);
+    }
+    return v10_arr(o, rows, count);
+}
+
 void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed) {
+    v10_map_end_tms(o, p, n, medals, ed, NULL);
+}
+
+void v10_map_end_tms(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed,
+                     const KrunkerValue *tms) {
     if (n != END_SIZE) {
         o->stop = "malformed";
         return;
@@ -2022,7 +2092,8 @@ void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket
         mdls[mdls_n++] = KRUNKER_V_NUM(medals->medals[i].count);
     }
     const char *const keys[5] = {"vo", "mts", "tms", "ed", "mdls"};
-    const KrunkerValue vals[5] = {v10_obj(o, NULL, NULL, 0), v10_arr(o, NULL, 0), KRUNKER_V_NIL, ed ? *ed : v10_arr(o, NULL, 0), v10_arr(o, mdls, mdls_n)};
+    const KrunkerValue vals[5] = {v10_obj(o, NULL, NULL, 0), v10_arr(o, NULL, 0), tms ? *tms : KRUNKER_V_NIL, ed ? *ed : v10_arr(o, NULL, 0),
+                                  v10_arr(o, mdls, mdls_n)};
     const KrunkerValue end_data = v10_obj(o, keys, vals, 5);
     const KrunkerValue args[7] = {KRUNKER_V_NUM(0), did_win, end_data, KRUNKER_V_NUM(-1), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL};
     v10_push(o, "end", args, 7);
