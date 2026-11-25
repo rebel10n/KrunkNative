@@ -873,7 +873,7 @@ int main(void) {
         spawn_buf(buf, &other_s);
         V10Spawn other;
         CHECK(v10_parse_spawn(buf, 150, &other), "SPAWN parse");
-        V10Skins sk2 = {2, 7, 8, 9};
+        V10Skins sk2 = {.uid = 2, .primary = 7, .secondary = 8, .melee = 9};
         V10Out o;
         v10_out_init(&o);
         const KrunkerValue rec = v10_player_add_record(&o, &other, &sk2, 1, "SOCKET");
@@ -891,6 +891,38 @@ int main(void) {
             }
         }
         v10_out_free(&o);
+
+        // SKINS V2 (40 bytes, patch 6): each worn skin's paint goes on the add record's weapon slots as v10.0.7's owned copy
+        // {i, m} (getPlayerAddData sends player.skins / meleeIndex as held, deob-10.0.7.js:176753; the client reads i and
+        // m.paint / m.paintShader, :24322-24337, :174190-174195); an unpainted slot stays the plain index
+        {
+            uint8_t v2[40];
+            const int32_t v2vals[10] = {2, 7, 8, 9, 0x112233, -1, -1, -1, -1, 3};
+            for (int i = 0; i < 10; i++) put_i32(v2, (size_t)i * 4, v2vals[i]);
+            V10Skins painted = {.uid = -1};
+            CHECK(v10_parse_skins(v2, 40, &painted) && painted.has_paint && painted.paint_color[0] == 0x112233 &&
+                      painted.paint_shader[0] == -1 && painted.paint_color[2] == -1 && painted.paint_shader[2] == 3,
+                  "SKINS V2 parse: the paint of each slot");
+            CHECK(v10_parse_skins(sk, 16, &skins) && !skins.has_paint, "SKINS V1 parse: no paint");
+            v10_out_init(&o);
+            const KrunkerValue prec = v10_player_add_record(&o, &other, &painted, 1, "SOCKET");
+            static const char *const im[2] = {"i", "m"};
+            static const char *const paint_key[1] = {"paint"}, *const shader_key[1] = {"paintShader"};
+            const KrunkerValue primary_m = kv_map(1, paint_key, (KrunkerValue[]){S("#112233")});
+            const KrunkerValue melee_m = kv_map(1, shader_key, (KrunkerValue[]){N(3)});
+            const KrunkerValue want_pair = ARR(kv_map(2, im, (KrunkerValue[]){N(7), primary_m}), N(8));
+            const KrunkerValue want_melee = kv_map(2, im, (KrunkerValue[]){N(9), melee_m});
+            CHECK(prec.type == KRUNKER_ARRAY && prec.len == 53 && vequal(&prec.u.items[12], &want_pair),
+                  "a painted primary is {i: 7, m: {paint: \"#112233\"}}, the unpainted secondary the index 8");
+            CHECK(prec.type == KRUNKER_ARRAY && prec.len == 53 && vequal(&prec.u.items[19], &want_melee),
+                  "a shader-painted melee is {i: 9, m: {paintShader: 3}}");
+            v10_out_free(&o);
+            v10_out_init(&o);
+            const KrunkerValue urec = v10_player_add_record(&o, &other, &skins, 1, "SOCKET");
+            CHECK(urec.type == KRUNKER_ARRAY && urec.len == 53 && vequal(&urec.u.items[12], &want[12]) && vequal(&urec.u.items[19], &want[19]),
+                  "a V1 SKINS keeps the plain indices");
+            v10_out_free(&o);
+        }
 
         TSpawn mine_s = default_spawn();
         mine_s.uid = 1; mine_s.is_you = 1; mine_s.class_index = 4; mine_s.team = 0; mine_s.name = "me";
@@ -1598,16 +1630,70 @@ int main(void) {
         {
             const KrunkerValue cell1[2] = {S("Ann"), S("Ann")};
             const KrunkerValue cell2[2] = {S(""), S("")};
-            const KrunkerValue row1[6] = {N(3), KRUNKER_V_ARRAY(cell1, 2), N(40), N(5), N(1), N(25)};
-            const KrunkerValue row2[6] = {N(7), KRUNKER_V_ARRAY(cell2, 2), N(12), N(2), N(9), N(0)};
-            const KrunkerValue rows[2] = {KRUNKER_V_ARRAY(row1, 6), KRUNKER_V_ARRAY(row2, 6)};
-            const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(rows, 2),
+            /* flat, one value per endStats column (deob-10.0.7.js:195246-195264), the reward through its formatter (:18316-18318) */
+            const KrunkerValue cells[12] = {N(3), KRUNKER_V_ARRAY(cell1, 2), N(40), N(5), N(1), S("<span style='color:#F8C55C'>+25</span> KR"),
+                                            N(7), KRUNKER_V_ARRAY(cell2, 2), N(12), N(2), N(9), S("NONE")};
+            const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(cells, 12),
                                          S("mdls"), KRUNKER_V_ARRAY(NULL, 0)};
             const KrunkerValue end_data = KRUNKER_V_MAP(kv, 5);
             const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
-            CHECK(msg_is(&e, 0, "end", want, 7), "END with MODE_END's table: endData.ed = [uid, [name, name], score, kills, deaths, reward] rows");
+            CHECK(msg_is(&e, 0, "end", want, 7), "END with MODE_END's table: endData.ed is flat, uid, [name, name], score, kills, deaths, formatted reward");
         }
         v10_out_free(&e);
+    }
+
+    /* ---- endData.tms: getTeamScores(true) after endGame counted the round (deob-10.0.7.js:195217, :193975-193985,
+     * :195051-195053): null outside a team mode, else [team, n, teamFlags[team] || null] over teamRoundWins once a round
+     * was won, else over teamScores */
+    {
+        uint8_t mend[16];
+        memset(mend, 0, sizeof mend);
+        put_i32(mend, 0, 1);  /* mode 1, Team Deathmatch */
+        put_i32(mend, 4, 2);  /* team 2 won */
+        put_i32(mend, 8, 30); /* team_scores */
+        put_i32(mend, 12, 45);
+        V10Out t;
+        v10_out_init(&t);
+        KrunkerValue got = v10_end_team_scores(&t, mend, 16, 0, NULL, NULL);
+        CHECK(got.type == KRUNKER_NIL, "tms outside a team mode is null");
+        got = v10_end_team_scores(&t, mend, 16, 1, NULL, NULL);
+        KrunkerValue want = ARR(ARR(N(2), N(1), NIL));
+        CHECK(vequal(&got, &want), "a won round of a first match: teamRoundWins {2: 1}, not the team scores");
+        put_i32(mend, 4, -1); /* a draw: getWinTeam 0 counts no round */
+        got = v10_end_team_scores(&t, mend, 16, 1, NULL, NULL);
+        want = ARR(ARR(N(1), N(30), NIL), ARR(N(2), N(45), NIL));
+        CHECK(vequal(&got, &want), "a draw with no round won yet: the team scores");
+        const int32_t prior[6] = {0, 1, 2, 0, 0, 0};
+        got = v10_end_team_scores(&t, mend, 16, 1, prior, NULL);
+        want = ARR(ARR(N(1), N(1), NIL), ARR(N(2), N(2), NIL));
+        CHECK(vequal(&got, &want), "a draw after won rounds: the round wins as they were");
+        put_i32(mend, 4, 1);
+        got = v10_end_team_scores(&t, mend, 16, 1, prior, NULL);
+        want = ARR(ARR(N(1), N(2), NIL), ARR(N(2), N(2), NIL));
+        CHECK(vequal(&got, &want), "team 1 wins the last round: its count goes up first (1 + 1, 2)");
+        const char *const flags[2] = {"AT BASE", ""};
+        got = v10_end_team_scores(&t, mend, 16, 1, NULL, flags);
+        want = ARR(ARR(N(1), N(1), S("AT BASE")));
+        CHECK(vequal(&got, &want), "a flag mode: teamFlags[team] rides along, \"\" is null");
+        memset(mend + 4, 0, 12); /* a 0 - 0 draw */
+        put_i32(mend, 4, -1);
+        got = v10_end_team_scores(&t, mend, 16, 1, NULL, NULL);
+        CHECK(got.type == KRUNKER_ARRAY && got.len == 0, "a 0 - 0 draw: an empty list (teamScores {}), not null");
+        got = v10_end_team_scores(&t, mend, 15, 1, NULL, NULL);
+        CHECK(got.type == KRUNKER_NIL, "a short MODE_END gives null");
+
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;
+        const KrunkerValue tms = ARR(ARR(N(1), N(3), NIL), ARR(N(2), N(1), NIL));
+        v10_map_end_tms(&t, endp, 330, NULL, NULL, &tms);
+        const KrunkerValue *end_data = t.count == 1 && t.msgs[0].argc == 7 ? &t.msgs[0].args[2] : NULL;
+        CHECK(end_data && vequal(map_get_v(end_data, "tms"), &tms), "v10_map_end_tms puts the list in endData.tms");
+        v10_map_end(&t, endp, 330, NULL, NULL);
+        end_data = t.count == 2 && t.msgs[1].argc == 7 ? &t.msgs[1].args[2] : NULL;
+        CHECK(end_data && map_get_v(end_data, "tms") && map_get_v(end_data, "tms")->type == KRUNKER_NIL,
+              "v10_map_end (free-for-all) keeps tms null");
+        v10_out_free(&t);
     }
 
     // ---- v10.0.3 KrunkScript entities and live objects (v10_map_entity_record): the handlers' arguments (:261720-261742)

@@ -279,14 +279,25 @@ typedef struct {
     int32_t uid;
     char name[100];
 } V10PlayerName;
-/* The end table (endData.ed) of a free-for-all round from its END (NetEndPacket: board rows and rewards): one row per board
- * entry in the default endStats order (sid, name, score, kills, deaths, reward, game.deob.js:18307): [uid, [name, name], score,
- * kills, deaths, reward]. names: the SPAWN names (an unknown uid gets ""). */
+/* The end table (endData.ed) of a free-for-all round from its END (NetEndPacket: board rows and rewards), flat as endGame
+ * pushes it (deob-10.0.7.js:195246-195264): per board entry the default endStats columns (sid, name, score, kills, deaths,
+ * reward, :18314) as uid, [name, name], score, kills, deaths and the formatted reward ("<span style='color:#F8C55C'>+N</span>
+ * KR", "NONE" for 0, :18316-18318). names: the SPAWN names (an unknown uid gets ""). */
 KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n);
 /* NET 51 MODE_END (NetModeEndPacket): 1 when it is a free-for-all's, 0 another mode's, -1 malformed. */
 int v10_mode_end_is_ffa(const uint8_t *p, size_t n);
-/* END with the player's medals (NULL: none) and the end table (NULL: an empty ed, the table comes with a MODE_END). */
+/* END with the player's medals (NULL: none) and the end table (NULL: an empty ed, the table comes with a MODE_END).
+ * endData.tms is null: getTeamScores' value outside a team mode, the only end table the bridge maps (free-for-all). */
 void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed);
+/* The same with endData.tms given (NULL: null), for a team mode's end (v10_end_team_scores). */
+void v10_map_end_tms(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed,
+                     const KrunkerValue *tms);
+/* endData.tms of the round's MODE_END (NetModeEndPacket: mode_id, winner_team, team_scores[2] @8): getTeamScores(true)
+ * after endGame counted the round's winner. teams: the mode's `teams`. round_wins: teamRoundWins before this end by team
+ * id (MODE_TEAMS entries, the last rds / MODE_SYNC_V7 numbers), NULL while it is null. flags: teamFlags[1] and [2] (the
+ * "ufi" texts), NULL or "" none. NIL for a malformed MODE_END. */
+KrunkerValue v10_end_team_scores(V10Out *o, const uint8_t *mode_end, size_t n, int teams, const int32_t *round_wins,
+                                 const char *const *flags);
 /* NET 9 CHAT (NetChatPacket, 325 bytes): a v3 chat line as "ch" (mapChat). */
 void v10_map_chat(V10Out *o, const uint8_t *p, size_t n);
 /* ---- INPUT (q): the official client's input window -> NET_PACKET_INPUT_BATCH (111). Mirrors decodeInputBatch and
@@ -349,10 +360,37 @@ void v10_map_game_announcement(V10Out *o, const uint8_t *body, size_t n);
 
 /* ---- SKINS, SPAWN, the add record, START, LEADERBOARD, LEADER_STATS */
 
+/* What a player's worn copies carry, kept by uid for its next add record: SKINS (or V2 with each worn skin's paint,
+ * patch 6: paint_color 0xRRGGBB and paint_shader per slot, primary, secondary, melee, -1 none), then the EXTs the server
+ * sends with it (net.c net_send_skins / net_send_spawn): NET_EXT_KN_SKIN_COPIES (each weapon slot's counter base, -1
+ * none, seed, 0 none, and wear, -1 none), NET_EXT_KN_SKIN_META (the wear, serial and name tag of each worn store index)
+ * and NET_EXT_KN_SKIN_STYLES (each worn cosmetic's style and wear). A zeroed struct carries none of them (the has_
+ * flags and counts are 0). */
 typedef struct V10Skins {
     int32_t uid, primary, secondary, melee;
+    int32_t paint_color[3], paint_shader[3];
+    int has_paint;
+    int has_copies;
+    int32_t base[3], seed[3];
+    float copy_wear[3];
+    int meta_count;
+    NetSkinMetaEntry meta[NET_SKIN_META_MAX];
+    int style_count;
+    int32_t style_skin[NET_SKIN_STYLES_MAX], style[NET_SKIN_STYLES_MAX];
+    float style_wear[NET_SKIN_STYLES_MAX];
 } V10Skins;
 int v10_parse_skins(const uint8_t *p, size_t n, V10Skins *out);
+/* The bodies (after the EXT subtype) of NET_EXT_KN_SKIN_COPIES (28 or 40 bytes), NET_EXT_KN_SKIN_META (440) and
+ * NET_EXT_KN_SKIN_STYLES (72 or 104): *uid is the player, and only that packet's fields of `into` are written (the rest
+ * stay as the SKINS left them). 0 for a malformed body (nothing written). */
+int v10_parse_skin_copies(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into);
+int v10_parse_skin_meta(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into);
+int v10_parse_skin_styles(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into);
+/* The stat a counter skin counts (store.skins attach type 1: attach.stat when it is one of SKIN_STATS, else "kills",
+ * deob-10.0.7.js:106684-106686), NULL for another skin. Read once from <KRUNKNATIVE_ASSETS_DIR or assets>/skins.json, or from
+ * the text given to v10_counter_stats_load first. */
+const char *v10_counter_stat(int32_t skin);
+int v10_counter_stats_load(const char *json, size_t n); /* 1 read, 0 not JSON (no counter skins then) */
 
 typedef struct V10Spawn {
     int32_t uid;
@@ -371,7 +409,9 @@ typedef struct V10Spawn {
 } V10Spawn;
 int v10_parse_spawn(const uint8_t *p, size_t n, V10Spawn *out);
 
-/* The add record (ADD_PLAYERS "0" arguments: the record, then 1). socket_id is our own player's id. */
+/* The add record (ADD_PLAYERS "0" arguments: the record, then 1). socket_id is our own player's id. A weapon slot (skins
+ * [12] and melee [19]) or a cosmetic slot whose copy carries anything is v10's {i: index, m}, m with the copy's paint /
+ * paintShader, seed, wear, serial, name, style and counter stat; the plain index otherwise. */
 KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *spawn, const V10Skins *skins, int has_skins, const char *socket_id);
 /* START_GAME ("start") for our own spawn: gameTimer, team, spectating, challMode, moveLock, 1, null, classIndex. */
 void v10_start_game(const V10Spawn *spawn, int32_t game_timer, int32_t chall_mode, KrunkerValue out[8]);

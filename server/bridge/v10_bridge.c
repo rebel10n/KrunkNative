@@ -1195,8 +1195,48 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     /* SKINS come right before the SPAWN they belong to: kept for it, nothing sent */
     if (s->init_sent && type == NET_PACKET_SKINS) {
         V10Skins skins;
+        memset(&skins, 0, sizeof skins);
         if (!v10_parse_skins(p, n, &skins)) { stop_at(s, "SKINS", "malformed"); return; }
         set_skins(s, &skins);
+        return;
+    }
+    /* the worn copies' data the server sends after a SKINS and before the SPAWN (net.c net_send_skins / net_send_spawn,
+     * and again after a mid-match inventory refresh): kept with that uid's SKINS for its next add record, which carries
+     * them in each slot's {i, m} (v10_player_add_record) */
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 &&
+        (rd_u16(p, 0) == NET_EXT_KN_SKIN_COPIES || rd_u16(p, 0) == NET_EXT_KN_SKIN_META || rd_u16(p, 0) == NET_EXT_KN_SKIN_STYLES)) {
+        const uint16_t sub = rd_u16(p, 0);
+        V10Skins got;
+        memset(&got, 0, sizeof got);
+        int32_t uid = 0;
+        const int ok = sub == NET_EXT_KN_SKIN_COPIES ? v10_parse_skin_copies(p + 2, n - 2, &uid, &got)
+                     : sub == NET_EXT_KN_SKIN_META   ? v10_parse_skin_meta(p + 2, n - 2, &uid, &got)
+                                                     : v10_parse_skin_styles(p + 2, n - 2, &uid, &got);
+        if (!ok) { stop_at(s, native_name(type, p, n), "malformed"); return; }
+        if (skins_index(s, uid) < 0) { /* no SKINS for the uid yet: its weapon slots wear none */
+            V10Skins none;
+            memset(&none, 0, sizeof none);
+            none.uid = uid;
+            none.primary = none.secondary = none.melee = -1;
+            set_skins(s, &none);
+        }
+        const int at = skins_index(s, uid);
+        if (at < 0) { close_session(s, 1011, "out of memory", 0); return; }
+        V10Skins *e = &s->skins[at].skins;
+        if (sub == NET_EXT_KN_SKIN_COPIES) {
+            e->has_copies = got.has_copies;
+            memcpy(e->base, got.base, sizeof e->base);
+            memcpy(e->seed, got.seed, sizeof e->seed);
+            memcpy(e->copy_wear, got.copy_wear, sizeof e->copy_wear);
+        } else if (sub == NET_EXT_KN_SKIN_META) {
+            e->meta_count = got.meta_count;
+            memcpy(e->meta, got.meta, sizeof e->meta);
+        } else {
+            e->style_count = got.style_count;
+            memcpy(e->style_skin, got.style_skin, sizeof e->style_skin);
+            memcpy(e->style, got.style, sizeof e->style);
+            memcpy(e->style_wear, got.style_wear, sizeof e->style_wear);
+        }
         return;
     }
     /* SPAWN: a living player's add record (ADD_PLAYERS "0", one player) and, for our own spawn, the start */
