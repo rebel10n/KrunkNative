@@ -279,9 +279,10 @@ typedef struct {
     int32_t uid;
     char name[100];
 } V10PlayerName;
-/* The end table (endData.ed) of a free-for-all round from its END (NetEndPacket: board rows and rewards): one row per board
- * entry in the default endStats order (sid, name, score, kills, deaths, reward, game.deob.js:18307): [uid, [name, name], score,
- * kills, deaths, reward]. names: the SPAWN names (an unknown uid gets ""). */
+/* The end table (endData.ed) of a free-for-all round from its END (NetEndPacket: board rows and rewards), flat as endGame
+ * pushes it (deob-10.0.7.js:195246-195264): per board entry the default endStats columns (sid, name, score, kills, deaths,
+ * reward, :18314) as uid, [name, name], score, kills, deaths and the formatted reward ("<span style='color:#F8C55C'>+N</span>
+ * KR", "NONE" for 0, :18316-18318). names: the SPAWN names (an unknown uid gets ""). */
 KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n);
 /* NET 51 MODE_END (NetModeEndPacket): 1 when it is a free-for-all's, 0 another mode's, -1 malformed. */
 int v10_mode_end_is_ffa(const uint8_t *p, size_t n);

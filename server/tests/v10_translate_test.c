@@ -1630,14 +1630,14 @@ int main(void) {
         {
             const KrunkerValue cell1[2] = {S("Ann"), S("Ann")};
             const KrunkerValue cell2[2] = {S(""), S("")};
-            const KrunkerValue row1[6] = {N(3), KRUNKER_V_ARRAY(cell1, 2), N(40), N(5), N(1), N(25)};
-            const KrunkerValue row2[6] = {N(7), KRUNKER_V_ARRAY(cell2, 2), N(12), N(2), N(9), N(0)};
-            const KrunkerValue rows[2] = {KRUNKER_V_ARRAY(row1, 6), KRUNKER_V_ARRAY(row2, 6)};
-            const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(rows, 2),
+            /* flat, one value per endStats column (deob-10.0.7.js:195246-195264), the reward through its formatter (:18316-18318) */
+            const KrunkerValue cells[12] = {N(3), KRUNKER_V_ARRAY(cell1, 2), N(40), N(5), N(1), S("<span style='color:#F8C55C'>+25</span> KR"),
+                                            N(7), KRUNKER_V_ARRAY(cell2, 2), N(12), N(2), N(9), S("NONE")};
+            const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(cells, 12),
                                          S("mdls"), KRUNKER_V_ARRAY(NULL, 0)};
             const KrunkerValue end_data = KRUNKER_V_MAP(kv, 5);
             const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
-            CHECK(msg_is(&e, 0, "end", want, 7), "END with MODE_END's table: endData.ed = [uid, [name, name], score, kills, deaths, reward] rows");
+            CHECK(msg_is(&e, 0, "end", want, 7), "END with MODE_END's table: endData.ed is flat, uid, [name, name], score, kills, deaths, formatted reward");
         }
         v10_out_free(&e);
     }

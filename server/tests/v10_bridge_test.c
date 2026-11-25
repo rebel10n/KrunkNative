@@ -1239,10 +1239,12 @@ int main(void) {
         KrunkerFrame ef;
         CHECK(client_get("end", 0, &ef) && ef.argc == 7 && ef.args[2].type == KRUNKER_MAP, "one end [0, true, endData, ...] after END and MODE_END");
         const KrunkerValue *ed = ef.argc == 7 ? map_get(&ef.args[2], "ed") : NULL;
-        CHECK(ed && ed->type == KRUNKER_ARRAY && ed->len == 1 && ed->u.items[0].type == KRUNKER_ARRAY && ed->u.items[0].len == 6 &&
-              vequal(&ed->u.items[0].u.items[0], &KRUNKER_V_NUM(1)) && vequal(&ed->u.items[0].u.items[2], &KRUNKER_V_NUM(9)) &&
-              is_str(&ed->u.items[0].u.items[1].u.items[0], "me") && vequal(&ed->u.items[0].u.items[5], &KRUNKER_V_NUM(4)),
-              "endData.ed: the row [uid, [name, name], score, kills, deaths, reward] with our name from the spawn");
+        /* flat, stride endStats.length (deob-10.0.7.js:195246-195264, read at :226741-226790) */
+        CHECK(ed && ed->type == KRUNKER_ARRAY && ed->len == 6 && vequal(&ed->u.items[0], &KRUNKER_V_NUM(1)) &&
+                  ed->u.items[1].type == KRUNKER_ARRAY && ed->u.items[1].len == 2 && is_str(&ed->u.items[1].u.items[0], "me") &&
+                  vequal(&ed->u.items[2], &KRUNKER_V_NUM(9)) && vequal(&ed->u.items[3], &KRUNKER_V_NUM(2)) &&
+                  vequal(&ed->u.items[4], &KRUNKER_V_NUM(3)) && is_str(&ed->u.items[5], "<span style='color:#F8C55C'>+4</span> KR"),
+              "endData.ed: flat uid, [name, name], score, kills, deaths, formatted reward, with our name from the spawn");
         if (ef.argc) krunker_frame_free(&ef);
         CHECK(v10_bridge_untranslated("END") == 0 && v10_bridge_untranslated("MODE_END") == 0, "END and MODE_END are translated, the session goes on");
     }

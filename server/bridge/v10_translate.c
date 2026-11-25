@@ -2202,10 +2202,15 @@ int v10_mode_end_is_ffa(const uint8_t *p, size_t n) {
     return (int32_t)(p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24) == MODE_ID_FFA;
 }
 
+/* endGame builds ed flat (deob-10.0.7.js:195246-195264): for each player, one value per endStats column, the name column
+ * as [getName, getName], every other one through statForm or the shared formatters (:18315-18355), so the reward reads
+ * "<span style='color:#F8C55C'>+N</span> KR" or "NONE". The client walks it in steps of endStats.length (:226741-226790);
+ * one array per player put the whole row where it reads the sid. */
 KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n) {
     if (n != END_SIZE) return KRUNKER_V_ARRAY(NULL, 0);
     const size_t rc = p[END_BOARD_AT] < LEADER_MAX ? p[END_BOARD_AT] : LEADER_MAX;
-    KrunkerValue *rows = rc ? v10_arena(o, rc * sizeof *rows) : NULL;
+    KrunkerValue *cells = rc ? v10_arena(o, rc * 6 * sizeof *cells) : NULL;
+    if (rc && !cells) return KRUNKER_V_ARRAY(NULL, 0);
     for (size_t i = 0; i < rc; i++) {
         const size_t at = END_BOARD_AT + 1 + i * 16;
         const int32_t uid = rd_i32(p, at);
@@ -2214,11 +2219,19 @@ KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10Player
             if (names[k].uid == uid) { name = names[k].name; break; }
         const KrunkerValue text = v10_text(o, (const uint8_t *)name, strlen(name));
         const KrunkerValue cell_items[2] = {text, text};
-        const KrunkerValue row[6] = {KRUNKER_V_NUM(uid), v10_arr(o, cell_items, 2), KRUNKER_V_NUM(rd_i32(p, at + 4)),
-                                     KRUNKER_V_NUM(rd_i32(p, at + 8)), KRUNKER_V_NUM(rd_i32(p, at + 12)), KRUNKER_V_NUM(rd_i32(p, END_REWARDS_AT + 4 * i))};
-        rows[i] = v10_arr(o, row, 6);
+        const int32_t reward = rd_i32(p, END_REWARDS_AT + 4 * i);
+        char kr[64];
+        if (reward) snprintf(kr, sizeof kr, "<span style='color:#F8C55C'>+%d</span> KR", (int)reward);
+        else snprintf(kr, sizeof kr, "NONE");
+        KrunkerValue *c = &cells[i * 6];
+        c[0] = KRUNKER_V_NUM(uid);
+        c[1] = v10_arr(o, cell_items, 2);
+        c[2] = KRUNKER_V_NUM(rd_i32(p, at + 4));
+        c[3] = KRUNKER_V_NUM(rd_i32(p, at + 8));
+        c[4] = KRUNKER_V_NUM(rd_i32(p, at + 12));
+        c[5] = v10_text(o, (const uint8_t *)kr, strlen(kr));
     }
-    return v10_arr(o, rows, (uint32_t)rc);
+    return v10_arr(o, cells, (uint32_t)(rc * 6));
 }
 
 #define MODE_END_TEAMS 6 /* MODE_TEAMS: team ids 0..5 (sdm multiTeam) */
