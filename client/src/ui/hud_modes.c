@@ -102,6 +102,19 @@ static const NetOfficialEndRowPacket *end_row(const int uid) {
         if (g_end_rows[i].uid == uid) return &g_end_rows[i];
     return NULL;
 }
+// NET_EXT_KN_END_STATS of our own server (before its MODE_END): the "dmg" cells, by uid
+static NetEndStatsPacket g_end_stats;
+
+void hud_modes_end_extras(const NetEndStatsPacket *stats) {
+    g_end_stats = *stats;
+    if (g_end_stats.count > NET_END_STATS_MAX) g_end_stats.count = NET_END_STATS_MAX;
+}
+
+static const NetEndStatsEntry *end_extras(const int uid) {
+    for (int i = 0; i < g_end_stats.count; i++)
+        if (g_end_stats.entries[i].uid == uid) return &g_end_stats.entries[i];
+    return NULL;
+}
 static char g_scenario_message[NET_GAME_MESSAGE_SIZE]; // --render-scenario modeHud.gameMessage
 static int g_scenario_message_set;
 
@@ -590,6 +603,7 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
 void hud_modes_reset(Client *client) {
     mode_world_unload(client);
     g_end_row_count = 0;
+    memset(&g_end_stats, 0, sizeof(g_end_stats));
     const int chat_seq = g_modes.chat_seq;
     memset(&g_modes, 0, sizeof(g_modes));
     g_modes.mode_id = -1;
@@ -787,6 +801,14 @@ static void hud_modes_end_value(const Player *player, const NetModeEndEntry *ent
     else if (!strcmp(stat, "zombies")) snprintf(out, size, "%d", player->mode.ai_kills); // endForm.zombies: aiKills (NET_PACKET_ZOMBIE_STATS)
     else if (!strcmp(stat, "downs")) snprintf(out, size, "%u", player->deaths);         // endForm.downs: deaths
     else if (!strcmp(stat, "rounds")) snprintf(out, size, "%d", player->mode.rounds);   // player.rounds (NET_PACKET_ZOMBIE_STATS)
+    else if (!strcmp(stat, "dmg")) {                                      // endForm.dmg: round(dmgDealt) (NET_EXT_KN_END_STATS)
+        const NetEndStatsEntry *extras = end_extras(player->uid);
+        snprintf(out, size, "%d", extras ? (int) extras->dmg : 0);
+    }
+    else if (!strcmp(stat, "candy")) {                                    // Candy Heist statForm.candy (deob-10.0.7.js:106114-106118)
+        const int score = player->score;
+        snprintf(out, size, "%d", score >= 0 ? score / 10 : -((-score + 9) / 10));
+    }
     else if (!strcmp(stat, "time")) {                                     // endForm.time: timer || "DNF"
         const int tenths = s ? s[NET_MODE_STAT_TIME] - 1 : -1;            // UTILS.getTime(lastTimer, showMS): Race / Raid
         if (tenths < 0) snprintf(out, size, "DNF");

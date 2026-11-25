@@ -17,6 +17,7 @@
 #include "krunker_maps.h" /* KRUNKER_OFFICIAL_MAPS: the official list an official map's INIT is numbered by */
 #include "progression.h" /* g_progression_medals: the names of the END_MEDALS medals */
 #include "network_sounds.h" /* config.networkSounds: the ids "s" / "so" / "sso" carry */
+#include "mode_columns.h" /* each mode's teams, endStats and leaderStats */
 #include "shared.h" /* NET_PROTOCOL_MAJOR / MINOR / PATCH, NET_HELLO_RULESETS: the HELLO this bridge sends */
 
 #include <ctype.h>
@@ -1757,8 +1758,22 @@ void v10_start_game(const V10Spawn *spawn, int32_t game_timer, int32_t chall_mod
 
 /* NetLeaderboardPacket: uint8 count, then 16 rows of int32 uid, score, kills, deaths (257 bytes). */
 #define LEADERBOARD_SIZE (1 + 16 * 16)
-#define LEADER_MAX 16
+#define LEADER_MAX 16 /* syncLeaders' cap: 16 rows (deob-10.0.7.js:176118) */
 #define MODE_ID_FFA 0
+
+static size_t key_count(const char *const *keys) {
+    size_t n = 0;
+    while (keys && keys[n]) n++;
+    return n;
+}
+
+/* 1: the mode's leaderStats are the LEADERBOARD's own columns (score, kills, deaths), so "7" goes out with it. 0: other
+ * columns, carried by the LEADER_STATS that follows. -1: a mode id the table does not have. */
+static int leaders_are_board(int32_t mode_index) {
+    const char *const *keys = mode_columns_leader_stats(mode_index);
+    if (!keys) return -1;
+    return key_count(keys) == 3 && !strcmp(keys[0], "score") && !strcmp(keys[1], "kills") && !strcmp(keys[2], "deaths");
+}
 
 void v10_map_leaderboard(V10Out *o, const uint8_t *p, size_t n, int32_t mode_index, int32_t *rows, size_t *count) {
     *count = 0;
@@ -1766,39 +1781,77 @@ void v10_map_leaderboard(V10Out *o, const uint8_t *p, size_t n, int32_t mode_ind
         o->stop = "malformed";
         return;
     }
-    if (mode_index != MODE_ID_FFA) {
-        o->stop = "leaderStats of this mode are not verified (only Free for All)";
+    const int board = leaders_are_board(mode_index);
+    if (board < 0) {
+        o->stop = "a mode with no leaderStats in the mode table";
         return;
     }
     const size_t rc = p[0] < LEADER_MAX ? p[0] : LEADER_MAX;
-    KrunkerValue *vals = rc ? v10_arena(o, rc * 4 * sizeof *vals) : NULL;
+    KrunkerValue *vals = rc && board ? v10_arena(o, rc * 4 * sizeof *vals) : NULL;
     for (size_t i = 0; i < rc; i++) {
         const size_t at = 1 + i * 16;
         for (int k = 0; k < 4; k++) {
             const int32_t v = rd_i32(p, at + 4 * (size_t)k);
             rows[i * 4 + k] = v;
-            vals[i * 4 + k] = KRUNKER_V_NUM(v);
+            if (vals) vals[i * 4 + k] = KRUNKER_V_NUM(v);
         }
     }
     *count = rc * 4;
-    v10_push(o, V10_IN_UPDATE_LEADERS, (KrunkerValue[]){v10_arr(o, vals, (uint32_t)(rc * 4))}, 1);
+    if (board) v10_push(o, V10_IN_UPDATE_LEADERS, (KrunkerValue[]){v10_arr(o, vals, (uint32_t)(rc * 4))}, 1);
 }
 
 /* NetLeaderStatsPacket: uint8 count, uint8 stat_count, int32 uid[16], int32 values[16][4] (322 bytes). */
 #define LEADER_STATS_SIZE (2 + 16 * 4 + 16 * 4 * 4)
 
-const char *v10_check_leader_stats(const uint8_t *p, size_t n, const int32_t *rows, size_t row_count, int have_rows) {
-    if (n != LEADER_STATS_SIZE) return "malformed";
-    if (!have_rows) return "no LEADERBOARD before it";
-    const size_t count = p[0] < LEADER_MAX ? p[0] : LEADER_MAX;
-    if (p[1] != 3) return "leaderStats of this mode are not verified (only Free for All)";
-    if (row_count != count * 4) return "the rows differ from the LEADERBOARD";
-    for (size_t i = 0; i < count; i++) {
-        if (rd_i32(p, 2 + i * 4) != rows[i * 4]) return "the rows differ from the LEADERBOARD";
-        for (size_t k = 0; k < 3; k++)
-            if (rd_i32(p, 2 + 16 * 4 + (i * 4 + k) * 4) != rows[i * 4 + 1 + k]) return "the values differ from the LEADERBOARD";
+void v10_map_leader_stats(V10Out *o, const uint8_t *p, size_t n, int32_t mode_index, const int32_t *rows, size_t row_count,
+                          int have_rows) {
+    if (n != LEADER_STATS_SIZE) {
+        o->stop = "malformed";
+        return;
     }
-    return NULL;
+    if (!have_rows) {
+        o->stop = "no LEADERBOARD before it";
+        return;
+    }
+    const int board = leaders_are_board(mode_index);
+    if (board < 0) {
+        o->stop = "a mode with no leaderStats in the mode table";
+        return;
+    }
+    const size_t keys = key_count(mode_columns_leader_stats(mode_index));
+    const size_t count = p[0] < LEADER_MAX ? p[0] : LEADER_MAX;
+    if (p[1] != keys) {
+        o->stop = "the columns differ from the mode's leaderStats";
+        return;
+    }
+    if (row_count != count * 4) {
+        o->stop = "the rows differ from the LEADERBOARD";
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (rd_i32(p, 2 + i * 4) != rows[i * 4]) {
+            o->stop = "the rows differ from the LEADERBOARD";
+            return;
+        }
+    }
+    if (board) { /* the rows it repeats went out as "7" with the LEADERBOARD */
+        for (size_t i = 0; i < count; i++)
+            for (size_t k = 0; k < 3; k++)
+                if (rd_i32(p, 2 + 16 * 4 + (i * 4 + k) * 4) != rows[i * 4 + 1 + k]) {
+                    o->stop = "the values differ from the LEADERBOARD";
+                    return;
+                }
+        return;
+    }
+    /* syncLeaders (deob-10.0.7.js:176107-176130): flat [sid, then one value per leaderStats key], each key through statForm
+     * or the shared formatters, which the server applied (mode_leader_stat_value) */
+    KrunkerValue *vals = count ? v10_arena(o, count * (keys + 1) * sizeof *vals) : NULL;
+    if (count && !vals) return;
+    for (size_t i = 0; i < count; i++) {
+        vals[i * (keys + 1)] = KRUNKER_V_NUM(rows[i * 4]);
+        for (size_t k = 0; k < keys; k++) vals[i * (keys + 1) + 1 + k] = KRUNKER_V_NUM(rd_i32(p, 2 + 16 * 4 + (i * 4 + k) * 4));
+    }
+    v10_push(o, V10_IN_UPDATE_LEADERS, (KrunkerValue[]){v10_arr(o, vals, (uint32_t)(count * (keys + 1)))}, 1);
 }
 
 /* ---- MODE_SYNC_V7, DOM_UPDATE, AI_SYNC_V7, AI_ADD_V7, STATE, CHAT_V7 */
@@ -2202,39 +2255,164 @@ int v10_mode_end_is_ffa(const uint8_t *p, size_t n) {
     return (int32_t)(p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24) == MODE_ID_FFA;
 }
 
-/* endGame builds ed flat (deob-10.0.7.js:195246-195264): for each player, one value per endStats column, the name column
- * as [getName, getName], every other one through statForm or the shared formatters (:18315-18355), so the reward reads
- * "<span style='color:#F8C55C'>+N</span> KR" or "NONE". The client walks it in steps of endStats.length (:226741-226790);
- * one array per player put the whole row where it reads the sid. */
-KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n) {
+#define MODE_END_SIZE ((size_t)sizeof(NetModeEndPacket))
+#define MODE_END_WINNER_AT offsetof(NetModeEndPacket, winner_team)
+#define MODE_END_COUNT_AT offsetof(NetModeEndPacket, count)
+#define MODE_END_ENTRIES_AT offsetof(NetModeEndPacket, entries)
+#define MODE_END_ENTRY_SIZE sizeof(NetModeEndEntry)
+#define MODE_END_STATS_AT offsetof(NetModeEndEntry, stats)
+
+int v10_mode_end_id(const uint8_t *p, size_t n) {
+    if (n != MODE_END_SIZE) return -1;
+    const int32_t id = rd_i32(p, MODE_END_MODE_AT);
+    return mode_columns(id) ? id : -1;
+}
+
+/* MODE_END's stats of `uid` (NULL: none) */
+static const uint8_t *mode_end_entry(const uint8_t *mode_end, int32_t uid) {
+    if (!mode_end) return NULL;
+    const size_t count = mode_end[MODE_END_COUNT_AT] < NET_MODE_END_MAX ? mode_end[MODE_END_COUNT_AT] : NET_MODE_END_MAX;
+    for (size_t i = 0; i < count; i++) {
+        const uint8_t *e = mode_end + MODE_END_ENTRIES_AT + i * MODE_END_ENTRY_SIZE;
+        if (rd_i32(e, 0) == uid) return e;
+    }
+    return NULL;
+}
+
+static int32_t mode_end_stat(const uint8_t *entry, NetModeStat stat) {
+    return entry ? rd_i16(entry, MODE_END_STATS_AT + 2 * (size_t)stat) : 0;
+}
+
+/* the MODE_END stat a column reads as is, -1 none: the statForm of obj / objective (objectiveScore || 0), weapon (weaponTier),
+ * infected / found (convs), confirms and denies (|| 0), and the plain player fields (deob-10.0.7.js:18315-18355) */
+static int end_column_stat(const char *col) {
+    static const struct {
+        const char *col;
+        NetModeStat stat;
+    } k[] = {
+        {"obj", NET_MODE_STAT_OBJECTIVE},   {"objective", NET_MODE_STAT_OBJECTIVE}, {"caps", NET_MODE_STAT_CAPS},
+        {"confirms", NET_MODE_STAT_CONFIRMS}, {"denies", NET_MODE_STAT_DENIES},   {"weapon", NET_MODE_STAT_WEAPON_TIER},
+        {"setbacks", NET_MODE_STAT_SETBACKS}, {"melees", NET_MODE_STAT_MELEES},   {"infected", NET_MODE_STAT_CONVS},
+        {"found", NET_MODE_STAT_CONVS},       {"lives", NET_MODE_STAT_LIVES},     {"assists", NET_MODE_STAT_ASSISTS},
+        {"deposits", NET_MODE_STAT_DEPOSITS}, {"pickups", NET_MODE_STAT_PICKUPS},
+    };
+    for (size_t i = 0; i < sizeof k / sizeof k[0]; i++)
+        if (!strcmp(k[i].col, col)) return (int)k[i].stat;
+    return -1;
+}
+
+/* statForm.time: player.timer || "DNF" (deob-10.0.7.js:18319-18321). Race's timer is the round clock text when the player
+ * finished (lastTimer, getTime with showMS: "MM:SS.t", :104868); Raid's onEnd gives getTime(ms) with no fraction ("MM:SS",
+ * :105253; getTime :23928-23944). MODE_END's time is the tenths + 1, 0 for none. */
+static KrunkerValue end_time_cell(V10Out *o, int32_t mode_id, int32_t stat) {
+    char text[32];
+    if (stat <= 0) return KRUNKER_V_STR("DNF");
+    const int tenths = stat - 1;
+    if (mode_id == MODE_ID_RAID) snprintf(text, sizeof text, "%02d:%02d", tenths / 600 % 60, tenths / 10 % 60);
+    else snprintf(text, sizeof text, "%02d:%02d.%d", tenths / 600 % 60, tenths / 10 % 60, tenths % 10);
+    return v10_text(o, (const uint8_t *)text, strlen(text));
+}
+
+/* endGame builds ed flat (deob-10.0.7.js:195246-195264): for each player in the end order, one value per endStats column,
+ * the name column as [getName, getName], every other one through statForm or the shared formatters (:18315-18355), the
+ * reward as "<span style='color:#F8C55C'>+N</span> KR" or "NONE", [that, skinReward] when a skin dropped (:195262). The
+ * client walks it in steps of endStats.length (:226741-226790). The END's board is the end order (game_end_round) and
+ * MODE_END lists the same players. */
+KrunkerValue v10_end_table(V10Out *o, const uint8_t *p, size_t n, const uint8_t *mode_end, size_t mode_end_n,
+                           const V10PlayerName *names, size_t name_n, const V10EndExtras *extras) {
     if (n != END_SIZE) return KRUNKER_V_ARRAY(NULL, 0);
+    int32_t mode_id = MODE_ID_FFA;
+    if (mode_end) {
+        mode_id = v10_mode_end_id(mode_end, mode_end_n);
+        if (mode_id < 0) {
+            o->stop = "MODE_END: malformed or a mode the table does not have";
+            return KRUNKER_V_NIL;
+        }
+    }
+    const char *const *cols = mode_columns_end_stats(mode_id);
+    const size_t nc = key_count(cols);
     const size_t rc = p[END_BOARD_AT] < LEADER_MAX ? p[END_BOARD_AT] : LEADER_MAX;
-    KrunkerValue *cells = rc ? v10_arena(o, rc * 6 * sizeof *cells) : NULL;
+    KrunkerValue *cells = rc ? v10_arena(o, rc * nc * sizeof *cells) : NULL;
     if (rc && !cells) return KRUNKER_V_ARRAY(NULL, 0);
+    const NetEndStatsPacket *stats = extras ? extras->stats : NULL;
+    const NetZombieStatsPacket *zombies = extras ? extras->zombies : NULL;
     for (size_t i = 0; i < rc; i++) {
         const size_t at = END_BOARD_AT + 1 + i * 16;
         const int32_t uid = rd_i32(p, at);
-        const char *name = "";
-        for (size_t k = 0; k < name_n; k++)
-            if (names[k].uid == uid) { name = names[k].name; break; }
-        const KrunkerValue text = v10_text(o, (const uint8_t *)name, strlen(name));
-        const KrunkerValue cell_items[2] = {text, text};
-        const int32_t reward = rd_i32(p, END_REWARDS_AT + 4 * i);
-        char kr[64];
-        if (reward) snprintf(kr, sizeof kr, "<span style='color:#F8C55C'>+%d</span> KR", (int)reward);
-        else snprintf(kr, sizeof kr, "NONE");
-        KrunkerValue *c = &cells[i * 6];
-        c[0] = KRUNKER_V_NUM(uid);
-        c[1] = v10_arr(o, cell_items, 2);
-        c[2] = KRUNKER_V_NUM(rd_i32(p, at + 4));
-        c[3] = KRUNKER_V_NUM(rd_i32(p, at + 8));
-        c[4] = KRUNKER_V_NUM(rd_i32(p, at + 12));
-        c[5] = v10_text(o, (const uint8_t *)kr, strlen(kr));
+        const int32_t score = rd_i32(p, at + 4), kills = rd_i32(p, at + 8), deaths = rd_i32(p, at + 12);
+        const uint8_t *entry = mode_end_entry(mode_end, uid);
+        const NetEndStatsEntry *extra = NULL;
+        for (int k = 0; stats && k < stats->count && k < NET_END_STATS_MAX; k++)
+            if (stats->entries[k].uid == uid) { extra = &stats->entries[k]; break; }
+        const NetZombieStatsEntry *zombie = NULL;
+        for (int k = 0; zombies && k < zombies->count && k < NET_MODE_END_MAX; k++)
+            if (zombies->entries[k].uid == uid) { zombie = &zombies->entries[k]; break; }
+        int32_t skin = 0;
+        for (size_t k = 0; extras && k < extras->skin_n; k++)
+            if (extras->skins[k].uid == uid) skin = extras->skins[k].skin;
+        KrunkerValue *c = &cells[i * nc];
+        for (size_t col = 0; col < nc; col++) {
+            const char *key = cols[col];
+            const int stat = end_column_stat(key);
+            if (!strcmp(key, "sid")) c[col] = KRUNKER_V_NUM(uid);
+            else if (!strcmp(key, "name")) {
+                const char *name = "";
+                for (size_t k = 0; k < name_n; k++)
+                    if (names[k].uid == uid) { name = names[k].name; break; }
+                const KrunkerValue text = v10_text(o, (const uint8_t *)name, strlen(name));
+                const KrunkerValue cell_items[2] = {text, text};
+                c[col] = v10_arr(o, cell_items, 2);
+            } else if (!strcmp(key, "score") || !strcmp(key, "points")) c[col] = KRUNKER_V_NUM(score); /* points: score || 0 */
+            else if (!strcmp(key, "kills")) c[col] = KRUNKER_V_NUM(kills);
+            else if (!strcmp(key, "deaths") || !strcmp(key, "downs")) c[col] = KRUNKER_V_NUM(deaths); /* downs: deaths || 0 */
+            else if (!strcmp(key, "reward")) {
+                const int32_t reward = rd_i32(p, END_REWARDS_AT + 4 * i);
+                char kr[64];
+                if (reward) snprintf(kr, sizeof kr, "<span style='color:#F8C55C'>+%d</span> KR", (int)reward);
+                else snprintf(kr, sizeof kr, "NONE");
+                const KrunkerValue text = v10_text(o, (const uint8_t *)kr, strlen(kr));
+                const KrunkerValue pair[2] = {text, KRUNKER_V_NUM(skin)};
+                c[col] = skin > 0 ? v10_arr(o, pair, 2) : text;
+            } else if (!strcmp(key, "time")) c[col] = end_time_cell(o, mode_id, mode_end_stat(entry, NET_MODE_STAT_TIME));
+            else if (!strcmp(key, "dmg")) c[col] = KRUNKER_V_NUM(extra ? extra->dmg : 0); /* Math.round(dmgDealt || 0) */
+            else if (!strcmp(key, "zombies")) c[col] = KRUNKER_V_NUM(zombie ? zombie->zombies : 0); /* aiKills || 0 */
+            else if (!strcmp(key, "rounds")) c[col] = KRUNKER_V_NUM(zombie ? zombie->rounds : 0);
+            else if (!strcmp(key, "candy")) c[col] = KRUNKER_V_NUM(floor(score / 10.0)); /* statForm.candy (:106114-106118) */
+            else if (stat >= 0) c[col] = KRUNKER_V_NUM(mode_end_stat(entry, (NetModeStat)stat));
+            else {
+                o->stop = "an endStats column the bridge does not map";
+                return KRUNKER_V_NIL;
+            }
+        }
     }
-    return v10_arr(o, cells, (uint32_t)(rc * 6));
+    return v10_arr(o, cells, (uint32_t)(rc * nc));
+}
+
+KrunkerValue v10_end_rows(V10Out *o, const uint8_t *p, size_t n, const V10PlayerName *names, size_t name_n) {
+    return v10_end_table(o, p, n, NULL, 0, names, name_n, NULL);
 }
 
 #define MODE_END_TEAMS 6 /* MODE_TEAMS: team ids 0..5 (sdm multiTeam) */
+
+/* getTeamScores(true) from NET_EXT_KN_END_STATS: [team, n, teamFlags[team] || null] for each key of teamRoundWins when it is
+ * set, else of teamScores (deob-10.0.7.js:193975-193985), the round already counted (mode_end_game, :195051-195053). A
+ * teamRoundWins key exists once its team won a round, so it is a count above 0; the teamScores keys are the bitmask. JS lists
+ * integer keys in ascending order. */
+KrunkerValue v10_end_team_scores_ext(V10Out *o, const NetEndStatsPacket *stats, int teams) {
+    if (!teams || !stats) return KRUNKER_V_NIL;
+    KrunkerValue rows[MODE_END_TEAMS];
+    uint32_t count = 0;
+    for (int t = 0; t < MODE_END_TEAMS; t++) {
+        const int key = stats->has_round_wins ? stats->team_round_wins[t] > 0 : (stats->team_score_keys >> t) & 1;
+        if (!key) continue;
+        const int32_t v = stats->has_round_wins ? stats->team_round_wins[t] : stats->team_scores[t];
+        const size_t flag_len = strnlen(stats->team_flags[t], sizeof stats->team_flags[t]);
+        const KrunkerValue row[3] = {KRUNKER_V_NUM(t), KRUNKER_V_NUM(v),
+                                     flag_len ? v10_text(o, (const uint8_t *)stats->team_flags[t], flag_len) : KRUNKER_V_NIL};
+        rows[count++] = v10_arr(o, row, 3);
+    }
+    return v10_arr(o, rows, count);
+}
 
 /* getTeamScores(true) at the match end: endData.tms = getTeamScores(!0) (deob-10.0.7.js:195217). getTeamScores
  * (:193975-193985) is null outside a team mode; else [team, n, teamFlags[team] || null] for each key of teamRoundWins when
@@ -2273,6 +2451,11 @@ void v10_map_end(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket
 
 void v10_map_end_tms(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed,
                      const KrunkerValue *tms) {
+    v10_map_end_team(o, p, n, medals, ed, tms, -1);
+}
+
+void v10_map_end_team(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPacket *medals, const KrunkerValue *ed,
+                      const KrunkerValue *tms, int32_t winner_team) {
     if (n != END_SIZE) {
         o->stop = "malformed";
         return;
@@ -2289,6 +2472,9 @@ void v10_map_end_tms(V10Out *o, const uint8_t *p, size_t n, const NetEndMedalsPa
     const KrunkerValue vals[5] = {v10_obj(o, NULL, NULL, 0), v10_arr(o, NULL, 0), tms ? *tms : KRUNKER_V_NIL, ed ? *ed : v10_arr(o, NULL, 0),
                                   v10_arr(o, mdls, mdls_n)};
     const KrunkerValue end_data = v10_obj(o, keys, vals, 5);
-    const KrunkerValue args[7] = {KRUNKER_V_NUM(0), did_win, end_data, KRUNKER_V_NUM(-1), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL};
+    /* arg 3: mode.teams && (winner || endIndex == 3) ? winner : -1 (deob-10.0.7.js:195273): the winning team, -1 outside a
+     * team mode and for no winner (MODE_END's winner_team is -1 then) */
+    const KrunkerValue args[7] = {KRUNKER_V_NUM(0), did_win, end_data, KRUNKER_V_NUM(winner_team > 0 ? winner_team : -1), KRUNKER_V_NUM(0),
+                                  KRUNKER_V_NIL, KRUNKER_V_NIL};
     v10_push(o, "end", args, 7);
 }

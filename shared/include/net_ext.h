@@ -218,6 +218,8 @@ typedef enum {
     // 0x81D0 v10.0.7 item copies in a match: the end table's skin reward and the worn copies' wear, serial and name tag
     NET_EXT_KN_END_REWARD = 0x81D0, // S -> C NetEndRewardPacket, one per player endGame dropped a skin for, ahead of the END
     NET_EXT_KN_SKIN_META = 0x81D1,  // S -> C NetSkinMetaPacket, with a player's SKINS: its worn copies' m (client/include/skin_meta.h)
+    // 0x81E0 v10.0.7 endGame's end data that NET_PACKET_MODE_END has no room for (shared/src/modes/mode_net.c mode_send_end)
+    NET_EXT_KN_END_STATS = 0x81E0, // S -> C NetEndStatsPacket, right before the round's NET_PACKET_MODE_END
 } NetExtSubtype;
 
 // NET_EXT_KN_CREATION_INFO (S -> C): which published map this game server hosts, so the menu can offer a vote on it and
@@ -964,6 +966,29 @@ typedef struct {
     int32_t skin; // the store.skins index endGame dropped, > 0
 } NetEndRewardPacket;
 _Static_assert(sizeof(NetEndRewardPacket) == 12, "NetEndRewardPacket: the wire body is 12 bytes");
+
+// NET_EXT_KN_END_STATS (S -> C, every EXT peer, right before NET_PACKET_MODE_END, whose fixed layout old clients check by
+// size): what v10.0.7's endGame puts in endData that MODE_END lacks. endData.tms is getTeamScores(true) (deob-10.0.7.js:195217,
+// :193975-193985): [team, n, teamFlags[team] || null] for each key of teamRoundWins when it is set, else of teamScores. A
+// teamScores key exists from the team's first giveTeamScore on, even when its score is back at 0 (:193971-193974), so the keys
+// travel as a bitmask. The end table's "dmg" column (Hardpoint :104771, Raid :105229) is Math.round(dmgDealt || 0) (:18343-18345).
+#define NET_END_STATS_TEAMS 6 // MODE_TEAMS: team ids 0..5 (sdm multiTeam)
+#define NET_END_STATS_MAX 16  // NET_MODE_END_MAX: the rows of the MODE_END that follows
+typedef struct {
+    int32_t uid;
+    int32_t dmg;
+} NetEndStatsEntry;
+typedef struct {
+    int32_t team_scores[NET_END_STATS_TEAMS];     // teamScores[t]
+    int32_t team_round_wins[NET_END_STATS_TEAMS]; // teamRoundWins[t], this end's round counted (mode_end_game)
+    char team_flags[NET_END_STATS_TEAMS][32];     // teamFlags[t] ("AT BASE", "AWAY", a carrier), "" = none
+    uint8_t team_score_keys;                      // bit t: teamScores has key t
+    uint8_t has_round_wins;                       // teamRoundWins != null
+    uint8_t count;
+    uint8_t reserved;
+    NetEndStatsEntry entries[NET_END_STATS_MAX];  // in MODE_END's order
+} NetEndStatsPacket;
+_Static_assert(sizeof(NetEndStatsPacket) == 372, "NetEndStatsPacket: the wire body is 372 bytes");
 
 // NET_EXT_KN_SKIN_META (S -> C, every EXT peer): v10.0.7's worn items carry their copy's metadata m (getPlayerAddData's
 // skin entries {i, id, m}, read by iïîìîîï, deob-10.0.7.js:24335-24337): generateMeshData draws m.wear with the item's

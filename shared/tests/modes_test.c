@@ -14,6 +14,7 @@
 #include <game_config.h> // game_config_host: a hosted game keeps its winner
 #include <map_catalog.h> // the official Raid maps (Khepri, Bastion)
 #include <net_ext.h>     // gmsg's countdown (NET_EXT_KN_OFFICIAL_COUNTDOWN)
+#include <mode_columns.h> // the bridge's copy of teams / endStats / leaderStats
 #include <ai.h>          // game_ai_free: the Raid maps' AIs
 #include <math.h>
 #include <stdio.h>
@@ -256,6 +257,32 @@ static void test_table(void) {
     CHECK(mode_config(MODE_ID_SDM)->multi_team == 4 && mode_config(MODE_ID_DEPO)->tag_hold_limit == 20 && mode_config(MODE_ID_DEPOFFA)->obj_score == 75, "sdm / depo keys");
     CHECK(mode_config(MODE_ID_CHS)->grav_mlt == 0.92f && mode_config(MODE_ID_IMP)->expl_mlt == 5.0f && mode_config(MODE_ID_AON)->has_ammo_limit &&
           mode_config(MODE_ID_AON)->ammo_limit == 0 && mode_config(MODE_ID_CLAS)->no_melee, "modifier keys");
+
+    // the v10 bridge links mode_columns.c, not modes.c: both tables come from the same MODE_COLUMNS_* initializers, and a mode
+    // whose copy drifted would give official clients the wrong end table or leaderboard
+    int column_drift = 0;
+    for (int i = 0; i < MODE_COUNT; i++) {
+        const GameModeConfig *config = mode_config(i);
+        const ModeColumns *columns = mode_columns(i);
+        if (!config) {
+            column_drift += columns != NULL;
+            continue;
+        }
+        if (!columns || columns->teams != config->teams || columns->multi_team != config->multi_team ||
+            columns->end_stats != config->end_stats || columns->leader_stats != config->leader_stats) {
+            printf("  mode %d: mode_columns differs from g_mode_configs\n", i);
+            column_drift++;
+        }
+    }
+    CHECK(column_drift == 0 && !mode_columns(-1) && !mode_columns(MODE_COUNT), "mode_columns matches g_mode_configs for every mode (%d differ)",
+          column_drift);
+    const char *const *point = mode_columns_end_stats(MODE_ID_POINT);
+    const char *const *ffa_cols = mode_columns_end_stats(MODE_ID_FFA);
+    CHECK(point && !strcmp(point[5], "obj") && !strcmp(point[6], "dmg") && !strcmp(point[7], "reward") && !point[8] && ffa_cols &&
+              !strcmp(ffa_cols[5], "reward") && !ffa_cols[6] && !strcmp(mode_columns_leader_stats(MODE_ID_FFA)[0], "score"),
+          "Hardpoint's endStats end obj, dmg, reward (deob-10.0.7.js:104771); FFA has config.endStats (:18314) and [\"score\"]");
+    CHECK(mode_columns(MODE_ID_TDM)->teams && !mode_columns(MODE_ID_FFA)->teams && mode_columns(MODE_ID_SDM)->multi_team == 4,
+          "mode_columns: TDM has teams, FFA none, SDM 4 teams");
 }
 
 // ------------------------------------------------------------------ FFA / TDM
@@ -363,6 +390,53 @@ static void test_tdm(Game *game) {
     game->round_timer = 0.1f;
     tick(game, 0.5f, 0.25f);
     CHECK(end_result_for(1) == -1 && end_result_for(2) == -1, "0 - 0 is a draw");
+}
+
+// NET_EXT_KN_END_STATS, sent right before MODE_END: every team's score and whether giveTeamScore made its key
+// (deob-10.0.7.js:193971-193985), and each player's dmg cell, Math.round(dmgDealt || 0) (:18343-18345)
+static void test_end_stats(Game *game) {
+    printf("Running end stats test...\n");
+    start_mode(game, MODE_ID_TDM);
+    Player *a = add_player(game, 1, 0);
+    Player *b = add_player(game, 2, 0);
+    kill(b, a, 1);
+    a->damage_dealt = 123.6f;
+    game->round_timer = 0.1f;
+    tick(game, 0.5f, 0.25f);
+    CHECK(ended(game), "end stats: the round is over");
+    int ext_at = -1, end_at = -1;
+    NetEndStatsPacket stats;
+    memset(&stats, 0, sizeof(stats));
+    for (int i = 0; i < g_sent_count; i++) {
+        uint16_t subtype = 0, length = 0;
+        const uint8_t *body = NULL;
+        if (g_sent[i].type == NET_PACKET_MODE_END && end_at < 0) end_at = i;
+        if (g_sent[i].type != NET_PACKET_EXT || !net_ext_unpack(g_sent[i].payload, g_sent[i].length, &subtype, &body, &length)) continue;
+        if (subtype != NET_EXT_KN_END_STATS || length != sizeof(stats) || g_sent[i].uid != NET_TARGET_ALL) continue;
+        memcpy(&stats, body, sizeof(stats));
+        ext_at = i;
+    }
+    CHECK(ext_at >= 0 && end_at > ext_at, "END_STATS goes to everyone right before MODE_END (%d, %d)", ext_at, end_at);
+    CHECK(stats.team_score_keys == 1u << a->team && stats.team_scores[a->team] == mode_team_score(game, a->team) &&
+              stats.team_scores[a->team] > 0 && stats.team_scores[b->team] == 0,
+          "only the scoring team has a key (keys %#x, team %d)", stats.team_score_keys, a->team);
+    int dmg_a = -1, dmg_b = -1;
+    for (int i = 0; i < stats.count; i++) {
+        if (stats.entries[i].uid == 1) dmg_a = stats.entries[i].dmg;
+        if (stats.entries[i].uid == 2) dmg_b = stats.entries[i].dmg;
+    }
+    CHECK(stats.count == 2 && dmg_a == 124 && dmg_b == 0, "dmg per player, rounded (%d, %d)", dmg_a, dmg_b);
+
+    // a new round clears the keys, as init's teamScores = {} (:193666)
+    start_mode(game, MODE_ID_TDM);
+    CHECK(game->mode->team_score_keys == 0, "a new round has no team keys");
+
+    // Candy Heist's statForm.candy: Math.floor(score / 10) (:106114-106118)
+    Player *c = add_player(game, 3, 0);
+    c->score = 125;
+    const int candy = mode_leader_stat_value(c, "candy");
+    c->score = -15;
+    CHECK(candy == 12 && mode_leader_stat_value(c, "candy") == -2, "candy is floor(score / 10) (%d)", candy);
 }
 
 // ------------------------------------------------------------------ objectives
@@ -2311,6 +2385,7 @@ int main(void) {
     test_table();
     test_ffa(&game);
     test_tdm(&game);
+    test_end_stats(&game);
     test_swap_team(&game);
     test_point(&game);
     test_king(&game);

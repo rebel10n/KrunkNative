@@ -293,7 +293,36 @@ static int16_t clamp16(const int value) {
     return (int16_t) (value > 32767 ? 32767 : value < -32768 ? -32768 : value);
 }
 
+_Static_assert(NET_END_STATS_TEAMS == MODE_TEAMS && NET_END_STATS_MAX == NET_MODE_END_MAX &&
+               sizeof(((NetEndStatsPacket *) 0)->team_flags[0]) == MODE_TEXT_SIZE, "NetEndStatsPacket follows the mode tables");
+
+// NET_EXT_KN_END_STATS: the end data MODE_END has no field for (net_ext.h), its rows in the same order
+static void mode_send_end_stats(Game *game, Player **sorted, const size_t count) {
+    const GameMode *mode = game->mode;
+    NetEndStatsPacket body;
+    memset(&body, 0, sizeof(body));
+    for (int t = 0; t < MODE_TEAMS; t++) {
+        body.team_scores[t] = mode->team_scores[t];
+        body.team_round_wins[t] = mode->team_round_wins[t];
+        copy_text(body.team_flags[t], sizeof(body.team_flags[t]), mode->flag_info[t]);
+    }
+    body.team_score_keys = (uint8_t) (mode->team_score_keys & ((1u << MODE_TEAMS) - 1));
+    body.has_round_wins = mode->has_round_wins;
+    for (size_t i = 0; i < count && body.count < NET_END_STATS_MAX; i++) {
+        const Player *player = sorted[i];
+        if (!player) continue;
+        NetEndStatsEntry *entry = &body.entries[body.count++];
+        entry->uid = player->uid;
+        entry->dmg = mode_leader_stat_value(player, "dmg");
+    }
+    uint8_t buffer[NET_EXT_HEADER_SIZE + sizeof(body)];
+    const uint16_t n = net_ext_pack(buffer, sizeof(buffer), NET_EXT_KN_END_STATS, &body, sizeof(body));
+    if (n) game_send(game, NET_TARGET_ALL, NET_PACKET_EXT, buffer, n);
+}
+
 void mode_send_end(Game *game, const ModeWinner winner, Player **sorted, const size_t count) {
+    mode_send_end_stats(game, sorted, count);
+
     NetModeEndPacket packet;
     memset(&packet, 0, sizeof(packet));
 
@@ -342,6 +371,9 @@ int mode_leader_stat_value(const Player *player, const char *key) {
     if (!strcmp(key, "lives")) return m->lives;
     if (!strcmp(key, "zombies")) return m->ai_kills;                              // endForm.zombies: aiKills || 0
     if (!strcmp(key, "dmg")) return (int) lroundf(player->damage_dealt);         // endForm.dmg: round(dmgDealt || 0)
+    // Candy Heist's statForm.candy: Math.floor((score || 0) / 10) (deob-10.0.7.js:106114-106118); without it the
+    // leaderboard's only column read 0
+    if (!strcmp(key, "candy")) return (int) floor(player->score / 10.0);
     return 0;
 }
 

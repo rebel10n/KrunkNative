@@ -39,6 +39,8 @@ int  hud_modes_end_winner_team(void); // MODE_END's winner team: 1 / 2, -1 none 
 // An official "end" row (net_ext.h NET_EXT_KN_OFFICIAL_END_ROW, before its END): #endTable prints it
 // even when its player already left (its name cell), and its "dmg" cell.
 void hud_modes_end_row(const NetOfficialEndRowPacket*);
+// NET_EXT_KN_END_STATS of our own server, right before its MODE_END: the "dmg" cells #endTable prints.
+void hud_modes_end_extras(const NetEndStatsPacket*);
 
 // WP-D: the v7.1.4 mode state the HUD shows (ui-v7 owns the DOM): team scores 1..5 (sdm), rounds
 // ("rds"), lockout ("lkt"), the local KR Tags ("krt"), the last "tx" / "Switching Sides" popup.

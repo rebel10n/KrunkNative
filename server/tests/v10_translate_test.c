@@ -952,9 +952,79 @@ int main(void) {
         v10_map_leaderboard(&o, board, 257, 0, rows, &row_count);
         MSG_IS(&o, 0, "7", ARR(N(1), N(40), N(3), N(1), N(2), N(10), N(0), N(4)));
         v10_out_free(&o);
+        /* LEADER_STATS after it repeats the rows (stat_count 3, score / kills / deaths): checked, nothing sent */
+        uint8_t stats[322];
+        memset(stats, 0, sizeof stats);
+        stats[0] = 2;
+        stats[1] = 3;
+        put_i32(stats, 2, 1); put_i32(stats, 6, 2);
+        const int32_t skd[8] = {40, 3, 1, 0, 10, 0, 4, 0}; /* values[16][4]: 3 used per row */
+        for (int i = 0; i < 8; i++) put_i32(stats, 66 + (size_t)i * 4, skd[i]);
+        v10_out_init(&o);
+        v10_map_leader_stats(&o, stats, 322, 0, rows, row_count, 1);
+        CHECK(!o.stop && o.count == 0, "a free-for-all's LEADER_STATS repeats the \"7\" rows: no message");
+        v10_out_free(&o);
+        put_i32(stats, 66, 41);
+        v10_out_init(&o);
+        v10_map_leader_stats(&o, stats, 322, 0, rows, row_count, 1);
+        CHECK(stop_has(&o, "values differ"), "a LEADER_STATS value other than the LEADERBOARD's stops");
+        v10_out_free(&o);
+
+        /* Team Deathmatch's leaderStats are score, kills, deaths too (deob-10.0.7.js:106137): "7" from the board */
         v10_out_init(&o);
         v10_map_leaderboard(&o, board, 257, 1, rows, &row_count);
-        CHECK(stop_has(&o, "Free for All"), "another mode's leaderboard stops");
+        MSG_IS(&o, 0, "7", ARR(N(1), N(40), N(3), N(1), N(2), N(10), N(0), N(4)));
+        v10_out_free(&o);
+
+        /* Capture the Flag: leaderStats ["caps", "score"] (:106145). The LEADERBOARD only keeps the rows, the LEADER_STATS
+         * that follows is "7" [sid, caps, score] per row */
+        v10_out_init(&o);
+        v10_map_leaderboard(&o, board, 257, 3, rows, &row_count);
+        CHECK(!o.stop && o.count == 0 && row_count == 8, "a CTF LEADERBOARD keeps its rows and sends nothing");
+        v10_out_free(&o);
+        memset(stats, 0, sizeof stats);
+        stats[0] = 2;
+        stats[1] = 2;
+        put_i32(stats, 2, 1); put_i32(stats, 6, 2);
+        put_i32(stats, 66, 3); put_i32(stats, 70, 40); /* uid 1: 3 caps, 40 score */
+        put_i32(stats, 82, 0); put_i32(stats, 86, 10); /* uid 2: 0 caps, 10 score */
+        v10_out_init(&o);
+        v10_map_leader_stats(&o, stats, 322, 3, rows, row_count, 1);
+        MSG_IS(&o, 0, "7", ARR(N(1), N(3), N(40), N(2), N(0), N(10)));
+        v10_out_free(&o);
+        stats[1] = 3;
+        v10_out_init(&o);
+        v10_map_leader_stats(&o, stats, 322, 3, rows, row_count, 1);
+        CHECK(stop_has(&o, "columns differ"), "a LEADER_STATS whose column count is not the mode's leaderStats stops");
+        v10_out_free(&o);
+        stats[1] = 2;
+        put_i32(stats, 6, 9);
+        v10_out_init(&o);
+        v10_map_leader_stats(&o, stats, 322, 3, rows, row_count, 1);
+        CHECK(stop_has(&o, "rows differ"), "a LEADER_STATS of other players stops");
+        v10_out_free(&o);
+        v10_out_init(&o);
+        v10_map_leader_stats(&o, stats, 322, 3, rows, row_count, 0);
+        CHECK(stop_has(&o, "no LEADERBOARD"), "a LEADER_STATS with no LEADERBOARD before it stops");
+        v10_out_free(&o);
+
+        /* Zombies: four columns, points, zombies, downs, dmg (:105897) */
+        memset(stats, 0, sizeof stats);
+        stats[0] = 1;
+        stats[1] = 4;
+        put_i32(stats, 2, 1);
+        put_i32(stats, 66, 300); put_i32(stats, 70, 25); put_i32(stats, 74, 2); put_i32(stats, 78, 1880);
+        board[0] = 1;
+        v10_out_init(&o);
+        v10_map_leaderboard(&o, board, 257, 35, rows, &row_count);
+        v10_map_leader_stats(&o, stats, 322, 35, rows, row_count, 1);
+        CHECK(o.count == 1, "Zombies: one \"7\", from the LEADER_STATS");
+        MSG_IS(&o, 0, "7", ARR(N(1), N(300), N(25), N(2), N(1880)));
+        v10_out_free(&o);
+
+        v10_out_init(&o);
+        v10_map_leaderboard(&o, board, 257, 99, rows, &row_count);
+        CHECK(stop_has(&o, "no leaderStats"), "a mode id outside the mode table stops");
         v10_out_free(&o);
     }
 
@@ -1693,6 +1763,160 @@ int main(void) {
         end_data = t.count == 2 && t.msgs[1].argc == 7 ? &t.msgs[1].args[2] : NULL;
         CHECK(end_data && map_get_v(end_data, "tms") && map_get_v(end_data, "tms")->type == KRUNKER_NIL,
               "v10_map_end (free-for-all) keeps tms null");
+        v10_out_free(&t);
+    }
+
+    /* ---- the end table of every mode (v10_end_table): one cell per endStats column of MODE_END's mode, through statForm or
+     * the shared formatters (deob-10.0.7.js:18315-18355, :195246-195264), with NET_EXT_KN_END_STATS, ZOMBIE_STATS and
+     * END_REWARD for what END and MODE_END lack */
+    {
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;
+        endp[9] = 2; /* board: {uid 3, score 125, kills 5, deaths 1}, {uid 7, score -15, kills 2, deaths 9} */
+        put_i32(endp, 10, 3); put_i32(endp, 14, 125); put_i32(endp, 18, 5); put_i32(endp, 22, 1);
+        put_i32(endp, 26, 7); put_i32(endp, 30, -15); put_i32(endp, 34, 2); put_i32(endp, 38, 9);
+        put_i32(endp, 266, 25); put_i32(endp, 270, 0);
+        V10PlayerName names[2];
+        memset(names, 0, sizeof names);
+        names[0].uid = 3;
+        snprintf(names[0].name, sizeof names[0].name, "Ann");
+        names[1].uid = 7;
+        snprintf(names[1].name, sizeof names[1].name, "Bo");
+        NetModeEndPacket me;
+        memset(&me, 0, sizeof me);
+        me.winner_team = -1;
+        me.count = 2;
+        me.entries[0].uid = 7; /* MODE_END is looked up by uid, its order is the END's */
+        me.entries[1].uid = 3;
+        me.entries[1].stats[NET_MODE_STAT_OBJECTIVE] = 44;
+        me.entries[0].stats[NET_MODE_STAT_OBJECTIVE] = 6;
+        uint8_t mend[sizeof me];
+        NetEndStatsPacket es;
+        memset(&es, 0, sizeof es);
+        es.count = 2;
+        es.entries[0] = (NetEndStatsEntry){3, 1234};
+        es.entries[1] = (NetEndStatsEntry){7, 88};
+        const V10EndSkin skins[1] = {{3, 412}};
+        V10EndExtras extras = {.stats = &es, .skins = skins, .skin_n = 1};
+        const KrunkerValue a = ARR(S("Ann"), S("Ann")), b = ARR(S("Bo"), S("Bo"));
+
+        /* Hardpoint (2): sid, name, score, kills, deaths, obj, dmg, reward (:104771); a dropped skin makes the reward cell
+         * [text, skin] (:195262) */
+        me.mode_id = 2;
+        memcpy(mend, &me, sizeof me);
+        V10Out e;
+        v10_out_init(&e);
+        CHECK(v10_mode_end_id(mend, sizeof mend) == 2 && v10_mode_end_id(mend, sizeof mend - 1) == -1, "MODE_END's mode id, -1 for a short one");
+        KrunkerValue ed = v10_end_table(&e, endp, 330, mend, sizeof mend, names, 2, &extras);
+        KrunkerValue want = ARR(N(3), a, N(125), N(5), N(1), N(44), N(1234), ARR(S("<span style='color:#F8C55C'>+25</span> KR"), N(412)),
+                                N(7), b, N(-15), N(2), N(9), N(6), N(88), S("NONE"));
+        CHECK(!e.stop && vequal(&ed, &want), "Hardpoint's end table: obj from MODE_END, dmg from END_STATS, [reward, skin]");
+        extras.stats = NULL;
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, names, 2, &extras);
+        CHECK(ed.type == KRUNKER_ARRAY && ed.len == 16 && vequal(&ed.u.items[6], &KRUNKER_V_NUM(0)),
+              "an older server's end (no END_STATS): dmg reads round(dmgDealt || 0) of nothing, 0");
+        extras.stats = &es;
+
+        /* Race (7): sid, name, score, time (:104848); timer is the clock text with tenths, or "DNF" (:18319-18321) */
+        me.mode_id = 7;
+        me.entries[1].stats[NET_MODE_STAT_TIME] = 623 + 1; /* 62.3 s */
+        me.entries[0].stats[NET_MODE_STAT_TIME] = 0;
+        memcpy(mend, &me, sizeof me);
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, names, 2, &extras);
+        want = ARR(N(3), a, N(125), S("01:02.3"), N(7), b, N(-15), S("DNF"));
+        CHECK(vequal(&ed, &want), "Race's end table: time \"01:02.3\" and \"DNF\"");
+        /* Raid (23): sid, name, score, time, dmg, reward (:105229); onEnd's timer is getTime(ms), no tenths (:105253) */
+        me.mode_id = 23;
+        memcpy(mend, &me, sizeof me);
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, names, 2, &extras);
+        want = ARR(N(3), a, N(125), S("01:02"), N(1234), ARR(S("<span style='color:#F8C55C'>+25</span> KR"), N(412)),
+                   N(7), b, N(-15), S("DNF"), N(88), S("NONE"));
+        CHECK(vequal(&ed, &want), "Raid's end table: time \"01:02\", dmg");
+
+        /* Zombies (35): sid, name, score, zombies, downs, rounds, reward (:105896); zombies / rounds come in ZOMBIE_STATS,
+         * downs is deaths (:18349-18351) */
+        NetZombieStatsPacket zs;
+        memset(&zs, 0, sizeof zs);
+        zs.count = 2;
+        zs.entries[0] = (NetZombieStatsEntry){7, 4, 2};
+        zs.entries[1] = (NetZombieStatsEntry){3, 31, 6};
+        extras.zombies = &zs;
+        extras.skin_n = 0;
+        me.mode_id = 35;
+        memcpy(mend, &me, sizeof me);
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, names, 2, &extras);
+        want = ARR(N(3), a, N(125), N(31), N(1), N(6), S("<span style='color:#F8C55C'>+25</span> KR"),
+                   N(7), b, N(-15), N(4), N(9), N(2), S("NONE"));
+        CHECK(vequal(&ed, &want), "Zombies' end table: zombies and rounds from ZOMBIE_STATS, downs = deaths");
+
+        /* Candy Heist (37): sid, name, candy, reward; statForm.candy = Math.floor(score / 10) (:106112-106118) */
+        me.mode_id = 37;
+        memcpy(mend, &me, sizeof me);
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, names, 2, &extras);
+        want = ARR(N(3), a, N(12), S("<span style='color:#F8C55C'>+25</span> KR"), N(7), b, N(-2), S("NONE"));
+        CHECK(vequal(&ed, &want), "Candy Heist's end table: candy = floor(score / 10), -15 -> -2");
+
+        /* Gun Game (10): sid, name, weapon, kills, melees, setbacks, reward (:106298) */
+        me.mode_id = 10;
+        me.entries[1].stats[NET_MODE_STAT_WEAPON_TIER] = 9;
+        me.entries[1].stats[NET_MODE_STAT_MELEES] = 2;
+        me.entries[1].stats[NET_MODE_STAT_SETBACKS] = 1;
+        memcpy(mend, &me, sizeof me);
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, names, 2, &extras);
+        CHECK(ed.type == KRUNKER_ARRAY && ed.len == 14 && vequal(&ed.u.items[2], &KRUNKER_V_NUM(9)) && vequal(&ed.u.items[3], &KRUNKER_V_NUM(5)) &&
+                  vequal(&ed.u.items[4], &KRUNKER_V_NUM(2)) && vequal(&ed.u.items[5], &KRUNKER_V_NUM(1)),
+              "Gun Game's end table: weapon, kills, melees, setbacks");
+
+        me.mode_id = 99;
+        memcpy(mend, &me, sizeof me);
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, names, 2, &extras);
+        CHECK(stop_has(&e, "MODE_END"), "a MODE_END of a mode outside the table stops");
+        v10_out_free(&e);
+
+        /* the FFA table from the END alone is the default endStats (:18314) */
+        v10_out_init(&e);
+        ed = v10_end_rows(&e, endp, 330, names, 2);
+        want = ARR(N(3), a, N(125), N(5), N(1), S("<span style='color:#F8C55C'>+25</span> KR"), N(7), b, N(-15), N(2), N(9), S("NONE"));
+        CHECK(vequal(&ed, &want), "v10_end_rows: the free-for-all table");
+        v10_out_free(&e);
+    }
+
+    /* ---- endData.tms from NET_EXT_KN_END_STATS (getTeamScores(true), deob-10.0.7.js:193975-193985): every team id, the
+     * teamScores keys exact (a team that scored and is back at 0 keeps its key, :193971-193974), teamFlags */
+    {
+        NetEndStatsPacket es;
+        memset(&es, 0, sizeof es);
+        es.team_scores[1] = 0;
+        es.team_scores[2] = 5;
+        es.team_score_keys = 1u << 1 | 1u << 2;
+        V10Out t;
+        v10_out_init(&t);
+        KrunkerValue got = v10_end_team_scores_ext(&t, &es, 1);
+        KrunkerValue want = ARR(ARR(N(1), N(0), NIL), ARR(N(2), N(5), NIL));
+        CHECK(vequal(&got, &want), "a draw: teamScores keys, team 1's 0 included");
+        es.team_score_keys = 1u << 2;
+        got = v10_end_team_scores_ext(&t, &es, 1);
+        want = ARR(ARR(N(2), N(5), NIL));
+        CHECK(vequal(&got, &want), "a team with no key is left out");
+        es.has_round_wins = 1;
+        es.team_round_wins[3] = 1;
+        es.team_round_wins[4] = 2;
+        snprintf(es.team_flags[4], sizeof es.team_flags[4], "AWAY");
+        got = v10_end_team_scores_ext(&t, &es, 1);
+        want = ARR(ARR(N(3), N(1), NIL), ARR(N(4), N(2), S("AWAY")));
+        CHECK(vequal(&got, &want), "Squad Deathmatch's teams 3 and 4 by round wins, teamFlags[4]");
+        got = v10_end_team_scores_ext(&t, &es, 0);
+        CHECK(got.type == KRUNKER_NIL, "outside a team mode tms is null");
+
+        /* END argument 3: mode.teams && winner ? winner : -1 (:195273) */
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;
+        v10_map_end_team(&t, endp, 330, NULL, NULL, &got, 2);
+        v10_map_end_team(&t, endp, 330, NULL, NULL, &got, -1);
+        CHECK(t.count == 2 && vequal(&t.msgs[0].args[3], &KRUNKER_V_NUM(2)) && vequal(&t.msgs[1].args[3], &KRUNKER_V_NUM(-1)),
+              "END's winner team is argument 3");
         v10_out_free(&t);
     }
 

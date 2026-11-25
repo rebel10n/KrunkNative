@@ -35,6 +35,7 @@
 #include "krunker_proto.h"
 #include "net_ext.h"
 #include "ai.h"        /* NET_PACKET_AI_SYNC_V7, NET_PACKET_AI_ADD_V7 */
+#include "mode_columns.h" /* a mode's teams: endData.tms and the winner team of its END */
 #include "shared.h"
 #include "social_v7.h" /* NET_PACKET_CHAT_V7, NET_PACKET_SOCIAL_V7 */
 #include "v10_translate.h"
@@ -130,6 +131,14 @@ typedef struct V10Session {
     size_t names_n;
     uint8_t *pending_end;        /* END (16), held for its MODE_END, which carries the end table (ed) */
     size_t pending_end_n;
+    /* the end's other data, kept for its MODE_END: NET_EXT_KN_END_STATS (between the ENDs and MODE_END), ZOMBIE_STATS and
+     * NET_EXT_KN_END_REWARD (before the ENDs) */
+    NetEndStatsPacket end_stats;
+    int has_end_stats;
+    NetZombieStatsPacket zombie_stats;
+    int has_zombie_stats;
+    V10EndSkin end_skins[NET_MODE_END_MAX];
+    size_t end_skin_n;
     size_t held_n, held_cap;
     int started;                 /* START went out: our spawn is in */
     uint8_t *own_spawn;          /* our last active SPAWN (150 B): answered again when the client enters while we are alive */
@@ -854,6 +863,18 @@ static void flush_pending_end(V10Session *s) {
     finish_out(s, &o, "END");
 }
 
+/* the end data kept for a MODE_END: used once, or dropped with the round */
+static void clear_end_extras(V10Session *s) {
+    s->has_end_stats = 0;
+    s->has_zombie_stats = 0;
+    s->end_skin_n = 0;
+}
+
+/* NET_EXT_KN_END_STATS: it comes between the ENDs and MODE_END, so it must not end the held END without its table */
+static int is_end_stats(uint8_t type, const uint8_t *p, size_t n) {
+    return type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_END_STATS;
+}
+
 /* a new round (the server's MAP_INFO after the init): the next map's config, networking, INIT and RANKED come after it
  * (net_send_init), so the client gets the same v10 "init" for that map. Those are waited for again; START comes with our
  * next active SPAWN, and the others' adds are held until then. */
@@ -867,6 +888,7 @@ static void round_restart(V10Session *s) {
     s->have_config_text = 0;
     s->network_received = 0;
     s->ranked_received = 0;
+    clear_end_extras(s);
 }
 
 /* our own SPAWN, kept while we are alive: an ENT from the client is answered with it (see the ENTER_GAME case). A dead or
@@ -932,7 +954,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
     }
     if (s->stopped) return;
     /* an END waits for the MODE_END that follows it: any other packet first ends it without an end table */
-    if (s->pending_end && type != NET_PACKET_MODE_END) flush_pending_end(s);
+    if (s->pending_end && type != NET_PACKET_MODE_END && !is_end_stats(type, p, n)) flush_pending_end(s);
     if (s->stopped) return;
     if (s->init_sent && type == NET_PACKET_MAP_INFO) round_restart(s);
     /* SYNC_PLAYER's sendVals (NET_EXT_PLAYER_MOVE_VALS, right before the RECON of the same ack): its "l" carries them */
@@ -1077,9 +1099,33 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         return;
     }
     if (s->init_sent && type == NET_PACKET_LEADER_STATS) {
-        const char *stop = v10_check_leader_stats(p, n, s->leader_rows, s->leader_count, s->leader_have);
-        if (stop) { stop_at(s, "LEADER_STATS", stop); return; }
-        return; /* the rows it repeats were sent as "7" */
+        v10_out_init(&o);
+        v10_map_leader_stats(&o, p, n, s->mode_index, s->leader_rows, s->leader_count, s->leader_have);
+        finish_out(s, &o, "LEADER_STATS"); /* "7" for a mode whose columns are not the LEADERBOARD's */
+        return;
+    }
+    /* the end data MODE_END and END lack, kept for the end table (v10_end_table) */
+    if (s->init_sent && is_end_stats(type, p, n)) {
+        if (n != 2 + sizeof s->end_stats) { stop_at(s, "EXT 0x81e0 END_STATS", "malformed"); return; }
+        memcpy(&s->end_stats, p + 2, sizeof s->end_stats);
+        s->has_end_stats = 1;
+        return;
+    }
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_END_REWARD) {
+        NetEndRewardPacket reward;
+        if (n != 2 + sizeof reward) { stop_at(s, "EXT 0x81d0 END_REWARD", "malformed"); return; }
+        memcpy(&reward, p + 2, sizeof reward);
+        size_t i = 0;
+        while (i < s->end_skin_n && s->end_skins[i].uid != reward.uid) i++;
+        if (i == s->end_skin_n && s->end_skin_n < NET_MODE_END_MAX) s->end_skin_n++;
+        if (i < s->end_skin_n) s->end_skins[i] = (V10EndSkin){reward.uid, reward.skin};
+        return;
+    }
+    if (s->init_sent && type == NET_PACKET_ZOMBIE_STATS) {
+        if (n != sizeof s->zombie_stats) { stop_at(s, "ZOMBIE_STATS", "malformed"); return; }
+        memcpy(&s->zombie_stats, p, sizeof s->zombie_stats);
+        s->has_zombie_stats = 1;
+        return;
     }
     /* AI_ADD (90) is the v3 encoding of a bot; a 1.3+ peer gets AI_ADD_V7 (162) as well: the v3 one is consumed */
     if (s->init_sent && type == NET_PACKET_STATE) {
@@ -1110,21 +1156,34 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         s->pending_end_n = n;
         return;
     }
-    /* MODE_END (51) after the round's END (NetModeEndPacket): a free-for-all's end table goes into that END (endData.ed) */
+    /* MODE_END (51) after the round's END (NetModeEndPacket): the end table (endData.ed), the team scores (endData.tms) and
+     * the winner team go into that END */
     if (s->init_sent && type == NET_PACKET_MODE_END) {
-        const int ffa = v10_mode_end_is_ffa(p, n);
-        if (ffa < 0) { stop_at(s, "MODE_END", "malformed"); return; }
-        if (!ffa) {
+        const int mode_id = v10_mode_end_id(p, n);
+        if (mode_id < 0) {
             if (s->pending_end) flush_pending_end(s);
-            stop_at(s, "MODE_END", "the team scores and end table of this mode are not mapped yet");
+            stop_at(s, "MODE_END", "malformed or a mode the table does not have");
             return;
         }
-        if (!s->pending_end) return; /* no END before it: nothing to end */
+        if (!s->pending_end) { clear_end_extras(s); return; } /* no END before it: nothing to end */
+        const ModeColumns *cols = mode_columns(mode_id);
+        const V10EndExtras extras = {
+            .stats = s->has_end_stats ? &s->end_stats : NULL,
+            .zombies = s->has_zombie_stats ? &s->zombie_stats : NULL,
+            .skins = s->end_skins,
+            .skin_n = s->end_skin_n,
+        };
         V10Out e;
         v10_out_init(&e);
-        const KrunkerValue ed = v10_end_rows(&e, s->pending_end, s->pending_end_n, s->names, s->names_n);
-        v10_map_end(&e, s->pending_end, s->pending_end_n, s->has_end_medals ? &s->end_medals : NULL, &ed);
+        const KrunkerValue ed = v10_end_table(&e, s->pending_end, s->pending_end_n, p, n, s->names, s->names_n, &extras);
+        /* getTeamScores(true): exact from END_STATS; an older server sends only MODE_END's teams 1 and 2 */
+        const KrunkerValue tms = !cols->teams ? KRUNKER_V_NIL
+                                 : s->has_end_stats ? v10_end_team_scores_ext(&e, &s->end_stats, 1)
+                                                    : v10_end_team_scores(&e, p, n, 1, NULL, NULL);
+        const int32_t winner = cols->teams ? (int32_t)(p[4] | p[5] << 8 | p[6] << 16 | (uint32_t)p[7] << 24) : -1;
+        if (!e.stop) v10_map_end_team(&e, s->pending_end, s->pending_end_n, s->has_end_medals ? &s->end_medals : NULL, &ed, &tms, winner);
         s->has_end_medals = 0;
+        clear_end_extras(s);
         free(s->pending_end);
         s->pending_end = NULL;
         s->pending_end_n = 0;
