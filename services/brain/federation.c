@@ -109,15 +109,18 @@ static void on_persist(kn_db_result *res, void *ud) {
         /* the persisted counts include these players: their seats' rows can go */
         for (size_t i = 0; i < p->settled_count; i++) federation_release(g_b, p->settled[i]);
     }
+    /* A persist still in flight at federation_shutdown answers while the brain drains or inside kn_db_free: a
+     * write or timer from it then meets a closed pool ("node delete failed: database pool closed" in
+     * brain_dev_grant_e2e's log check), so after shutdown it only clears its flag, as federation_node_gone does. */
     if (n) {
         n->persisting = 0;
-        if (n->dirty) schedule_flush();
-    } else if (kn_db_ok(res)) {
+        if (n->dirty && g_active) schedule_flush();
+    } else if (kn_db_ok(res) && g_active) {
         /* removed while the write was in flight: make sure it stays gone */
         kn_db_query_sql(g_b->db, &SQL_NODE_DELETE, KN_DB_ARGS(p->node_id, g_b->id), on_ignore, "node delete");
     }
     free(p);
-    kn_db_notify(g_b->db, "kn_mm_lobby", g_b->id);
+    if (g_active) kn_db_notify(g_b->db, "kn_mm_lobby", g_b->id);
 }
 
 static void persist_node(MmNode *n) {
