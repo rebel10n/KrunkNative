@@ -2883,6 +2883,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
     if (!scenario) ai_render_tick(client, delta); // AI meshes / orbs (ai_render.c), drawn by the world scene
     nav_overlay_frame(client); // show_navmeshes: a finished build, map switches (nav_overlay.c)
 
+    // DEFAULT.disable3D only sets the renderer's dontRender (deob-10.0.7.js:208555-208558); v10's envZones loop runs
+    // in the game update either way (:228874-228882), so a 3D-off KrunkScript game still switches the soundscape
+    if (!scenario && ks_client_3d_disabled()) map_environment_update(client->game.map, client->camera.position);
     if (!scenario && !ks_client_3d_disabled()) { // KrunkScript DEFAULT.disable3D: RENDER.disable()
         // textureAnim off: Krunker resets moving/framed textures to their first frame.
         client_tick_textures(client, client_render_settings()->texture_anim ? now : 0.0f);
