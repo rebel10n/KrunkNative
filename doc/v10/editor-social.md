@@ -181,7 +181,7 @@ v10's hub is still v7's social.js with targeted changes (S10 routes, settings an
 | Black Market `rank` / `ownSkins` requirements | CLS:3885-3910, S10:3225 | accAge / stats | **done** (v10.0.7 checkReq, deob-10.0.7.js:103566-103580: client `economy_client.c` `econ_black_market_req_met`, brain `db_economy.c` `run_blackm_buy`; 9a11bf7d) |
 | Item tooltips (`createTip`) | S10:6843-6880 | none | **done** (`social_ui.c:3135`, :3315; doc/v10/parity-audit-2026-11-20-social.md "Trade tooltips") |
 | Maps / mods / map page tabs; map leaderboard `glb` | S10:6040-6213, 3123-3162 | lists done, `glb` missing | **done** (`glb` at `social_ui.c:8679`) |
-| Feed tabs, posts, comments, likes | S10:4930-5099 | client done, brain ignores the tab | **partial** |
+| Feed tabs, posts, comments, likes | S10:4930-5099 | client done; the brain's `social_feed` (services/brain/social_gapi.c) answers the global, following, hot, giveaways and clan tabs | done |
 | Giveaway posts | S10:4930, 5077-5099 | none | **done** (`social_ui.c:2424`, typ 9 posts; `giveaway_posted` :7738, gapi POST /social/post) |
 | DMs, chat sidebar | S10:2224-2343 | done | **done** |
 | Live DM push `msg` | S10:6922 | none | **done** (`social_ui.c` `io_msg`, :5084) |
