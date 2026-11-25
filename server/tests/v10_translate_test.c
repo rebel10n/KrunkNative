@@ -1619,8 +1619,8 @@ int main(void) {
             const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(NULL, 0),
                                          S("mdls"), KRUNKER_V_ARRAY(NULL, 0)};
             const KrunkerValue end_data = KRUNKER_V_MAP(kv, 5);
-            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
-            CHECK(msg_is(&o, 0, "end", want, 7), "END -> end [0, true, endData with an empty vo, mts and mdls, -1, 0, null, null]");
+            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), NIL, NIL, NIL}; /* arg 4: endIndex, null for a clock end (:195089) */
+            CHECK(msg_is(&o, 0, "end", want, 7), "END -> end [0, true, endData with an empty vo, mts and mdls, -1, null, null, null]");
         }
         v10_out_free(&o);
         endp[0] = 0xff; /* a draw */
@@ -1672,7 +1672,7 @@ int main(void) {
             const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(NULL, 0),
                                          S("mdls"), KRUNKER_V_ARRAY(mdls, 4)};
             const KrunkerValue end_data = KRUNKER_V_MAP(kv, 5);
-            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
+            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), NIL, NIL, NIL};
             CHECK(msg_is(&m, 0, "end", want, 7), "END after END_MEDALS: endData.mdls = [name, count, ...] in overlay.medalsList order");
         }
         v10_out_free(&m);
@@ -1706,7 +1706,7 @@ int main(void) {
             const KrunkerValue kv[10] = {S("vo"), KRUNKER_V_MAP(NULL, 0), S("mts"), KRUNKER_V_ARRAY(NULL, 0), S("tms"), NIL, S("ed"), KRUNKER_V_ARRAY(cells, 12),
                                          S("mdls"), KRUNKER_V_ARRAY(NULL, 0)};
             const KrunkerValue end_data = KRUNKER_V_MAP(kv, 5);
-            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), N(0), NIL, NIL};
+            const KrunkerValue want[] = {N(0), B(1), end_data, N(-1), NIL, NIL, NIL};
             CHECK(msg_is(&e, 0, "end", want, 7), "END with MODE_END's table: endData.ed is flat, uid, [name, name], score, kills, deaths, formatted reward");
         }
         v10_out_free(&e);
@@ -1918,6 +1918,62 @@ int main(void) {
         CHECK(t.count == 2 && vequal(&t.msgs[0].args[3], &KRUNKER_V_NUM(2)) && vequal(&t.msgs[1].args[3], &KRUNKER_V_NUM(-1)),
               "END's winner team is argument 3");
         v10_out_free(&t);
+    }
+
+    // ---- a 40-player end: endData.ed has every player (deob-10.0.7.js:195244-195264, no cap); the END's board holds the
+    // first 16 and NET_EXT_KN_END_ROW the rest
+    {
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;
+        endp[9] = 16;
+        for (int i = 0; i < 16; i++) {
+            put_i32(endp, 10 + 16 * i, 100 + i);   /* uid */
+            put_i32(endp, 14 + 16 * i, 1000 - i); /* score */
+        }
+        NetEndRowPacket rows[24];
+        memset(rows, 0, sizeof rows);
+        for (int i = 0; i < 24; i++) {
+            rows[i].index = 16 + i;
+            rows[i].uid = 200 + i;
+            rows[i].score = 500 - i;
+            rows[i].kills = i;
+            rows[i].deaths = 1;
+            rows[i].reward = i == 23 ? 7 : 0;
+            rows[i].dmg = 30 + i;
+            rows[i].stats[NET_MODE_STAT_OBJECTIVE] = (int16_t)(i + 2);
+        }
+        NetModeEndPacket me;
+        memset(&me, 0, sizeof me);
+        me.winner_team = -1;
+        me.count = 16;
+        for (int i = 0; i < 16; i++) me.entries[i].uid = 100 + i;
+        uint8_t mend[sizeof me];
+        memcpy(mend, &me, sizeof me);
+        V10EndExtras extras = {.rows = rows, .row_n = 24};
+        V10Out e;
+        v10_out_init(&e);
+        KrunkerValue ed = v10_end_table(&e, endp, 330, mend, sizeof mend, NULL, 0, &extras);
+        CHECK(!e.stop && ed.type == KRUNKER_ARRAY && ed.len == 40 * 6, "a 40-player FFA end table: 40 rows of 6 (%u cells)", ed.len);
+        if (ed.len == 40 * 6) {
+            const KrunkerValue *r16 = &ed.u.items[16 * 6], *r39 = &ed.u.items[39 * 6];
+            CHECK(vequal(&ed.u.items[15 * 6], &KRUNKER_V_NUM(115)) && vequal(&r16[0], &KRUNKER_V_NUM(200)) &&
+                      vequal(&r16[2], &KRUNKER_V_NUM(500)) && vequal(&r39[0], &KRUNKER_V_NUM(223)) && vequal(&r39[3], &KRUNKER_V_NUM(23)) &&
+                      vequal(&r39[5], &S("<span style='color:#F8C55C'>+7</span> KR")) && vequal(&r16[5], &S("NONE")),
+                  "rows 16..39 follow the board in the end order with their score, kills and reward");
+        }
+        /* Hardpoint's columns for a row past 16: obj and dmg from its END_ROW */
+        me.mode_id = MODE_ID_POINT;
+        memcpy(mend, &me, sizeof me);
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, NULL, 0, &extras);
+        CHECK(ed.type == KRUNKER_ARRAY && ed.len == 40 * 8 && vequal(&ed.u.items[39 * 8 + 5], &KRUNKER_V_NUM(25)) &&
+                  vequal(&ed.u.items[39 * 8 + 6], &KRUNKER_V_NUM(53)),
+              "Hardpoint's row 39: obj and dmg from NET_EXT_KN_END_ROW");
+        /* rows past 16 continue a full board only */
+        endp[9] = 15;
+        ed = v10_end_table(&e, endp, 330, mend, sizeof mend, NULL, 0, &extras);
+        CHECK(ed.type == KRUNKER_ARRAY && ed.len == 15 * 8, "a board of 15 takes no END_ROW (%u cells)", ed.len);
+        v10_out_free(&e);
     }
 
     // ---- v10.0.3 KrunkScript entities and live objects (v10_map_entity_record): the handlers' arguments (:261720-261742)

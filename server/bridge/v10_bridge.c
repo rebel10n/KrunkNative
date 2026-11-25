@@ -131,13 +131,15 @@ typedef struct V10Session {
     size_t names_n;
     uint8_t *pending_end;        /* END (16), held for its MODE_END, which carries the end table (ed) */
     size_t pending_end_n;
-    /* the end's other data, kept for its MODE_END: NET_EXT_KN_END_STATS (between the ENDs and MODE_END), ZOMBIE_STATS and
-     * NET_EXT_KN_END_REWARD (before the ENDs) */
+    /* the end's other data, kept for its MODE_END: NET_EXT_KN_END_STATS and NET_EXT_KN_END_ROW (between the ENDs and
+     * MODE_END), ZOMBIE_STATS and NET_EXT_KN_END_REWARD (before the ENDs) */
     NetEndStatsPacket end_stats;
     int has_end_stats;
+    NetEndRowPacket end_rows[NET_END_ROWS_MAX - NET_MODE_END_MAX]; /* rows 16 .. of the end order */
+    size_t end_row_n;
     NetZombieStatsPacket zombie_stats;
     int has_zombie_stats;
-    V10EndSkin end_skins[NET_MODE_END_MAX];
+    V10EndSkin end_skins[NET_END_ROWS_MAX]; /* a skin can drop for any row of the table */
     size_t end_skin_n;
     size_t held_n, held_cap;
     int started;                 /* START went out: our spawn is in */
@@ -866,13 +868,15 @@ static void flush_pending_end(V10Session *s) {
 /* the end data kept for a MODE_END: used once, or dropped with the round */
 static void clear_end_extras(V10Session *s) {
     s->has_end_stats = 0;
+    s->end_row_n = 0;
     s->has_zombie_stats = 0;
     s->end_skin_n = 0;
 }
 
-/* NET_EXT_KN_END_STATS: it comes between the ENDs and MODE_END, so it must not end the held END without its table */
+/* NET_EXT_KN_END_STATS and NET_EXT_KN_END_ROW: they come between the ENDs and MODE_END, so they must not end the held END
+ * without its table */
 static int is_end_stats(uint8_t type, const uint8_t *p, size_t n) {
-    return type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_END_STATS;
+    return type == NET_PACKET_EXT && n >= 2 && (rd_u16(p, 0) == NET_EXT_KN_END_STATS || rd_u16(p, 0) == NET_EXT_KN_END_ROW);
 }
 
 /* a new round (the server's MAP_INFO after the init): the next map's config, networking, INIT and RANKED come after it
@@ -1105,6 +1109,18 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         return;
     }
     /* the end data MODE_END and END lack, kept for the end table (v10_end_table) */
+    if (s->init_sent && type == NET_PACKET_EXT && n >= 2 && rd_u16(p, 0) == NET_EXT_KN_END_ROW) {
+        NetEndRowPacket row;
+        if (n != 2 + sizeof row) { stop_at(s, "EXT 0x81e1 END_ROW", "malformed"); return; }
+        memcpy(&row, p + 2, sizeof row);
+        /* the rows come in the end order (mode_send_end_rows); one out of order would put a player in another's place */
+        if (row.index != (int32_t)(NET_MODE_END_MAX + s->end_row_n) || s->end_row_n >= sizeof s->end_rows / sizeof s->end_rows[0]) {
+            stop_at(s, "EXT 0x81e1 END_ROW", "a row out of the end order");
+            return;
+        }
+        s->end_rows[s->end_row_n++] = row;
+        return;
+    }
     if (s->init_sent && is_end_stats(type, p, n)) {
         if (n != 2 + sizeof s->end_stats) { stop_at(s, "EXT 0x81e0 END_STATS", "malformed"); return; }
         memcpy(&s->end_stats, p + 2, sizeof s->end_stats);
@@ -1117,7 +1133,7 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
         memcpy(&reward, p + 2, sizeof reward);
         size_t i = 0;
         while (i < s->end_skin_n && s->end_skins[i].uid != reward.uid) i++;
-        if (i == s->end_skin_n && s->end_skin_n < NET_MODE_END_MAX) s->end_skin_n++;
+        if (i == s->end_skin_n && s->end_skin_n < NET_END_ROWS_MAX) s->end_skin_n++;
         if (i < s->end_skin_n) s->end_skins[i] = (V10EndSkin){reward.uid, reward.skin};
         return;
     }
@@ -1172,6 +1188,8 @@ static void handle_native(V10Session *s, uint8_t type, const uint8_t *p, size_t 
             .zombies = s->has_zombie_stats ? &s->zombie_stats : NULL,
             .skins = s->end_skins,
             .skin_n = s->end_skin_n,
+            .rows = s->end_rows,
+            .row_n = s->end_row_n,
         };
         V10Out e;
         v10_out_init(&e);

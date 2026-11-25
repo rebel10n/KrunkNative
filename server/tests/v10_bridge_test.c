@@ -1302,6 +1302,59 @@ int main(void) {
               "a team end is translated, the session goes on");
     }
 
+    // a 40-player end (a hosted lobby's maxPS): the END's board has the first 16 rows, NET_EXT_KN_END_ROW one packet per row
+    // after them, between END_STATS and MODE_END. endData.ed has all 40 (deob-10.0.7.js:195244-195264, no cap), and END arg 4
+    // is endIndex, null for a clock end (:195089).
+    {
+        uint8_t endp[330];
+        memset(endp, 0, sizeof endp);
+        endp[0] = 1;
+        endp[9] = 16;
+        for (int i = 0; i < 16; i++) {
+            w_i32(endp, 10 + 16 * i, i == 0 ? 1 : 300 + i);
+            w_i32(endp, 14 + 16 * i, 1000 - i);
+        }
+        native_send(&g_native, NET_PACKET_END, endp, sizeof endp);
+        NetEndStatsPacket es;
+        memset(&es, 0, sizeof es);
+        uint8_t ext[2 + sizeof es];
+        w_u16(ext, 0, NET_EXT_KN_END_STATS);
+        memcpy(ext + 2, &es, sizeof es);
+        native_send(&g_native, NET_PACKET_EXT, ext, sizeof ext);
+        for (int i = 0; i < 24; i++) {
+            NetEndRowPacket row;
+            memset(&row, 0, sizeof row);
+            row.index = 16 + i;
+            row.uid = 400 + i;
+            row.score = 500 - i;
+            row.reward = i == 23 ? 3 : 0;
+            uint8_t rext[2 + sizeof row];
+            w_u16(rext, 0, NET_EXT_KN_END_ROW);
+            memcpy(rext + 2, &row, sizeof row);
+            native_send(&g_native, NET_PACKET_EXT, rext, sizeof rext);
+        }
+        NetModeEndPacket mend;
+        memset(&mend, 0, sizeof mend);
+        mend.mode_id = 0;
+        mend.winner_team = -1;
+        mend.count = 16;
+        for (int i = 0; i < 16; i++) mend.entries[i].uid = i == 0 ? 1 : 300 + i;
+        native_send(&g_native, NET_PACKET_MODE_END, (const uint8_t *)&mend, sizeof mend);
+        WAIT_FOR(client_count("end") == 3);
+        KrunkerFrame ef;
+        CHECK(client_get("end", 2, &ef) && ef.argc == 7 && ef.args[2].type == KRUNKER_MAP, "a 40-player end: one end after 24 END_ROWs");
+        if (ef.argc == 7) {
+            const KrunkerValue *ed = map_get(&ef.args[2], "ed");
+            CHECK(ed && ed->type == KRUNKER_ARRAY && ed->len == 40 * 6 && vequal(&ed->u.items[16 * 6], &KRUNKER_V_NUM(400)) &&
+                      vequal(&ed->u.items[39 * 6], &KRUNKER_V_NUM(423)) && vequal(&ed->u.items[39 * 6 + 2], &KRUNKER_V_NUM(477)) &&
+                      is_str(&ed->u.items[39 * 6 + 5], "<span style='color:#F8C55C'>+3</span> KR"),
+                  "a 40-player end: endData.ed has 40 rows, 16..39 from NET_EXT_KN_END_ROW (%u cells)", ed ? ed->len : 0);
+            CHECK(ef.args[4].type == KRUNKER_NIL, "END arg 4, endIndex: null for a clock end (deob-10.0.7.js:195089)");
+        }
+        if (ef.argc) krunker_frame_free(&ef);
+        CHECK(v10_bridge_untranslated("EXT 0x81e1") == 0 && v10_bridge_untranslated("MODE_END") == 0, "the END_ROWs are translated, the session goes on");
+    }
+
     // ENTER_GAME -> ENT: the client's "en" array becomes the KN join packet (the bytes of encodeEnter)
     KrunkerValue en_items[T_EN_LEN];
     for (int i = 0; i < T_EN_LEN; i++) en_items[i] = KRUNKER_V_NUM(-1);
