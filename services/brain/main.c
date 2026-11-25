@@ -122,8 +122,18 @@ static void modules_shutdown(Brain *b) {
     }
 }
 
-static void stop_now(kn_loop *loop, void *ud) {
-    (void) ud;
+/* The loop stops once the shutdown's own writes have gone out (federation's node delete, the last persists):
+ * kn_db_free fails whatever is still queued with "database pool closed". At load 64 on devbox the fixed 400 ms
+ * was not enough and brain_lottery_mysql's log check saw that error. 400 ms at least (close frames), 3 s at most. */
+#define STOP_MIN_MS 400
+#define STOP_MAX_MS 3000
+static uint64_t g_stop_at;
+
+static void stop_when_drained(kn_loop *loop, void *ud) {
+    const Brain *b = ud;
+    const uint64_t waited = kn_now_ms() - g_stop_at;
+    if (waited < STOP_MIN_MS) return;
+    if (b->db && kn_db_queue_len(b->db) > 0 && waited < STOP_MAX_MS) return;
     kn_loop_stop(loop);
 }
 
@@ -138,7 +148,8 @@ static void on_signal(kn_loop *loop, int signo, void *ud) {
     b->draining = 1;
     modules_shutdown(b);
     /* let close frames and the last writes go out */
-    kn_loop_add_timer(loop, 400, 0, stop_now, NULL);
+    g_stop_at = kn_now_ms();
+    kn_loop_add_timer(loop, 50, 50, stop_when_drained, b);
 }
 
 static void usage(const char *argv0) {
