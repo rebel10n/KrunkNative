@@ -740,6 +740,12 @@ static void paint_done(SocialSession *s, kn_db_result *res, void *extra) {
 
 void sh_item_paint(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
+    /* the HTTP route's paintTargets check (v10_market.c h_item_paint): the native picker's frame gets the same refusal */
+    const SkinInfo *k = acct_skin(fa_int(f, 2, -1));
+    if (k && !k->paintable) {
+        social_error(s, V10_PAINT_NOT_PAINTABLE);
+        return;
+    }
     char me[24], copy[24], item[24], paint[24], shader[24];
     me_str(s, me);
     const char *colour = fa_str(f, 4);

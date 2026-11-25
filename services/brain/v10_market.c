@@ -1386,7 +1386,8 @@ static void h_item_paint(kn_http_req *req, void *ud) {
     const int64_t paint = kn_json_int(body, "paint_item_id", -1);
     const char *color = NULL;
     int shader = -1;
-    if (!acct_skin(item)) {
+    const SkinInfo *k = acct_skin(item);
+    if (!k) {
         cJSON_Delete(body);
         v10_reply_error(req, 404, "ITEMS_INVALID_ID", "Item not found"); /* as item_known's */
         return;
@@ -1394,6 +1395,13 @@ static void h_item_paint(kn_http_req *req, void *ud) {
     if (!v10_paint_of(paint, &color, &shader)) {
         cJSON_Delete(body);
         v10_reply_error(req, 400, "ITEM_PAINT_INVALID", "That item is not a paint.");
+        return;
+    }
+    /* v10 offers Paint only on an item with paintTargets (deob-10.0.7.js:135288, 147902); the server's own refusal is
+     * not in the bundle, whose picker shows error.message (108628-108629): same code as the non-paint's */
+    if (!k->paintable) {
+        cJSON_Delete(body);
+        v10_reply_error(req, 400, "ITEM_PAINT_INVALID", V10_PAINT_NOT_PAINTABLE);
         return;
     }
     if (a.id != item && a.id < V10_COPY_ID_BASE) {

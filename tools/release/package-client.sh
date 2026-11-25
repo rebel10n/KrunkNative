@@ -11,7 +11,8 @@
 #   runtime/ui/, runtime/assets/                     the HTML menu and the git-tracked part of assets/
 #                                                    (shaders, maps, ...); the launcher downloads the rest
 #   runtime/licenses/, runtime/kn-install.json       the third-party licence texts; the updater's marker
-#   runtime/*.dll (Windows), runtime/libEGL.dylib + libGLESv2.dylib (macOS, ANGLE), runtime/lib/ and
+#   runtime/*.dll (Windows; WebView2Loader.dll when client.exe has the WebView2 captcha webview),
+#   runtime/libEGL.dylib + libGLESv2.dylib (macOS, ANGLE), runtime/lib/ and
 #   runtime/libexec/ (Linux: WebKitGTK for the captcha webview, in every Linux client)
 #   README.txt, LICENSE-NOTICE.txt, SHA256SUMS      (the checksums of every other file in the package)
 # The launcher is the entry point on every platform. Linux: tar.gz; Windows and macOS: zip. There is
@@ -27,9 +28,11 @@
 #   --assets <dir>     full package: the whole game content as assets/ too (the name gets -full)
 #   --channel <name>   kn-install.json channel (default latest; client-v* tags: the tag)
 # Env: KN_COMMIT KN_COMMIT_TIME KN_BUILD_TIME KN_PROTOCOL (tools/release/version-meta.sh); the version is Krunker's (ui/windows/versions.txt, the official changelog)
+#      KN_WEBVIEW2_DIR (windows): the staged WebView2 SDK the client was built with (make webview2; default
+#      ~/.cache/krunknative/webview2, CMake's default), for x64/WebView2Loader.dll when <bin dir> has none
 set -euo pipefail
 
-usage() { sed -n '2,36p' "$0" >&2; exit 2; }
+usage() { sed -n '2,39p' "$0" >&2; exit 2; }
 [ $# -ge 3 ] || usage
 platform="$1" bindir="$2" out="$3"
 shift 3
@@ -177,6 +180,20 @@ Homebrew's OpenSSL (Apache License 2.0). The Linux client packages bundle OpenSS
 (runtime/lib/, Apache License 2.0, https://www.openssl.org/source/license.html); polyfilled
 Linux builds link it statically and are patched by polyfill-glibc (https://github.com/corsix/polyfill-glibc, MIT, its polyfill code is license-waived).
 NOTICE
+    if [ -f "$rt/WebView2Loader.dll" ]; then
+        # the Windows captcha webview's loader (webview2_loader); the package version is the lock's
+        local wv2_version
+        wv2_version="$(webview2_lock package 2 | sed -n 's|.*/microsoft\.web\.webview2/\([^/]*\)/.*|\1|p')"
+        cat >> "$stage/LICENSE-NOTICE.txt" << NOTICE
+
+The Microsoft Edge WebView2 loader (runtime/WebView2Loader.dll, the captcha webview on Windows) is
+Microsoft's redistributable from the NuGet package Microsoft.Web.WebView2 ${wv2_version:-(see tools/webview2/webview2.lock)},
+shipped unmodified under that package's license:
+https://www.nuget.org/packages/Microsoft.Web.WebView2/${wv2_version}/License
+It needs the Microsoft Edge WebView2 Runtime, which Windows 11 includes; without the runtime the game
+runs and the captcha challenge is unavailable.
+NOTICE
+    fi
     if [ -d "$bindir/lib" ]; then
         # the Linux client's WebKitGTK (lib/, libexec/; tools/release/bundle-webkit.sh)
         cp "$bindir/webkit-bundle.txt" "$root/licenses/webkitgtk-bundle.txt"
@@ -238,6 +255,7 @@ Unpack the zip into a folder of its own." ;;
         if [ "$os" = macos ]; then echo "  BoxOffice.app        the launcher: start this"; else echo "  $launcher_name            the launcher: start this"; fi
         echo "  runtime/             the game, the dedicated server, the menu (ui/), assets/ and licences"
         echo "  runtime/$client      the game itself (runtime/$server is the dedicated server: --help lists its flags)"
+        if [ -f "$rt/WebView2Loader.dll" ]; then echo "  runtime/WebView2Loader.dll  the captcha webview's loader (Microsoft Edge WebView2; see LICENSE-NOTICE.txt)"; fi
         echo "  runtime/host-libs.txt the system libraries it loads (a desktop Linux install has them: GL, X11, zlib; OpenSSL 3 is bundled in runtime/lib/)"
         echo "  LICENSE-NOTICE.txt   third-party licences; SHA256SUMS: checksums of every file in this package"
         echo
@@ -270,12 +288,43 @@ bundle_dylibs() {
     done < <(otool -L "$target" | awk 'NR > 1 { print $1 }' | grep -Ev '^(/usr/lib/|/System/|@)' || true)
 }
 
+# webview2_lock <name> <field>: a field of tools/webview2/webview2.lock (2 source, 3 sha256); KN_WEBVIEW2_LOCK
+# names another lock file (tools/release/test-package-windows.sh)
+webview2_lock() {
+    awk -F '\t' -v n="$1" -v f="$2" '$1 == n { print $f }' "${KN_WEBVIEW2_LOCK:-$repo/tools/webview2/webview2.lock}"
+}
+
+# runtime/WebView2Loader.dll: a client.exe built with the WebView2 SDK (CMake's KN_WEBVIEW_WV2) loads the loader
+# from its own directory at run time (client/src/ui/kn_webview.c wv2_load) and shows no captcha challenge without
+# it. No import names the DLL, so the WebView2 build is known by the loader entry point it looks up. The copy must
+# be the pinned one (tools/webview2/webview2.lock): a stale or foreign DLL is refused.
+webview2_loader() {
+    grep -qaF CreateCoreWebView2EnvironmentWithOptions "$rt/$client" || return 0
+    local sdk="${KN_WEBVIEW2_DIR:-${HOME:-${USERPROFILE:-}}/.cache/krunknative/webview2}" src pinned got
+    if [ -f "$bindir/WebView2Loader.dll" ]; then
+        src="$bindir/WebView2Loader.dll"
+    elif [ -f "$sdk/x64/WebView2Loader.dll" ]; then
+        src="$sdk/x64/WebView2Loader.dll"
+    else
+        echo "$client has the WebView2 captcha webview but there is no WebView2Loader.dll in $bindir or $sdk/x64 (make webview2, KN_WEBVIEW2_DIR)" >&2
+        exit 1
+    fi
+    pinned="$(webview2_lock x64/WebView2Loader.dll 3)"
+    got="$(sha256 "$src" | awk '{ print $1 }')"
+    if [ -z "$pinned" ] || [ "$got" != "$pinned" ]; then
+        echo "$src: sha256 $got is not the pinned ${pinned:-(none)} (tools/webview2/webview2.lock)" >&2
+        exit 1
+    fi
+    install -m 0644 "$src" "$rt/WebView2Loader.dll"
+}
+
 # runtime/: the game, the server and the bundled libraries
 put_runtime_bins() {
     install -m 0755 "$bindir/$client" "$bindir/$server" "$rt/"
     case "$os" in
         windows)
             find "$bindir" -maxdepth 1 -type f -iname '*.dll' -exec cp {} "$rt/" \;
+            webview2_loader
             ;;
         linux)
             # a dynamic build's WebKitGTK for the captcha webview (tools/release/bundle-webkit.sh)

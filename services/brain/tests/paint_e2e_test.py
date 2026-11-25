@@ -19,6 +19,8 @@ route does the rest). Then, over HTTP only:
   5. A quick sell "all" of the skin sells the stack's unpainted unit only (the official stack row counts its unpainted
      units: game.js 147652-147722); the painted copy is not sold.
   6. The paint's last unit is gone: a second paint of the same kind is refused (400).
+  7. An item without paintTargets is refused (400 ITEM_PAINT_INVALID) and keeps the paint unit: v10 offers the Paint
+     button only for paintTargets items (deob-10.0.7.js:135288, 147902).
 
 Exit 0 when every check passes, 1 otherwise, 77 when kn_brain or the sqlite scratch database is unavailable.
 """
@@ -43,7 +45,8 @@ NAME = "kn_test_paint_e2e_%d" % os.getpid()
 SECRET = "kn-paint-e2e-secret-%d" % os.getpid()
 PASSWORD = "paintpass1"
 OWNER = "paint_owner"  # at most 14 characters: a new name's cap (v10.0.3 maxNameLength, deob-10.0.3.js:22725)
-SKIN = 0            # a tradable skin in assets/skins.json (the market test's ITEM)
+SKIN = 7838         # Susanowo: tradable, paintTargets true (assets/skins.json)
+PLAIN_SKIN = 0      # Arctic Hunt: tradable, no paintTargets (v10 offers it no Paint button)
 PAINT = 7776        # a colour paint, #dc3c3c (v10_paint.c)
 PAINT_HEX = "#dc3c3c"
 COPY_BASE = 1000000  # V10_COPY_ID_BASE
@@ -218,6 +221,31 @@ def scenario(port, db):
     check("a second paint with none left is refused (400)",
           st == 400 and "paint" in str(err_of(reply).get("message", "")), "HTTP %d %s" % (st, json.dumps(reply)[:200]))
 
+def scenario_targets(port, db):
+    """paintTargets (deob-10.0.7.js:135288, 147902: the Paint button needs it): an item without it is refused, with
+    v10's error shape {code, message} (the picker shows the message, deob-10.0.7.js:108628-108629), and nothing moves."""
+    st, reply = http(port, "POST", "/auth/register", {"username": "paint_plain", "password": PASSWORD})
+    token = reply.get("token") if isinstance(reply, dict) else None
+    check("targets: the account registers", st == 200 and bool(token), "HTTP %d" % st)
+    if not token:
+        return
+    acc = query(db, "SELECT id FROM accounts WHERE username = ?", ("paint_plain",))
+    acc_id = acc[0][0] if acc else 0
+    seed(db, [
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (acc_id, PLAIN_SKIN)),
+        ("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, ?, 1)", (acc_id, PAINT)),
+    ])
+    st, reply = http(port, "POST", "/items/%d/paint" % PLAIN_SKIN, {"item_id": PLAIN_SKIN, "paint_item_id": PAINT}, token)
+    e = err_of(reply)
+    check("targets: POST /items/{id}/paint on an item without paintTargets is 400 ITEM_PAINT_INVALID",
+          st == 400 and e.get("code") == "ITEM_PAINT_INVALID" and e.get("message") == "That item cannot be painted.",
+          "HTTP %d %s" % (st, json.dumps(reply)[:200]))
+    left = query(db, "SELECT count FROM inventory WHERE account_id = ? AND skin_id = ?", (acc_id, PAINT))
+    copies = query(db, "SELECT copy_id FROM skin_copies WHERE account_id = ?", (acc_id,))
+    check("targets: the refusal keeps the paint unit and makes no copy", left == [(1,)] and copies == [],
+          "paint %r copies %r" % (left, copies))
+
+
 SHADER_PAINT = 7795  # Spectrum (paintShader 0; v10_paint.c)
 BUYER = "paint_buyer"  # at most 14 characters: a new name's cap (v10.0.3 maxNameLength, deob-10.0.3.js:22725)
 
@@ -311,6 +339,7 @@ def main():
         try:
             scenario(int(m.group(1)), db["path"])
             scenario_shader(int(m.group(1)), db["path"])
+            scenario_targets(int(m.group(1)), db["path"])
         except Exception as e:  # noqa: BLE001 - a crashed probe is a failed run, not a crash of the test
             check("the probes complete", False, repr(e)[:200])
     finally:

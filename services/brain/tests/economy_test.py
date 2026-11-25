@@ -765,6 +765,35 @@ async def concurrency(url, db, ids, names):
     check(db.one("SELECT count(*) FROM players WHERE player_funds < 0") == 0, "no negative balance after the races")
 
 
+PAINT_RED = 7776       # a colour paint, #dc3c3c (v10_paint.c)
+PAINTABLE = 7838       # Susanowo: paintTargets true (assets/skins.json)
+NOT_PAINTABLE = 0      # Arctic Hunt: no paintTargets
+
+
+async def paint_targets(url, db):
+    """The social socket's "ip" (the native paint picker's apply; economy.c sh_item_paint): a paint applies only to an
+    item with paintTargets, the items v10 offers the Paint button for (deob-10.0.7.js:135288, 147902). The refusal
+    takes no paint unit and makes no copy."""
+    name = "pnt%s" % STAMP
+    aid = await register(url, name)
+    set_player(db, aid, level=40)
+    give(db, aid, NOT_PAINTABLE, 1)
+    give(db, aid, PAINTABLE, 1)
+    give(db, aid, PAINT_RED, 2)
+    s = await user(url, name)
+    try:
+        r = await s.call(("ipr", "po"), "ip", NOT_PAINTABLE, NOT_PAINTABLE, PAINT_RED, "#dc3c3c", -1, 41)
+        check(po_text(r) == "That item cannot be painted.", "ip: an item without paintTargets is refused: %r" % (r,))
+        check(count(db, aid, PAINT_RED) == 2 and db.one("SELECT count(*) FROM skin_copies WHERE account_id = $1", aid) == 0,
+              "ip: the refusal takes no paint unit and makes no copy")
+        r = await s.call(("ipr", "po"), "ip", PAINTABLE, PAINTABLE, PAINT_RED, "#dc3c3c", -1, 42)
+        check(r[0] == "ipr" and isinstance(r[1], dict) and r[1].get("m") == {"paint": "#dc3c3c"} and r[2] == 42,
+              "ip: an item with paintTargets is painted (ipr, m, uid): %r" % (r,))
+        check(count(db, aid, PAINT_RED) == 1, "ip: the paint takes one unit")
+    finally:
+        await s.__aexit__()
+
+
 def set_listing_old(db, lid):
     db.q("UPDATE market_listings SET created_at = created_at - interval '10 minutes' WHERE id = $1" if DRIVER == "postgres" else
          ("UPDATE market_listings SET created_at = datetime(created_at, '-10 minutes') WHERE id = $1" if DRIVER == "sqlite" else
@@ -774,6 +803,7 @@ def set_listing_old(db, lid):
 async def main_async(url, db):
     ids, names = await scenario(url, db)
     await concurrency(url, db, ids, names)
+    await paint_targets(url, db)
 
 
 def main():

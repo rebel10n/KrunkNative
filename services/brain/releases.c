@@ -12,6 +12,7 @@
 #include "releases.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +54,10 @@ static struct {
     int warned_empty;
     PollResult res;
 } g_rel;
+
+/* releases_shutdown sets it: the poll's transfer stops at its next progress call instead of running out its 10 s
+ * timeout while the shutdown joins the thread (a SIGTERM'd brain otherwise took 9 s to exit on a stalled poll) */
+static atomic_int g_cancel;
 
 const ReleaseInfo *releases_latest(void) {
     return &g_rel.latest;
@@ -98,6 +103,11 @@ static size_t on_header(char *data, size_t size, size_t n, void *ud) {
     if (v[0]) r->ratelimit_reset = strtoll(v, NULL, 10);
     return len;
 }
+
+static int on_progress(void *ud, curl_off_t dl, curl_off_t dt, curl_off_t ul, curl_off_t ut) {
+    (void) ud; (void) dl; (void) dt; (void) ul; (void) ut;
+    return atomic_load(&g_cancel) ? 1 : 0;
+}
 #endif
 
 static void poll_done(kn_loop *loop, void *ud);
@@ -134,6 +144,8 @@ static void *poll_thread(void *arg) {
         curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, on_header);
         curl_easy_setopt(c, CURLOPT_HEADERDATA, r);
         curl_easy_setopt(c, CURLOPT_USERAGENT, "kn_brain (KrunkNative server finder)");
+        curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, on_progress);
+        curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
         if (curl_easy_perform(c) == CURLE_OK) {
             long code = 0;
             curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
@@ -223,6 +235,7 @@ static void tick(kn_loop *loop, void *ud) {
 
 int releases_init(Brain *b) {
     g_rel.b = b;
+    atomic_store(&g_cancel, 0);
     const struct kn_config *cfg = b->cfg;
     memset(&g_rel.latest, 0, sizeof(g_rel.latest));
     g_rel.latest.proto_major = g_rel.latest.proto_minor = -1;
@@ -254,7 +267,8 @@ int releases_init(Brain *b) {
 void releases_shutdown(Brain *b) {
     if (g_rel.timer) kn_loop_cancel_timer(b->loop, g_rel.timer);
     g_rel.timer = 0;
-    join_thread(); /* at most the 10 s request timeout; its posted task finds nothing to do */
+    atomic_store(&g_cancel, 1);
+    join_thread(); /* the transfer aborts at its next progress call (about 1 s when idle); its posted task finds nothing to do */
     free(g_rel.res.body);
     memset(&g_rel.res, 0, sizeof(g_rel.res));
 }

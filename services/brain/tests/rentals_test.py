@@ -27,6 +27,9 @@ import time
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import brain_stop  # noqa: E402 (the log tail and the threads' wchan when the exit is slow)
+
 try:
     import websockets
 except ImportError:  # pragma: no cover
@@ -368,9 +371,7 @@ def main():
         proc, port = start_brain(env, log_path, POOL_ARGS)
         asyncio.run(scenario(port))
     finally:
-        if proc:
-            proc.terminate()
-            proc.wait(5)
+        check(brain_stop.stop(proc, log_path), "kn_brain exits within 5 s of SIGTERM")
         subprocess.run(drop)
     with open(log_path) as f:
         bad = [l.strip() for l in f if re.search(r"failed:|ERROR|FATAL", l)]
