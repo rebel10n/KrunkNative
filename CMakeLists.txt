@@ -1694,6 +1694,11 @@ else ()
             add_test(NAME hub_text_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/hub_text_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(hub_text_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # paint_picker_e2e: the owned card's paint popup (paint_picker.c, deob-10.0.7.js:108483-108814): the item viewer
+            # with the picked paint drawn on the hat, locked paints, Paint over the social socket (kn_brain on sqlite)
+            add_test(NAME paint_picker_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/paint_picker_e2e.py
+                     ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+            set_tests_properties(paint_picker_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # clan_text_e2e: the clan MOTD (500) and recruitment description (2000) / Looking For (500) keep their UTF-8
             add_test(NAME clan_text_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/clan_text_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

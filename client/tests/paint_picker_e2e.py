@@ -3,11 +3,14 @@
 scratch kn_brain (sqlite, temp dir) and headless client_bin on the v10 page, online with a token login:
 
   apply     the Hat chooser (window 16) lists the account's Bullseye Halo (an unpainted unit, a stack); its card
-            has the paint button; the popup lists the owned Red Paint (x2); Paint applies it: POST
+            has the paint button; the popup's one unlocked swatch is the owned Red Paint (2); Paint applies it: POST
             /items/7882/paint {item_id, paint_item_id}, the brain makes a copy with the paint (skin_copies), one paint
             unit is taken, the popup closes, the toast says "Painted Bullseye Halo with Red Paint", and the card's
             badge reads "Painted: Red Paint"
-  empty     the account owns the hat but no paint: the popup shows v10's empty state, no error, no Paint button
+  preview   v10.0.7's popup is the item viewer (an iframe of /viewer.html?nobg&showcase=<hat>&paint=<colour>, drawn
+            natively over its box): the hat is drawn there; every store paint is a swatch, the unowned ones locked;
+            picking the locked Blue Paint shows it on the hat and Paint reads Locked (Blue Paint), disabled
+  empty     the account owns the hat but no paint: every paint is locked, the first previewed, Paint disabled
   refused   the brain goes away while the popup's Paint is pressed: the popup says the paint failed
 
   python3 -I client/tests/paint_picker_e2e.py BUILD_DIR REPO_ROOT [scenario ...]
@@ -17,15 +20,18 @@ matchmaker and finder point at a closed local port. PAINT_PICKER_SHOTS=<dir> kee
 77 = skip (no websockets, no kn_brain / client_bin).
 """
 import asyncio
+import glob
 import json
 import os
 import re
 import shutil
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 
 try:
     import websockets
@@ -233,7 +239,7 @@ def scenario_apply(brain, name, token, brain_url):
 2600 attr @btn onclick .selctPaintBtn
 2700 clicksel .selctPaintBtn
 3400 rects @popup .paint-container
-3450 rects @swatch .swatch
+3450 rects @swatch .swatch:not(.locked)
 3500 attr @picked aria-checked .swatch
 3600 grep @label Red .btn-apply
 4200 clicksel .btn-apply
@@ -253,7 +259,7 @@ def scenario_apply(brain, name, token, brain_url):
     check("the card has the paint button (paintOpen: deob:150226, paintTargets)", "paintOpen(%d,%d)" % (HAT, HAT) in attr(log, "btn"),
           "onclick=%s" % attr(log, "btn"))
     check("the popup opens over the chooser", rects(log, "popup") == 1, "n=%d" % rects(log, "popup"))
-    check("the popup lists the owned Red Paint (one swatch, picked)", rects(log, "swatch") == 1 and attr(log, "picked") == "true",
+    check("the owned Red Paint is the one unlocked swatch, first and picked", rects(log, "swatch") == 1 and attr(log, "picked") == "true",
           "swatches=%d picked=%s" % (rects(log, "swatch"), attr(log, "picked")))
     check("Paint is labelled with the paint's name (Paint (Red Paint))", hits(log, "label") >= 1, "hits=%d" % hits(log, "label"))
     check("screenshot of the popup (the page, the popup open)", shot_taken(picker_png))
@@ -275,21 +281,32 @@ def scenario_apply(brain, name, token, brain_url):
 
 
 def scenario_empty(brain, name, token, brain_url):
-    print("scenario empty: the hat is paintable, no paint owned: v10's empty state, no error", flush=True)
+    """No paint owned: v10.0.7 still lists every store paint, all locked, and previews the first (deob-10.0.7.js:108568,
+    :108689-108691: the empty state is for a store without paints); Paint reads Locked (<first paint>) and is disabled."""
+    print("scenario empty: the hat is paintable, no paint owned: every paint locked, the first previewed, no error", flush=True)
     script = """0 boot
 1500 call showWindow 16
 2500 clicksel .selctPaintBtn
 3400 rects @popup .paint-container
 3450 rects @empty .paint-empty
 3500 rects @error .paint-error
-3550 rects @applybtn .btn-apply
-3600 quit
+3550 rects @locked .swatch.locked
+3600 attr @picked aria-label .swatch.selected
+3650 rects @applydis .btn-apply[disabled]
+3700 grep @label Locked .btn-apply
+3750 attr @src src iframe.paint-iframe
+3800 quit
 """
     log = run("empty", script, brain_url, token, name)
-    check("the empty popup opens", rects(log, "popup") == 1, "n=%d" % rects(log, "popup"))
-    check("v10's empty state is shown (You don’t own any paints yet ...)", rects(log, "empty") == 1, "n=%d" % rects(log, "empty"))
-    check("no error and no Paint button without a paint", rects(log, "error") == 0 and rects(log, "applybtn") == 0,
-          "error=%d apply=%d" % (rects(log, "error"), rects(log, "applybtn")))
+    paints = store_paint_count()
+    check("the popup opens", rects(log, "popup") == 1, "n=%d" % rects(log, "popup"))
+    check("no empty state while the store has paints, and no error", rects(log, "empty") == 0 and rects(log, "error") == 0,
+          "empty=%d error=%d" % (rects(log, "empty"), rects(log, "error")))
+    check("every store paint is a locked swatch (%d)" % paints, rects(log, "locked") == paints, "locked=%d" % rects(log, "locked"))
+    check("the first paint (Red Paint) is picked and previewed", attr(log, "picked") == "Red Paint - locked, preview only" and
+          attr(log, "src") == "/viewer.html?nobg&showcase=%d&paint=dc3c3c" % HAT, "picked=%s src=%s" % (attr(log, "picked"), attr(log, "src")))
+    check("Paint reads Locked (Red Paint) and is disabled", rects(log, "applydis") == 1 and hits(log, "label") == 1,
+          "disabled=%d hits=%d" % (rects(log, "applydis"), hits(log, "label")))
 
 
 def scenario_refused(brain, name, token, brain_url):
@@ -298,7 +315,7 @@ def scenario_refused(brain, name, token, brain_url):
 1500 call showWindow 16
 2500 clicksel .selctPaintBtn
 3400 rects @popup .paint-container
-3450 rects @swatch .swatch
+3450 rects @swatch .swatch:not(.locked)
 4000 rects @wait .btn-apply
 6000 clicksel .btn-apply
 7000 rects @error .paint-error
@@ -330,7 +347,7 @@ def scenario_store(brain, name, token, brain_url):
 9100 attr @tilebtn onclick [id="v10mkPaint%d"]
 9200 clickid v10mkPaint%d
 10000 rects @popup .paint-container
-10050 rects @swatch .swatch
+10050 rects @swatch .swatch:not(.locked)
 10100 attr @picked aria-checked .swatch
 10150 grep @label Red .btn-apply
 10200 clicksel .selctPaintBtn
@@ -353,8 +370,167 @@ def scenario_store(brain, name, token, brain_url):
     check("store grid: the brain made the painted copy (#dc3c3c)", len(copies) == 1 and copies[0][1] == "#dc3c3c", "rows=%r" % copies)
 
 
+def read_png(path):
+    """8-bit RGB / RGBA PNG -> (w, h, channels, rows of bytes)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    pos, idat, w, h, ctype = 8, b"", 0, 0, 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, depth, ctype = struct.unpack(">IIBB", body[:10])
+            assert depth == 8 and ctype in (2, 6)
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    ch = 4 if ctype == 6 else 3
+    raw, stride, rows, prev = zlib.decompress(idat), w * ch, [], bytearray(w * ch)
+    for y in range(h):
+        ftype, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - ch] if i >= ch else 0
+            b, c = prev[i], prev[i - ch] if i >= ch else 0
+            if ftype == 1:
+                line[i] = (line[i] + a) & 255
+            elif ftype == 2:
+                line[i] = (line[i] + b) & 255
+            elif ftype == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif ftype == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line)
+        prev = line
+    return w, h, ch, rows
+
+
+def first_rect(log, label):
+    """The first match's box of a `rects` line: (x, y, w, h) in window px, None when absent."""
+    m = re.search(r"\[input_script\] rects t=\d+ @%s n=\d+ \S+@(-?[\d.]+),(-?[\d.]+),([\d.]+),([\d.]+)" % re.escape(label), log)
+    return tuple(int(float(v)) for v in m.groups()) if m else None
+
+
+def count_pixels(png, box, test):
+    """Pixels inside box (x, y, w, h) whose (r, g, b) passes test."""
+    w, h, ch, rows = read_png(png)
+    x0, y0, bw, bh = box
+    n = 0
+    for y in range(max(0, y0), min(h, y0 + bh)):
+        row = rows[y]
+        for x in range(max(0, x0), min(w, x0 + bw)):
+            if test(row[x * ch], row[x * ch + 1], row[x * ch + 2]):
+                n += 1
+    return n
+
+
+def bright(r, g, b):
+    """The model's lit pixels (the hat and the head): far above the popup's grey (#353535 at 75%)."""
+    return r + g + b > 450
+
+
+def bluish(r, g, b):
+    """Blue Paint's tint on the halo (#0457d1 lit: about (0, 160, 240)); the halo's own pink, yellow and the pale cyan
+    stripes of its fins (about (180, 240, 240)) have far more red."""
+    return b > 150 and r < 80
+
+
+def changed_pixels(a, b, box):
+    """Pixels inside box that differ by more than 40 on any channel between two frames."""
+    wa, ha, ca, ra = read_png(a)
+    wb, hb, cb, rb = read_png(b)
+    x0, y0, bw, bh = box
+    n = 0
+    for y in range(max(0, y0), min(ha, hb, y0 + bh)):
+        for x in range(max(0, x0), min(wa, wb, x0 + bw)):
+            if any(abs(ra[y][x * ca + i] - rb[y][x * cb + i]) > 40 for i in range(3)):
+                n += 1
+    return n
+
+
+def store_paint_count():
+    """The store's paints as v10 lists them (type 18 with paintColor or a numeric paintShader, deob-10.0.7.js:108530-108545)."""
+    with open(os.path.join(ROOT, "assets", "skins.json")) as f:
+        skins = json.load(f)
+    if isinstance(skins, dict):
+        skins = skins.get("skins", [])
+    return sum(1 for s in skins if isinstance(s, dict) and s.get("type") == 18 and
+               (s.get("paintColor") or isinstance(s.get("paintShader"), (int, float)) and not isinstance(s.get("paintShader"), bool)))
+
+
+BLUE = 7778  # Blue Paint (#0457d1), not owned: a locked swatch the preview still shows
+
+
+def scenario_preview(brain, name, token, brain_url):
+    """v10.0.7's paint popup is the item viewer with the paint applied (deob-10.0.7.js:108496 iframe, :108675 src): the
+    hat in the iframe's box wears the picked paint; a locked paint (not owned) is previewed too and Paint says Locked."""
+    print("scenario preview: the item viewer shows the hat with the picked paint, a locked paint too", flush=True)
+    red, blue = os.path.join(WORK, "preview-red"), os.path.join(WORK, "preview-blue")
+    script = """0 boot
+1500 call showWindow 16
+2500 clicksel .selctPaintBtn
+3400 rects @popup .paint-container
+3450 rects @frame iframe.paint-iframe
+3500 attr @src0 src iframe.paint-iframe
+3550 rects @swatches .swatch
+3600 rects @locked .swatch.locked
+3650 grep @count0 2 .swatch.selected .swatch-count
+3700 rects @header .paint-header
+3750 rects @controls .paint-controls
+5500 frames %s 1
+6000 call paintPick %d
+6100 attr @src1 src iframe.paint-iframe
+6150 attr @picked1 aria-label .swatch.selected
+6200 grep @lockedlabel Locked .btn-apply
+6250 rects @applydis .btn-apply[disabled]
+6300 rects @leftoff .slider-arrow.left[disabled]
+8000 frames %s 1
+8200 clicksel .slider-arrow.right
+8300 rects @scrolled .swatch
+8350 rects @lefton .slider-arrow.left:not([disabled])
+8500 quit
+""" % (red, BLUE, blue)
+    proc, log, _ = run_client("preview", script, brain_url, token, name)
+    log = finish(proc, log, "preview")
+    paints = store_paint_count()
+    check("the popup opens with the item viewer iframe (paint-iframe)", rects(log, "popup") == 1 and rects(log, "frame") == 1,
+          "popup=%d frame=%d" % (rects(log, "popup"), rects(log, "frame")))
+    check("the viewer shows the hat with its first owned paint (/viewer.html?nobg&showcase=%d&paint=dc3c3c)" % HAT,
+          attr(log, "src0") == "/viewer.html?nobg&showcase=%d&paint=dc3c3c" % HAT, "src=%s" % attr(log, "src0"))
+    check("every store paint is a swatch (%d), the %d unowned ones locked" % (paints, paints - 1),
+          rects(log, "swatches") == paints and rects(log, "locked") == paints - 1,
+          "swatches=%d locked=%d" % (rects(log, "swatches"), rects(log, "locked")))
+    check("the owned Red Paint is picked and shows its count (2)", hits(log, "count0") == 1, "hits=%d" % hits(log, "count0"))
+    check("picking the locked Blue Paint previews it (&paint=0457d1)", attr(log, "src1") == "/viewer.html?nobg&showcase=%d&paint=0457d1" % HAT,
+          "src=%s" % attr(log, "src1"))
+    check("the picked swatch is the locked Blue Paint", attr(log, "picked1") == "Blue Paint - locked, preview only", "aria-label=%s" % attr(log, "picked1"))
+    check("Paint reads Locked (Blue Paint) and is disabled", hits(log, "lockedlabel") >= 1 and rects(log, "applydis") == 1,
+          "hits=%d disabled=%d" % (hits(log, "lockedlabel"), rects(log, "applydis")))
+    first0, first1 = first_rect(log, "swatches"), first_rect(log, "scrolled")
+    check("the right arrow scrolls the swatch row and enables the left one (scrollSwatches, deob-10.0.7.js:108580-108595)",
+          rects(log, "leftoff") == 1 and rects(log, "lefton") == 1 and first0 and first1 and first1[0] < first0[0] - 100,
+          "left disabled before=%d enabled after=%d first swatch x %s -> %s" % (rects(log, "leftoff"), rects(log, "lefton"),
+                                                                                 first0 and first0[0], first1 and first1[0]))
+    frame, header, controls = first_rect(log, "frame"), first_rect(log, "header"), first_rect(log, "controls")
+    # the item's part of the viewer: between the item's name and the paint controls, inside the rarity border
+    box = (frame[0] + 8, header[1] + header[3], frame[2] - 16, controls[1] - header[1] - header[3]) if frame and header and controls else None
+    # `frames` numbers every finished frame of the run, so each prefix has one file with the frame's number
+    red_png, blue_png = (next(iter(sorted(glob.glob(p + "_*.png"))), p + "_0000.png") for p in (red, blue))
+    if not (box and shot_taken(red_png) and shot_taken(blue_png)):
+        check("the preview frames were written", False, "box=%r red=%s blue=%s" % (box, os.path.exists(red_png), os.path.exists(blue_png)))
+        return
+    lit = count_pixels(red_png, box, bright)
+    blue_before, blue_after = count_pixels(red_png, box, bluish), count_pixels(blue_png, box, bluish)
+    check("the hat is drawn in the viewer's box (the viewer scene over the iframe)", lit >= 1000, "lit=%d" % lit)
+    check("after the pick it wears Blue Paint (blue tint on the hat, none with Red Paint)", blue_after >= 40 and blue_after >= 4 * blue_before + 1,
+          "blue=%d (with Red Paint %d)" % (blue_after, blue_before))
+    check("the two previews differ in the viewer's box", changed_pixels(red_png, blue_png, box) >= 200,
+          "changed=%d" % changed_pixels(red_png, blue_png, box))
+
+
 def main():
-    names = sys.argv[3:] or ["apply", "empty", "refused", "store"]
+    names = sys.argv[3:] or ["apply", "preview", "empty", "refused", "store"]
     (port,) = free_ports(1)
     brain = Brain(port)
     brain_url = "http://127.0.0.1:%d" % port
@@ -367,6 +543,8 @@ def main():
             aid, token = new_account(brain, account, paints)
             if n == "apply":
                 scenario_apply(brain, account, token, brain_url)
+            elif n == "preview":
+                scenario_preview(brain, account, token, brain_url)
             elif n == "empty":
                 scenario_empty(brain, account, token, brain_url)
             elif n == "refused":
