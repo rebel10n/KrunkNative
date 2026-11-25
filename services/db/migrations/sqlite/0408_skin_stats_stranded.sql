@@ -1,15 +1,52 @@
 -- 0408_skin_stats_stranded (SQLite): same as postgres/0408. Krunker v10.0.7 keeps a counter skin's count in the copy's
 -- m[stat] (deob-10.0.7.js:191932), so the count is wherever the copy is. Before 0407 a copy changed owner without its
--- skin_stats rows (0406). Rows on a copy another account (or store index) holds now go to that copy's owner, summed into
--- a count the owner has for the same stat; an open offer's escrowed copy (no skin_copies row) gets them in its
--- trade_copies.stats when that is empty; the rows of every other copy id with no skin_copies row are dropped, as
--- copy_take drops a copy's rows today. Stack rows (copy_id 0) do not change.
+-- skin_stats rows (0406). A count moves only where it provably belongs, and nothing is deleted that was not written
+-- elsewhere first: a copy another account (or store index) holds goes to that owner, summed into a count it has; a
+-- copy with no skin_copies row that the same account offers in one open trade (side 's', empty stats) goes into that
+-- trade_copies.stats; else, with exactly one such copy id of the index and exactly one open copy listing of the index
+-- with empty stats, into that listing's stats. Every other row stays: nothing records a quick-sold or crafted copy's
+-- id, and a stranded row is never read. Stack rows (copy_id 0) do not change.
+CREATE TABLE skin_stats_0408 (
+    account_id INTEGER NOT NULL,
+    skin_id    INTEGER NOT NULL,
+    copy_id    INTEGER NOT NULL,
+    trade_id   INTEGER,
+    listing_id INTEGER
+);
+INSERT INTO skin_stats_0408 (account_id, skin_id, copy_id, trade_id)
+    SELECT g.account_id, g.skin_id, g.copy_id, min(tc.trade_id)
+    FROM (SELECT DISTINCT s.account_id, s.skin_id, s.copy_id FROM skin_stats s
+          WHERE s.copy_id > 0 AND NOT EXISTS (SELECT 1 FROM skin_copies c WHERE c.copy_id = s.copy_id)) g
+    JOIN trade_copies tc ON tc.copy_id = g.copy_id AND tc.skin_id = g.skin_id AND tc.side = 's' AND tc.stats IS NULL
+    JOIN trades t ON t.id = tc.trade_id AND t.status = 'open' AND t.sender_id = g.account_id
+    GROUP BY g.account_id, g.skin_id, g.copy_id
+    HAVING count(*) = 1;
+INSERT INTO skin_stats_0408 (account_id, skin_id, copy_id, listing_id)
+    SELECT g.account_id, g.skin_id, min(g.copy_id), min(l.id)
+    FROM (SELECT DISTINCT s.account_id, s.skin_id, s.copy_id FROM skin_stats s
+          WHERE s.copy_id > 0 AND NOT EXISTS (SELECT 1 FROM skin_copies c WHERE c.copy_id = s.copy_id)
+            AND NOT EXISTS (SELECT 1 FROM skin_stats_0408 p WHERE p.copy_id = s.copy_id)) g
+    JOIN market_listings l ON l.seller_id = g.account_id AND l.skin_id = g.skin_id
+        AND l.sold_at IS NULL AND l.cancelled_at IS NULL AND l.stats IS NULL
+        AND (l.paint_color IS NOT NULL OR l.paint_shader IS NOT NULL OR l.wear IS NOT NULL OR l.serial IS NOT NULL
+             OR l.name_tag IS NOT NULL)
+    GROUP BY g.account_id, g.skin_id
+    HAVING count(DISTINCT g.copy_id) = 1 AND count(DISTINCT l.id) = 1;
 UPDATE trade_copies SET stats = (SELECT json_group_object(s.stat, s.count) FROM skin_stats s
-                                 WHERE s.copy_id = trade_copies.copy_id AND s.count > 0)
-WHERE stats IS NULL
-  AND EXISTS (SELECT 1 FROM trades t WHERE t.id = trade_copies.trade_id AND t.status = 'open')
-  AND NOT EXISTS (SELECT 1 FROM skin_copies c WHERE c.copy_id = trade_copies.copy_id)
-  AND EXISTS (SELECT 1 FROM skin_stats s WHERE s.copy_id = trade_copies.copy_id AND s.count > 0);
+                                 JOIN skin_stats_0408 p ON p.account_id = s.account_id AND p.skin_id = s.skin_id
+                                                       AND p.copy_id = s.copy_id
+                                 WHERE p.trade_id = trade_copies.trade_id AND p.copy_id = trade_copies.copy_id
+                                   AND s.count > 0)
+WHERE side = 's' AND EXISTS (SELECT 1 FROM skin_stats_0408 p
+                             WHERE p.trade_id = trade_copies.trade_id AND p.copy_id = trade_copies.copy_id);
+UPDATE market_listings SET stats = (SELECT json_group_object(s.stat, s.count) FROM skin_stats s
+                                    JOIN skin_stats_0408 p ON p.account_id = s.account_id AND p.skin_id = s.skin_id
+                                                          AND p.copy_id = s.copy_id
+                                    WHERE p.listing_id = market_listings.id AND s.count > 0)
+WHERE EXISTS (SELECT 1 FROM skin_stats_0408 p WHERE p.listing_id = market_listings.id);
+DELETE FROM skin_stats
+WHERE EXISTS (SELECT 1 FROM skin_stats_0408 p WHERE p.account_id = skin_stats.account_id
+              AND p.skin_id = skin_stats.skin_id AND p.copy_id = skin_stats.copy_id);
 INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count)
     SELECT c.account_id, c.skin_id, s.copy_id, s.stat, sum(s.count)
     FROM skin_stats s JOIN skin_copies c ON c.copy_id = s.copy_id
@@ -17,5 +54,6 @@ INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count)
     GROUP BY c.account_id, c.skin_id, s.copy_id, s.stat
 ON CONFLICT (account_id, skin_id, copy_id, stat) DO UPDATE SET count = skin_stats.count + excluded.count;
 DELETE FROM skin_stats
-WHERE copy_id > 0 AND NOT EXISTS (SELECT 1 FROM skin_copies c WHERE c.copy_id = skin_stats.copy_id
-                                  AND c.account_id = skin_stats.account_id AND c.skin_id = skin_stats.skin_id);
+WHERE copy_id > 0 AND EXISTS (SELECT 1 FROM skin_copies c WHERE c.copy_id = skin_stats.copy_id
+                              AND (c.account_id <> skin_stats.account_id OR c.skin_id <> skin_stats.skin_id));
+DROP TABLE skin_stats_0408;
