@@ -12,6 +12,7 @@
 #include <ctype.h>
 
 #include "mode_internal.h"
+#include <mode_columns.h> // teams, multiTeam, endStats, leaderStats (MODE_COLUMNS_<KEY>)
 #include <candy_heist.h>  // CANDY_HEIST_* (the mode's key, name, class, time and event)
 #include <prop_hunt.h>
 #include <ruleset.h>
@@ -31,48 +32,6 @@ const GameModeConfig g_default_game_mode_config = {
 
 // map.js rotationModes (v3.1.1 [0, 1, 2, 3, 19])
 const int g_rotation_modes[5] = {MODE_ID_FFA, MODE_ID_POINT, MODE_ID_CTF, MODE_ID_KC, MODE_ID_DOM};
-
-// endStats ("sid" first, as in the mode files; the end table skips it)
-static const char *const k_stats_tdm[] = {"sid", "name", "score", "kills", "deaths", "assists", "reward", NULL};
-static const char *const k_stats_point[] = {"sid", "name", "score", "kills", "deaths", "obj", "dmg", "reward", NULL};
-static const char *const k_stats_obj[] = {"sid", "name", "score", "kills", "deaths", "obj", "reward", NULL};
-static const char *const k_stats_ctf[] = {"sid", "name", "score", "kills", "deaths", "caps", "reward", NULL};
-static const char *const k_stats_blitz[] = {"sid", "name", "score", "kills", "deaths", "caps", NULL};
-static const char *const k_stats_bhop[] = {"sid", "name", "score", "deaths", NULL};
-static const char *const k_stats_hide[] = {"sid", "name", "score", "found", "reward", NULL};
-static const char *const k_stats_infect[] = {"sid", "name", "score", "kills", "infected", "reward", NULL};
-static const char *const k_stats_race[] = {"sid", "name", "score", "time", NULL};
-static const char *const k_stats_lms[] = {"sid", "name", "score", "kills", "deaths", "assists", NULL};
-static const char *const k_stats_simon[] = {"sid", "name", "score", "reward", NULL};
-static const char *const k_stats_gun[] = {"sid", "name", "weapon", "kills", "melees", "setbacks", "reward", NULL};
-static const char *const k_stats_prop[] = {"sid", "name", "score", "kills", NULL};
-static const char *const k_stats_stalk[] = {"sid", "name", "score", "reward", NULL};
-static const char *const k_stats_oinc[] = {"sid", "name", "kills", "deaths", "melees", NULL};
-static const char *const k_stats_trade[] = {"sid", "name", "score", NULL};
-static const char *const k_stats_kc[] = {"sid", "name", "score", "kills", "deaths", "confirms", "denies", "reward", NULL};
-static const char *const k_stats_def[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL};
-static const char *const k_stats_raid[] = {"sid", "name", "score", "time", "dmg", "reward", NULL};
-static const char *const k_stats_depo[] = {"sid", "name", "score", "kills", "deaths", "deposits", "denies", "reward", NULL};
-static const char *const k_stats_depoffa[] = {"sid", "name", "score", "kills", "deaths", "deposits", "reward", NULL};
-static const char *const k_stats_md[] = {"sid", "name", "score", "kills", "deaths", "pickups", "reward", NULL};
-static const char *const k_stats_zom[] = {"sid", "name", "score", "zombies", "downs", "rounds", "reward", NULL};
-static const char *const k_stats_candy[] = {"sid", "name", "candy", "reward", NULL}; // endStats (deob-10.0.4.js:105919)
-
-// leaderStats
-static const char *const k_lead_skd[] = {"score", "kills", "deaths", NULL};
-static const char *const k_lead_sk[] = {"score", "kills", NULL};
-static const char *const k_lead_point[] = {"score", "objective", "kills", NULL};
-static const char *const k_lead_ctf[] = {"caps", "score", NULL};
-static const char *const k_lead_gun[] = {"weaponTier", "kills", NULL};
-static const char *const k_lead_depo[] = {"deposits", "kills", "denies", "score", NULL};
-static const char *const k_lead_oinc[] = {"lives", "kills", NULL};
-static const char *const k_lead_kc[] = {"confirms", "score", "denies", NULL};
-static const char *const k_lead_dom[] = {"score", "caps", NULL};
-static const char *const k_lead_obj[] = {"objective", "score", NULL};
-static const char *const k_lead_depoffa[] = {"deposits", "kills", "score", NULL};
-static const char *const k_lead_md[] = {"score", "kills", "pickups", NULL};
-static const char *const k_lead_zom[] = {"points", "zombies", "downs", "dmg", NULL};
-static const char *const k_lead_candy[] = {"candy", NULL}; // leaderStats (deob-10.0.4.js:105920)
 
 // gun.js weaponOrder (v3.1.1 [2,16,10,4,11,5,3,9,1,14,6,0,7,8,13,15,12]: adds 27, 21, 18, 22, drops 15)
 // v10:105580: v7.1.4's order with 28 (Charge Rifle) after 0 (Sniper)
@@ -141,59 +100,58 @@ static const ModeWaitTimer k_wait_raid[] = {
     .wall_jump_yv = 2.0f
 
 const GameModeConfig g_mode_configs[MODE_COUNT] = {
-    [MODE_ID_FFA] = {BASE, .id = MODE_ID_FFA, .key = "ffa", .name = "Free for All", .alias = "ffa", .leader_stats = k_lead_skd},
-    [MODE_ID_TDM] = {BASE, .id = MODE_ID_TDM, .key = "tdm", .name = "Team Deathmatch", .alias = "tdm",
-        .end_stats = k_stats_tdm, .teams = 1, .leader_stats = k_lead_skd},
-    [MODE_ID_POINT] = {BASE, .id = MODE_ID_POINT, .key = "point", .name = "Hardpoint", .alias = "point",
-        .sub = "Attack the Objective", .end_stats = k_stats_point, .leader_stats = k_lead_point, .objective = 1, .teams = 1,
+    [MODE_ID_FFA] = {BASE, MODE_COLUMNS_FFA, .id = MODE_ID_FFA, .key = "ffa", .name = "Free for All", .alias = "ffa"},
+    [MODE_ID_TDM] = {BASE, MODE_COLUMNS_TDM, .id = MODE_ID_TDM, .key = "tdm", .name = "Team Deathmatch", .alias = "tdm"},
+    [MODE_ID_POINT] = {BASE, MODE_COLUMNS_POINT, .id = MODE_ID_POINT, .key = "point", .name = "Hardpoint", .alias = "point",
+        .sub = "Attack the Objective", .objective = 1,
         .game_start = mode_start_objective, .update = mode_update_point},
-    [MODE_ID_CTF] = {BASE, .id = MODE_ID_CTF, .key = "ctf", .name = "Capture the Flag", .alias = "ctf",
-        .end_stats = k_stats_ctf, .leader_stats = k_lead_ctf, .leader_sort = mode_sort_ctf, .end_sort = mode_sort_ctf,
-        .on_kill = mode_kill_flag, .flags = 1, .teams = 1, .no_score_c = 1},
-    [MODE_ID_BHOP] = {BASE, .id = MODE_ID_BHOP, .key = "bhop", .name = "Parkour", .alias = "bhop",
-        .send_rate = 5, .end_stats = k_stats_bhop, .no_kick = 1, .friendly = 1, .log_time = 1, .show_ms = 1,
+    [MODE_ID_CTF] = {BASE, MODE_COLUMNS_CTF, .id = MODE_ID_CTF, .key = "ctf", .name = "Capture the Flag", .alias = "ctf",
+        .leader_sort = mode_sort_ctf, .end_sort = mode_sort_ctf,
+        .on_kill = mode_kill_flag, .flags = 1, .no_score_c = 1},
+    [MODE_ID_BHOP] = {BASE, MODE_COLUMNS_BHOP, .id = MODE_ID_BHOP, .key = "bhop", .name = "Parkour", .alias = "bhop",
+        .send_rate = 5, .no_kick = 1, .friendly = 1, .log_time = 1, .show_ms = 1,
         .own_time = 1, .allow_reset = 1, .show_hour = 1, .view_dis = 1000.0f},
-    [MODE_ID_HIDE] = {BASE, .id = MODE_ID_HIDE, .key = "hide", .name = "Hide & Seek", .alias = "hide",
-        .end_stats = k_stats_hide, .win_condition = mode_win_team1_active, .condition = mode_cond_team1_active,
-        .min_players = 2, WAIT(k_wait_hide), .speed_mlt = {1.0f, 0.8f, 1.0f, 1.0f, 1.0f, 1.0f}, .teams = 1,
+    [MODE_ID_HIDE] = {BASE, MODE_COLUMNS_HIDE, .id = MODE_ID_HIDE, .key = "hide", .name = "Hide & Seek", .alias = "hide",
+        .win_condition = mode_win_team1_active, .condition = mode_cond_team1_active,
+        .min_players = 2, WAIT(k_wait_hide), .speed_mlt = {1.0f, 0.8f, 1.0f, 1.0f, 1.0f, 1.0f},
         .team_options = {"Hiders", "Seekers"}, .kill_on_convert = 1, .no_kick = 1, .show_team = 1, .view_dis = 2000.0f,
         .convert_team = 1, .conv_team = 2, .conv_word = "found", .no_weapons = 1, .friendly = 1, .hide_names = 1},
-    [MODE_ID_INFECT] = {BASE, .id = MODE_ID_INFECT, .key = "infect", .name = "Infected", .alias = "infect",
-        .end_stats = k_stats_infect, .win_condition = mode_win_team1_active, .condition = mode_cond_team1_active,
+    [MODE_ID_INFECT] = {BASE, MODE_COLUMNS_INFECT, .id = MODE_ID_INFECT, .key = "infect", .name = "Infected", .alias = "infect",
+        .win_condition = mode_win_team1_active, .condition = mode_cond_team1_active,
         .min_players = 2, WAIT(k_wait_infect), .team_class = {-1, -1, 9, -1, -1, -1},
         .speed_mlt = {1.0f, 1.0f, 1.15f, 1.0f, 1.0f, 1.0f},
-        .kill_on_convert = 1, .no_kick = 1, .teams = 1, .team_options = {"Survivors", "Infected"},
+        .kill_on_convert = 1, .no_kick = 1, .team_options = {"Survivors", "Infected"},
         .conv_word = "infected", .convert_team = 1, .conv_team = 2},
-    [MODE_ID_RACE] = {BASE, .id = MODE_ID_RACE, .key = "race", .name = "Race", .alias = "race",
-        .send_rate = 5, .end_stats = k_stats_race, .game_time = 0.0f, .show_ms = 1, .timed = 1, .log_time = 1,
+    [MODE_ID_RACE] = {BASE, MODE_COLUMNS_RACE, .id = MODE_ID_RACE, .key = "race", .name = "Race", .alias = "race",
+        .send_rate = 5, .game_time = 0.0f, .show_ms = 1, .timed = 1, .log_time = 1,
         .view_dis = 1000.0f, .end_sort = mode_sort_race, .game_start = mode_start_race, .condition = mode_cond_race,
         WAIT(k_wait_race), .no_weapons = 1, .friendly = 1},
-    [MODE_ID_LMS] = {BASE, .id = MODE_ID_LMS, .key = "lms", .name = "Last Man Standing", .alias = "lms",
-        .end_stats = k_stats_lms, .no_regen = 1, .no_kick = 1, .teams = 1, .lives = 1,
+    [MODE_ID_LMS] = {BASE, MODE_COLUMNS_LMS, .id = MODE_ID_LMS, .key = "lms", .name = "Last Man Standing", .alias = "lms",
+        .no_regen = 1, .no_kick = 1, .lives = 1,
         .win_condition = mode_win_lives, .game_time = 300.0f},
-    [MODE_ID_SIMON] = {BASE, .id = MODE_ID_SIMON, .key = "simon", .name = "Simon Says", .alias = "simon",
-        .end_stats = k_stats_simon, .condition = mode_cond_team1_active, .min_players = 3, WAIT(k_wait_simon),
-        .teams = 1, .view_dis = 1000.0f, .team_options = {"Followers", "Simon"}, .no_kick = 1, .team_see = 1},
+    [MODE_ID_SIMON] = {BASE, MODE_COLUMNS_SIMON, .id = MODE_ID_SIMON, .key = "simon", .name = "Simon Says", .alias = "simon",
+        .condition = mode_cond_team1_active, .min_players = 3, WAIT(k_wait_simon),
+        .view_dis = 1000.0f, .team_options = {"Followers", "Simon"}, .no_kick = 1, .team_see = 1},
     // v7.1.4: no noReward / noStreaks / rewardMlt any more; disabledStreaks [4, 5, 6] instead
-    [MODE_ID_GUN] = {BASE, .id = MODE_ID_GUN, .key = "gun", .name = "Gun Game", .alias = "gun", .party = 1,
-        .rand_class_scr = 0.5f, .end_stats = k_stats_gun, .leader_stat = "weaponTier", .leader_stats = k_lead_gun,
+    [MODE_ID_GUN] = {BASE, MODE_COLUMNS_GUN, .id = MODE_ID_GUN, .key = "gun", .name = "Gun Game", .alias = "gun", .party = 1,
+        .rand_class_scr = 0.5f, .leader_stat = "weaponTier",
         .leader_sort = mode_leader_sort_gun, .end_sort = mode_sort_gun,
         .win_condition = mode_win_gun, .condition = mode_cond_gun, .on_kill = mode_kill_gun,
         LOADOUT(starting_loadout, k_gun_start), .keep_loadout = 1, .no_assists = 1, .min_players = 2,
         .no_weapons = 1, .no_pickups = 1, LOADOUT(weapon_order, k_gun_order), STREAKS_OFF(k_no_big_streaks)},
-    [MODE_ID_PROP] = {BASE, .id = MODE_ID_PROP, .key = "prop", .name = "Prop Hunt", .alias = "prop", .prop = 1,
-        .end_stats = k_stats_prop, .no_regen = 1, .no_kick = 1, .teams = 1, .lives = 1, .view_dis = 2000.0f,
+    [MODE_ID_PROP] = {BASE, MODE_COLUMNS_PROP, .id = MODE_ID_PROP, .key = "prop", .name = "Prop Hunt", .alias = "prop", .prop = 1,
+        .no_regen = 1, .no_kick = 1, .lives = 1, .view_dis = 2000.0f,
         .win_condition = mode_win_team1_active, .condition = mode_cond_teams_alive, .min_players = 2,
         WAIT(k_wait_prop), .prop_switches = 3, .team_options = {"Prop", "Seekers"}, .team_sort = 1, .show_team = 1,
         .hide_names = 1},
-    [MODE_ID_BOSS] = {BASE, .id = MODE_ID_BOSS, .key = "boss", .name = "Boss Hunt", .alias = "boss",
+    [MODE_ID_BOSS] = {BASE, MODE_COLUMNS_BOSS, .id = MODE_ID_BOSS, .key = "boss", .name = "Boss Hunt", .alias = "boss",
         .win_condition = mode_win_team2_active, .condition = mode_cond_team2_active, WAIT(k_wait_boss),
-        .teams = 1, .team_options = {"Heros", "Boss"}, .no_reward = 1, .min_players = 2},
-    [MODE_ID_CLAS] = {BASE, .id = MODE_ID_CLAS, .key = "clas", .name = "Classic FFA", .alias = "clas",
-        .leader_stats = k_lead_skd, .party = 1, .no_sliding = 1, .no_knives = 1, .no_streaks = 1, .no_wall_jump = 1,
+        .team_options = {"Heros", "Boss"}, .no_reward = 1, .min_players = 2},
+    [MODE_ID_CLAS] = {BASE, MODE_COLUMNS_CLAS, .id = MODE_ID_CLAS, .key = "clas", .name = "Classic FFA", .alias = "clas",
+        .party = 1, .no_sliding = 1, .no_knives = 1, .no_streaks = 1, .no_wall_jump = 1,
         .has_impulse_mlt = 1, .impulse_mlt = 0.0f, .no_pickups = 1, .no_melee = 1, .real_movement = 1},
-    [MODE_ID_DEPO] = {BASE, .id = MODE_ID_DEPO, .key = "depo", .name = "Deposit", .alias = "depo",
-        .end_stats = k_stats_depo, .leader_stats = k_lead_depo, .objective = 1, .teams = 1, .tag_limit = 65,
+    [MODE_ID_DEPO] = {BASE, MODE_COLUMNS_DEPO, .id = MODE_ID_DEPO, .key = "depo", .name = "Deposit", .alias = "depo",
+        .objective = 1, .tag_limit = 65,
         .obj_score = 50, .no_score_c = 1, .tag_hold_limit = 20, .deposit = 1, .max_per_cluster = 3,
         .game_start = mode_start_rand_objective, .leader_sort = mode_leader_sort_depo, .end_sort = mode_sort_depo,
         .win_condition = mode_win_tag_teams, .condition = mode_cond_tag_limit, .on_kill = mode_kill_deposit,
@@ -206,23 +164,23 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
     // shared/src/stalker.c and doc/v10/stalker.md. `event: true` (deob-10.0.7.js:105049): truthy, so
     // getPossibleMatches files Stalker in the event bucket, not the normal one (:195645), and `eventIndex == true`
     // holds for event index 1; event 1 is the same in both. Not ported: the tag ["Event", ...] (menu lists).
-    [MODE_ID_STALK] = {BASE, .id = MODE_ID_STALK, .key = "stalk", .name = "Stalker", .alias = "stalk", .event = 1,
-        .end_stats = k_stats_stalk, .amb_ind = 5, .min_players = 2, .has_fog_dist = 1, .fog_dist = 250.0f,
+    [MODE_ID_STALK] = {BASE, MODE_COLUMNS_STALK, .id = MODE_ID_STALK, .key = "stalk", .name = "Stalker", .alias = "stalk", .event = 1,
+        .amb_ind = 5, .min_players = 2, .has_fog_dist = 1, .fog_dist = 250.0f,
         .has_fog_col = 1, .fog_col = 1842204, .has_sky_col = 1, .sky_col = 1842204,
         .has_light_col = 1, .light_col = 855309, .has_amb_col = 1, .amb_col = 1513239,
         .lives = 1, .condition = mode_cond_stalk, .win_condition = mode_win_team2_active, WAIT(k_wait_stalk),
-        .hide_names = 1, .no_reward = 1, .no_kick = 1, .teams = 1, .team_options = {"Living", "Stalker"},
+        .hide_names = 1, .no_reward = 1, .no_kick = 1, .team_options = {"Living", "Stalker"},
         .speed_mlt = {1.0f, 0.65f, 1.0f, 1.0f, 1.0f, 1.0f},
         .has_wall_jump = 1, .wall_jump = 1.0f, .wall_jump_max = 100.0f, .wall_jump_d = 0.2f, .wall_jump_v = 0.04f,
         .wall_jump_yv = 1.2f, .stalker_v10 = 1, .on_kill = mode_kill_stalk, .update = mode_update_stalk,
         .on_melee = mode_melee_stalk},
     // king.js (rewritten in v7): random hills, +objScore 10 only for a lone occupant, kill bonuses
-    [MODE_ID_KING] = {BASE, .id = MODE_ID_KING, .key = "king", .name = "King of the Hill", .alias = "king",
-        .end_stats = k_stats_obj, .objective = 1, .kill_mlt = 0.15f, .hill_mlt = 0.05f, .obj_score = 10,
+    [MODE_ID_KING] = {BASE, MODE_COLUMNS_KING, .id = MODE_ID_KING, .key = "king", .name = "King of the Hill", .alias = "king",
+        .objective = 1, .kill_mlt = 0.15f, .hill_mlt = 0.05f, .obj_score = 10,
         .game_start = mode_start_rand_objective, .collision_check = mode_collision_king, .update = mode_update_king,
         .on_kill = mode_kill_king},
-    [MODE_ID_OINC] = {BASE, .id = MODE_ID_OINC, .key = "oinc", .name = "One in the Chamber", .alias = "oinc", .party = 1,
-        .end_stats = k_stats_oinc, .leader_stat = "lives", .leader_stats = k_lead_oinc, .leader_sort = mode_leader_sort_oinc,
+    [MODE_ID_OINC] = {BASE, MODE_COLUMNS_OINC, .id = MODE_ID_OINC, .key = "oinc", .name = "One in the Chamber", .alias = "oinc", .party = 1,
+        .leader_stat = "lives", .leader_sort = mode_leader_sort_oinc,
         .end_sort = mode_sort_oinc, .condition = mode_cond_oinc,
         .win_condition = mode_win_first_alive, WAIT(k_wait_oinc), .game_start = mode_start_lock,
         .on_kill = mode_kill_oinc, .force_spawn = 3.0f, .lives = 3, .health = 10, .force_class = 10,
@@ -230,23 +188,23 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .min_players = 2, .no_pickups = 1},
     // deob-10.0.3.js:119697-119711; canTrade: the live trade (server/src/trade.c, doc/v10/trade.md), maxNoMov 180000
     // the server's idle kick for the mode (net.c net_check_idle_clients)
-    [MODE_ID_TRADE] = {BASE, .id = MODE_ID_TRADE, .key = "trade", .name = "Trade", .alias = "trade",
-        .send_rate = 5, .end_stats = k_stats_trade, .no_client_kick = 1, .can_trade = 1, .friendly = 1, .no_hp_bars = 1,
+    [MODE_ID_TRADE] = {BASE, MODE_COLUMNS_TRADE, .id = MODE_ID_TRADE, .key = "trade", .name = "Trade", .alias = "trade",
+        .send_rate = 5, .no_client_kick = 1, .can_trade = 1, .friendly = 1, .no_hp_bars = 1,
         .view_dis = 500.0f, .name_dist = 60, .game_time = 0.0f, .max_no_mov = 180.0f, .no_minimap = 1},
     // kc.js v7: the winner is the team score (confirms) with denies / kills / score tie-breaks
-    [MODE_ID_KC] = {BASE, .id = MODE_ID_KC, .key = "kc", .name = "Kill Confirmed", .alias = "kc",
-        .end_stats = k_stats_kc, .leader_stats = k_lead_kc, .leader_sort = mode_leader_sort_kc, .end_sort = mode_sort_kc,
+    [MODE_ID_KC] = {BASE, MODE_COLUMNS_KC, .id = MODE_ID_KC, .key = "kc", .name = "Kill Confirmed", .alias = "kc",
+        .leader_sort = mode_leader_sort_kc, .end_sort = mode_sort_kc,
         .win_condition = mode_win_tag_teams, .condition = mode_cond_tag_limit,
-        .on_kill = mode_kill_kc, .tag_limit = 65, .teams = 1, .no_score_c = 1},
-    [MODE_ID_DEF] = {BASE, .id = MODE_ID_DEF, .key = "def", .name = "Defuse", .alias = "def",
-        .site = 1, .end_stats = k_stats_def, .lives = 1, .no_regen = 1, .teams = 1, .hitbox_pad = 0.5f,
+        .on_kill = mode_kill_kc, .tag_limit = 65, .no_score_c = 1},
+    [MODE_ID_DEF] = {BASE, MODE_COLUMNS_DEF, .id = MODE_ID_DEF, .key = "def", .name = "Defuse", .alias = "def",
+        .site = 1, .lives = 1, .no_regen = 1, .hitbox_pad = 0.5f,
         .game_start = mode_start_def, .real_movement = 1, .win_condition = mode_win_def, .condition = mode_cond_def,
         .on_kill = mode_kill_def, WAIT(k_wait_def)},
-    [MODE_ID_SHRP] = {BASE, .id = MODE_ID_SHRP, .key = "shrp", .name = "Sharp Shooter", .alias = "shrp", .party = 1,
-        .end_stats = k_stats_def, .leader_stats = k_lead_skd, .obj_weapon = 1, .rand_class_scr = 0.5f,
+    [MODE_ID_SHRP] = {BASE, MODE_COLUMNS_SHRP, .id = MODE_ID_SHRP, .key = "shrp", .name = "Sharp Shooter", .alias = "shrp", .party = 1,
+        .obj_weapon = 1, .rand_class_scr = 0.5f,
         .game_start = mode_start_weapon, .on_kill = mode_kill_shrp, .force_class = 9, STREAKS_OFF(k_no_big_streaks)},
-    [MODE_ID_TRAI] = {BASE, .id = MODE_ID_TRAI, .key = "trai", .name = "Traitor", .alias = "trai",
-        .lives = 1, .teams = 1, .no_dead_chat = 1, .no_kill_feed = 1, .team_options = {"Innocent", "Traitor"},
+    [MODE_ID_TRAI] = {BASE, MODE_COLUMNS_TRAI, .id = MODE_ID_TRAI, .key = "trai", .name = "Traitor", .alias = "trai",
+        .lives = 1, .no_dead_chat = 1, .no_kill_feed = 1, .team_options = {"Innocent", "Traitor"},
         .team_colors = {"#37ad47", "#d13838"}, .show_team = 1, .no_regen = 1, .fake_names = 1, .no_score_k = 1,
         .dmg_team = 1, .win_condition = mode_win_lives, .condition = mode_cond_teams_alive, WAIT(k_wait_trai),
         .no_reward = 1, .min_players = 3, .on_kill = mode_kill_trai},
@@ -254,73 +212,72 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
     // 1500000 (25 min, v10:104536; v7.1.4 360000). v10.0.3 (deob-10.0.3.js:118355-118457): onEnd's "time" and
     // run challenges (rnodmg, r1hp, rnogun, rsolo, rsolofull: mode_end_raid), update's runPeakPlayers
     // (mode_update_raid), onAIDeath "aik" (mode_ai_kill_challenge), noProfileStats, skipStats, specMaxD 25.
-    [MODE_ID_RAID] = {BASE, .id = MODE_ID_RAID, .key = "raid", .name = "Raid", .alias = "raid", .event = 0, .party = 1,
-        .rand_class_scr = 0.5f, .send_rate = 5, .end_stats = k_stats_raid, .show_ms = 1, .no_regen = 1, .lives = 1,
+    [MODE_ID_RAID] = {BASE, MODE_COLUMNS_RAID, .id = MODE_ID_RAID, .key = "raid", .name = "Raid", .alias = "raid", .event = 0, .party = 1,
+        .rand_class_scr = 0.5f, .send_rate = 5, .show_ms = 1, .no_regen = 1, .lives = 1,
         .min_players = 1, WAIT(k_wait_raid), .win_condition = mode_win_raid, .condition = mode_cond_raid,
         .on_end = mode_end_raid, .update = mode_update_raid, .no_weapons = 1, .friendly = 1, .no_clan = 1, .no_free_cam = 1,
         .view_dis = 500.0f, .game_time = 1500.0f, .bots_as_ai = 1, .no_assists = 1, .bot_bypass_class = 1, .no_minimap = 1,
         .no_profile_stats = 1, .skip_stats = k_skip_run_stats, .spec_max_d = 25.0f},
-    [MODE_ID_BLITZ] = {BASE, .id = MODE_ID_BLITZ, .key = "blitz", .name = "Blitz", .alias = "blitz",
-        .end_stats = k_stats_blitz, .on_kill = mode_kill_flag, .rush = 1, .flags = 1, .teams = 1, .no_score_c = 1},
-    [MODE_ID_DOM] = {BASE, .id = MODE_ID_DOM, .key = "dom", .name = "Domination", .alias = "dom",
-        .sub = "Dominate the Objective", .end_stats = k_stats_ctf, .leader_stats = k_lead_dom, .dom = 1, .teams = 1,
+    [MODE_ID_BLITZ] = {BASE, MODE_COLUMNS_BLITZ, .id = MODE_ID_BLITZ, .key = "blitz", .name = "Blitz", .alias = "blitz",
+        .on_kill = mode_kill_flag, .rush = 1, .flags = 1, .no_score_c = 1},
+    [MODE_ID_DOM] = {BASE, MODE_COLUMNS_DOM, .id = MODE_ID_DOM, .key = "dom", .name = "Domination", .alias = "dom",
+        .sub = "Dominate the Objective", .dom = 1,
         .no_score_c = 1, .capture_time = 10.0f, .lockout_mlt = 1.5f, .per_player_mlt = 0.2f,
         .collision_check = mode_collision_dom, .on_kill = mode_kill_dom},
-    [MODE_ID_SDM] = {BASE, .id = MODE_ID_SDM, .key = "sdm", .name = "Squad Deathmatch", .alias = "sdm",
-        .end_stats = k_stats_tdm, .teams = 1, .multi_team = 4},
+    [MODE_ID_SDM] = {BASE, MODE_COLUMNS_SDM, .id = MODE_ID_SDM, .key = "sdm", .name = "Squad Deathmatch", .alias = "sdm"},
     // v10: party false and the Party tag removed (v10:104640)
-    [MODE_ID_KRANK] = {BASE, .id = MODE_ID_KRANK, .key = "krank", .name = "Kranked FFA", .alias = "krank",
-        .end_stats = k_stats_def, .leader_stats = k_lead_skd, .force_spawn = 5.0f, .kranked_timer = 15.0f,
+    [MODE_ID_KRANK] = {BASE, MODE_COLUMNS_KRANK, .id = MODE_ID_KRANK, .key = "krank", .name = "Kranked FFA", .alias = "krank",
+        .force_spawn = 5.0f, .kranked_timer = 15.0f,
         .bonus_speed = 1.25f, .bonus_reload = 0.35f, .bonus_fire_rate = 0.85f,
         .update = mode_update_krank, .on_kill = mode_kill_krank},
-    [MODE_ID_TDF] = {BASE, .id = MODE_ID_TDF, .key = "tdf", .name = "Team Defender", .alias = "tdf",
-        .end_stats = k_stats_obj, .leader_stats = k_lead_obj, .teams = 1, .obj_score = 20, .team_carrier_mlt = 1.0f,
+    [MODE_ID_TDF] = {BASE, MODE_COLUMNS_TDF, .id = MODE_ID_TDF, .key = "tdf", .name = "Team Defender", .alias = "tdf",
+        .obj_score = 20, .team_carrier_mlt = 1.0f,
         .non_carrier_mlt = 0.5f, .carrier_mlt = 1.25f, .on_kill = mode_kill_flag, .oneflag = 1,
         .update = mode_update_carrier},
-    [MODE_ID_DEPOFFA] = {BASE, .id = MODE_ID_DEPOFFA, .key = "depoffa", .name = "Deposit FFA", .alias = "depoffa",
-        .party = 1, .end_stats = k_stats_depoffa, .leader_stats = k_lead_depoffa, .objective = 1, .tag_limit = 65,
+    [MODE_ID_DEPOFFA] = {BASE, MODE_COLUMNS_DEPOFFA, .id = MODE_ID_DEPOFFA, .key = "depoffa", .name = "Deposit FFA", .alias = "depoffa",
+        .party = 1, .objective = 1, .tag_limit = 65,
         .obj_score = 75, .kill_mlt = 0.5f, .no_score_c = 1, .tag_hold_limit = 20, .deposit = 1, .max_per_cluster = 3,
         .game_start = mode_start_rand_objective, .leader_sort = mode_leader_sort_depo, .end_sort = mode_sort_depo,
         .condition = mode_cond_deposits, .on_kill = mode_kill_deposit, .update = mode_update_deposit},
-    [MODE_ID_CAR] = {BASE, .id = MODE_ID_CAR, .key = "car", .name = "Carrier", .alias = "car",
-        .end_stats = k_stats_obj, .leader_stats = k_lead_obj, .prevent_custom = 1, .obj_score = 20,
+    [MODE_ID_CAR] = {BASE, MODE_COLUMNS_CAR, .id = MODE_ID_CAR, .key = "car", .name = "Carrier", .alias = "car",
+        .prevent_custom = 1, .obj_score = 20,
         .team_carrier_mlt = 1.0f, .non_carrier_mlt = 0.5f, .carrier_mlt = 1.25f, .on_kill = mode_kill_flag,
         .oneflag = 1, .update = mode_update_carrier},
-    [MODE_ID_AON] = {BASE, .id = MODE_ID_AON, .key = "aon", .name = "All or Nothing", .alias = "aon",
-        .prevent_custom = 1, .event = 4, .end_stats = k_stats_def, .leader_stats = k_lead_sk, .on_kill = mode_kill_aon,
+    [MODE_ID_AON] = {BASE, MODE_COLUMNS_AON, .id = MODE_ID_AON, .key = "aon", .name = "All or Nothing", .alias = "aon",
+        .prevent_custom = 1, .event = 4, .on_kill = mode_kill_aon,
         .double_xp = 1, .force_spawn = 3.0f, .force_class = 9, .ammo_limit = 0, .has_ammo_limit = 1, .no_reloads = 1,
         .no_pickups = 1, .rand_class_scr = 0.5f, .no_scr_limit = 1, .no_knives = 1, LOADOUT(starting_loadout, k_aon_start),
         STREAKS_OFF(k_no_big_streaks)},
-    [MODE_ID_MD] = {BASE, .id = MODE_ID_MD, .key = "md", .name = "Mag Dump", .alias = "md",
-        .prevent_custom = 1, .event = 5, .end_stats = k_stats_md, .leader_stats = k_lead_md, .on_kill = mode_kill_md,
+    [MODE_ID_MD] = {BASE, MODE_COLUMNS_MD, .id = MODE_ID_MD, .key = "md", .name = "Mag Dump", .alias = "md",
+        .prevent_custom = 1, .event = 5, .on_kill = mode_kill_md,
         .double_xp = 1, .force_spawn = 3.0f, .force_class = 9, .no_reloads = 1, .no_pickups = 1,
         .rand_class_scr = 0.5f, .no_scr_limit = 1, .no_knives = 1, LOADOUT(starting_loadout, k_md_start),
         STREAKS_OFF(k_no_big_streaks)},
-    [MODE_ID_CHS] = {BASE, .id = MODE_ID_CHS, .key = "chs", .name = "Chaos Snipers", .alias = "chs", .party = 1,
-        .end_stats = k_stats_def, .leader_stats = k_lead_sk, .force_spawn = 3.0f, .force_class = 0, .no_pickups = 1,
+    [MODE_ID_CHS] = {BASE, MODE_COLUMNS_CHS, .id = MODE_ID_CHS, .key = "chs", .name = "Chaos Snipers", .alias = "chs", .party = 1,
+        .force_spawn = 3.0f, .force_class = 0, .no_pickups = 1,
         .no_knives = 1, .grav_mlt = 0.92f, CHAOS_MOVEMENT, .health = 10, .ammo_limit = 1, .has_ammo_limit = 1,
         .no_scr_limit = 1, LOADOUT(starting_loadout, k_chs_start), STREAKS_OFF(k_no_big_streaks)},
-    [MODE_ID_BHFFA] = {BASE, .id = MODE_ID_BHFFA, .key = "bhffa", .name = "Bighead FFA", .alias = "bhffa",
-        .leader_stats = k_lead_skd, .party = 1, .bighead = 1, .head_mlt = 0.1f, .head_mlt_max = 3.0f,
+    [MODE_ID_BHFFA] = {BASE, MODE_COLUMNS_BHFFA, .id = MODE_ID_BHFFA, .key = "bhffa", .name = "Bighead FFA", .alias = "bhffa",
+        .party = 1, .bighead = 1, .head_mlt = 0.1f, .head_mlt_max = 3.0f,
         .on_kill = mode_kill_bhffa},
-    [MODE_ID_ZOM] = {BASE, .id = MODE_ID_ZOM, .key = "zom", .name = "Zombies", .alias = "zom",
+    [MODE_ID_ZOM] = {BASE, MODE_COLUMNS_ZOM, .id = MODE_ID_ZOM, .key = "zom", .name = "Zombies", .alias = "zom",
         .no_sliding = 1, .no_streaks = 1, .no_wall_jump = 1, .has_impulse_mlt = 1, .impulse_mlt = 0.0f, .lives = 1,
-        .end_stats = k_stats_zom, .leader_stats = k_lead_zom, .send_rate = 5, .min_players = 1, .friendly = 1,
+        .send_rate = 5, .min_players = 1, .friendly = 1,
         .view_dis = 500.0f, .no_class_scr = 1, .force_class = 9, .finite_ammo = 1, LOADOUT(starting_loadout, k_zom_start),
         .no_scr_limit = 1, .unrestricted_weapons = 1, .points_per_hit = 0.085f, .starter_score = 150, .skip_stats = k_skip_run_stats,
         .game_time = 0.0f, .regen_mlt = 0.1f, .prevent_custom = 1, .force_charge = 1, .force_old_scoreboard = 1, .no_minimap = 1,
         .win_condition = mode_win_team2, .condition = mode_cond_raid, // zom.js: winCondition 2, someone alive
         .game_start = mode_zombies_game_start, .update = mode_zombies_update, .on_kill = mode_zombies_on_kill,
         .on_pre_end = mode_zombies_on_pre_end},
-    [MODE_ID_IMP] = {BASE, .id = MODE_ID_IMP, .key = "imp", .name = "Impulsed", .alias = "imp", .party = 1,
-        .end_stats = k_stats_def, .leader_stats = k_lead_sk, .force_spawn = 3.0f, .force_class = 0, .no_pickups = 1,
+    [MODE_ID_IMP] = {BASE, MODE_COLUMNS_IMP, .id = MODE_ID_IMP, .key = "imp", .name = "Impulsed", .alias = "imp", .party = 1,
+        .force_spawn = 3.0f, .force_class = 0, .no_pickups = 1,
         .expl_mlt = 5.0f, .expl_size_mlt = 2.0f, .grav_mlt = 1.05f, .has_impulse_mlt = 1, .impulse_mlt = 3.0f,
         .non_obj_impulse = 1, CHAOS_MOVEMENT, .no_scr_limit = 1, LOADOUT(starting_loadout, k_imp_start),
         STREAKS_OFF(k_no_big_streaks), .prevent_custom = 1, .on_kill = mode_kill_imp},
     // Candy Heist (v10.0.4, deob-10.0.4.js:105905-105929): the mode's static config. Its map logic (the Hollowmen,
     // door knocks, the Cauldron bank, the Hollowman's Staff counter) is map 46's KrunkScript, not code here.
-    [MODE_ID_CANDY] = {BASE, .id = MODE_ID_CANDY, .key = CANDY_HEIST_MODE_KEY, .name = CANDY_HEIST_MODE_NAME,
-        .alias = CANDY_HEIST_MODE_KEY, .end_stats = k_stats_candy, .leader_stats = k_lead_candy,
+    [MODE_ID_CANDY] = {BASE, MODE_COLUMNS_CANDY, .id = MODE_ID_CANDY, .key = CANDY_HEIST_MODE_KEY, .name = CANDY_HEIST_MODE_NAME,
+        .alias = CANDY_HEIST_MODE_KEY,
         .game_time = (float) CANDY_HEIST_GAME_TIME, .force_class = CANDY_HEIST_CLASS, .no_pickups = 1, .no_scr_limit = 1,
         .no_score_xp = 1, .no_profile_stats = 1, .no_winner = 1, .prevent_custom = 1, .event = CANDY_HEIST_EVENT_ID,
         .score_stat = "candy", .score_label = "Candy"}, // scoreStat / scoreLabel (deob-10.0.7.js:106119-106120)
