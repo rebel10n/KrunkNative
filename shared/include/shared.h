@@ -2330,6 +2330,10 @@ typedef struct Game_t {
     unsigned char is_official:1;
 
     float end_timer;              // seconds of end screen left (> 0 = round over)
+    // the end order of the last end (game_end_round, sorted before onPreEnd): ZOMBIE_STATS lists its players in that order,
+    // so its 16 rows are the END board's 16 and not the first 16 to join
+    int end_order_uids[GAME_END_ROWS_MAX];
+    size_t end_order_count;
     float load_in_timer;          // v10 loadInTimer: seconds left of the map load-in hold (GAME_LOAD_IN_TIME), 0 none
 
     // Round state (authority): Krunker game.gameTimer / lastTimer / kills.

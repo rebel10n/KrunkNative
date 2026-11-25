@@ -665,21 +665,34 @@ void zombies_send_state(Game *game, const int uid) {
     airdrop_send_all(game, uid);
 }
 
-// zom.js endStats zombies / rounds: every player's aiKills and rounds, sent before the end table
-// (NET_PACKET_MODE_END's stats array is full, see NetZombieStatsPacket)
-void zombies_send_end_stats(Game *game) {
+static void zombie_stats_add(NetZombieStatsPacket *packet, const Player *p) {
+    for (int i = 0; i < packet->count; i++)
+        if (packet->entries[i].uid == p->uid) return;
+    if (packet->count >= NET_MODE_END_MAX) return;
+    NetZombieStatsEntry *e = &packet->entries[packet->count++];
+    e->uid = p->uid;
+    e->zombies = (int16_t) (p->mode.ai_kills > 32767 ? 32767 : p->mode.ai_kills);
+    e->rounds = (int16_t) (p->mode.rounds > 32767 ? 32767 : p->mode.rounds);
+}
+
+// zom.js endStats zombies / rounds: the players' aiKills and rounds, sent before the end table (NET_PACKET_MODE_END's
+// stats array is full, see NetZombieStatsPacket). The packet holds 16, so they are the end order's first 16 (the END's
+// board; the rows past 16 carry theirs in NET_EXT_KN_END_ROW). In join order, a 20-player end's best 4 had no cells.
+void zombies_send_end_stats_to(Game *game, const int target) {
     if (!game || !game_is_authority(game)) return;
     NetZombieStatsPacket packet;
     memset(&packet, 0, sizeof(packet));
-    for (size_t i = 0; i < game->player_count && packet.count < NET_MODE_END_MAX; i++) {
-        const Player *p = game->players[i];
-        if (!p) continue;
-        NetZombieStatsEntry *e = &packet.entries[packet.count++];
-        e->uid = p->uid;
-        e->zombies = (int16_t) (p->mode.ai_kills > 32767 ? 32767 : p->mode.ai_kills);
-        e->rounds = (int16_t) (p->mode.rounds > 32767 ? 32767 : p->mode.rounds);
+    for (size_t i = 0; i < game->end_order_count && i < GAME_END_ROWS_MAX; i++) {
+        const Player *p = game_find_player(game, game->end_order_uids[i]);
+        if (p) zombie_stats_add(&packet, p);
     }
-    game_send(game, NET_TARGET_ALL, NET_PACKET_ZOMBIE_STATS, &packet, sizeof(packet));
+    for (size_t i = 0; i < game->player_count; i++) // without an end order (or with fewer players in it): join order
+        if (game->players[i]) zombie_stats_add(&packet, game->players[i]);
+    game_send(game, target, NET_PACKET_ZOMBIE_STATS, &packet, sizeof(packet));
+}
+
+void zombies_send_end_stats(Game *game) {
+    zombies_send_end_stats_to(game, NET_TARGET_ALL);
 }
 
 // ------------------------------------------------------------------ client mirror

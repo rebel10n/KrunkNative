@@ -554,6 +554,8 @@ int mode_input_locked(const struct Player_t*);               // lockPlayer
 int mode_team_score(const struct Game_t*, int team);
 void mode_send_state(struct Game_t*, int uid);       // NET_PACKET_MODE_STATE to `uid` (NET_TARGET_ALL: one per player)
 void mode_send_end(struct Game_t*, ModeWinner, struct Player_t **sorted, size_t count); // NET_PACKET_MODE_END
+// The same packets (END_STATS, the END_ROWs, MODE_END) to one target: a late END's peer (game_send_end_late)
+void mode_send_end_to(struct Game_t*, int target, ModeWinner, struct Player_t **sorted, size_t count);
 // WP-E: one mode.leaderStats value of a player as v7 syncLeaders sends it (config.endForm for
 // objective / confirms / denies / dmg / zombies / downs / points, else the player field).
 int mode_leader_stat_value(const struct Player_t*, const char *key);
