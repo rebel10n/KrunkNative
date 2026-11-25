@@ -232,13 +232,15 @@ def main():
 
         second = r"\[paint\] mesh enabled=1 shader=-?\d+ color=00ff00"
         first = r"\[paint\] mesh enabled=1 shader=-?\d+ color=ff0000"
-        weapon_wear = r"\[wear\] weapons/\S+_wear level=0\.4500"
+        # Topo has no mid: v10's key is weapons/weapon_2_wear (deob-10.0.7.js:174185), one of the weapon wear maps
+        # krunker.io's asset host has (tools/ui-import/live_assets_v10.lock), so map=1: the wear is drawn
+        weapon_wear = r"\[wear\] weapons/weapon_2_wear level=0\.4500 map=1"
         melee_wear = r"\[wear\] melee/melee_182_wear level=0\.7100 map=1"
         ok = wait_for(lambda: re.search(second, read(bob_log)) and re.search(melee_wear, read(bob_log)), 150, 1.0)
         bl = read(bob_log)
         check("bob draws alice's Topo with the second copy's paint (color=00ff00)", bool(re.search(second, bl)), bl[-400:])
         check("bob never draws the first copy's paint (color=ff0000)", not re.search(first, bl))
-        check("bob's client gives alice's Topo the second copy's wear (level 0.4500)", bool(re.search(weapon_wear, bl)),
+        check("bob's client gives alice's Topo the second copy's wear (weapon_2_wear level 0.4500, map=1)", bool(re.search(weapon_wear, bl)),
               "\n".join(l for l in bl.splitlines() if l.startswith("[wear]"))[-400:])
         check("bob's client gives alice's melee the second copy's wear (melee_182_wear level 0.7100, map=1)", bool(re.search(melee_wear, bl)),
               "\n".join(l for l in bl.splitlines() if l.startswith("[wear]"))[-400:])

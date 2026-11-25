@@ -177,7 +177,6 @@ ported every gap except these (doc/v10/parity-audit-2026-11-20-ui.md, "Round 11"
 | Window | v10.0.7 | KrunkNative (kept) | Why / where |
 |---|---|---|---|
 | Prize wheels | a copy's wear comes from Krunker's server-side distribution | uniform in [0, 1) | the distribution is not in the bundle; `services/brain/store.c` |
-| Prize wheels | a weapon copy shows its wear map on the model | typed items show wear; weapons do not | the assets have no `weapons/weapon_N_wear` textures; `spin_wheel.c` |
 | Prize wheels | Purchase More writes the catalogue key into `onclick` with raw quotes, which breaks its own button | the quotes are escaped (`&quot;`) | a v10 bug; `store_ui.c` `spin_error` |
 | KrunkCup | `/krunkcup/wristband` and its claim are defined but never called | `{claimed, eligible, team, item_id}`, a `{team}` claim and 400 `KRUNKCUP_REFUSED` | the shape is KrunkNative's own; `v10_account.c` |
 | KrunkCup | top players' team from Krunker's tournament data | the team the player scored most for | `services/brain/leaderboards.c` |

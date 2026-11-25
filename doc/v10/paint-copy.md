@@ -282,8 +282,11 @@ KrunkNative:
   :173646-173651), of a melee (`melee/melee_<id>_wear`, :174102-174107) and of a weapon skin
   (`weapons/<src>[_<mid>]_wear`, :174184-174189, `skin_fx_weapon_wear_key`) at the copy's `m.wear`, mixed by
   `basic.frag`'s `wear_apply` as v10's `iïìîïiì` (:95713-95730). Another player's levels come from the two V2 packets
-  (`skin_counter_wear`, `skin_style_wear_of`). The assets ship no weapon wearMap yet (melee 182-200 and a few cosmetics
-  only): a weapon skin's wear is computed and logged (`[wear] ... map=0`) but not drawn.
+  (`skin_counter_wear`, `skin_style_wear_of`). The weapon wearMaps are the 31 that krunker.io's asset host has
+  (fetched 2026-11-25 for every weapon and model id in assets/skins.json, pinned in
+  tools/ui-import/live_assets_v10.lock; the other 328 keys answer 404 there, tools/ui-import/live_assets_absent.tsv).
+  A skin with no wearMap on the host draws none in v10 either; its wear is computed and logged (`[wear] ... map=0`).
+  copy_pick_e2e checks Topo's `weapons/weapon_2_wear` at `map=1`.
 - The item view (`view_item`, :223653-223690): the account's first entry of the index gives `.itemViewWear` ("<tier>
   (wear.toFixed(4))" and `#serial`), `.itemViewDesc` / `.itemViewDescWear` with the type label (`iìíiiií`,
   :24595-24598), and the viewer URL's `&wear`, `&paint`, `&style`, `&seed` and counter stats (`ui_loadout_paint_query`).
