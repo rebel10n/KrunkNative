@@ -1710,6 +1710,16 @@ else ()
             add_test(NAME market_copies_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/market_copies_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(market_copies_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # kio_owner_items_e2e: a krunker.io account's tw_twitchname and player_skinmaker (its "a" and an "ua" setData row's
+            # [23] / [42]) reach getSkins: the Hat picker lists the streamer's and the skin maker's items (deob-10.0.7.js:217752-217795)
+            add_test(NAME kio_owner_items_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/kio_owner_items_e2e.py
+                     ${CMAKE_BINARY_DIR} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set_tests_properties(kio_owner_items_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # v10_customize_e2e: Customize / Loadout / Titles / Store on a real kn_brain and server_bin: class locks, the Hat
+            # picker, titles, a Starter spin, the Daily Spin and getSkins' owner items (streamer, developer, skin maker)
+            add_test(NAME v10_customize_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_customize_e2e.py
+                     ${CMAKE_BINARY_DIR} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set_tests_properties(v10_customize_e2e PROPERTIES TIMEOUT 1200 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # player_rank_flag_server_e2e: the same two slots from a brain-linked server_bin (ranked_rank, stats.flg, the
             # showBadges.rank / anonMode gates) and a protocol 1.3.1 peer that gets none (server/tests/player_rank_flag_e2e.py)
             add_test(NAME player_rank_flag_server_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/player_rank_flag_e2e.py
