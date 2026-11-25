@@ -74,6 +74,9 @@ typedef struct {
     // m[stat] of a counter skin's copy, -1 none (skin_counters_load): a slot naming this copy counts from it, not from the
     // index's first counted copy (v10.0.7 counts from the slot's own m, deob-10.0.7.js:173031, m from :174120)
     int64_t counter;
+    // what this match counted on this copy (a slot naming it), taken with the copy's id: v10.0.7 keys a match's skinStats
+    // by the copy (deob-10.0.7.js:176205) and adds each to that copy (:191914-191936)
+    int64_t pending;
 } ServerSkinCopy;
 
 // v10.0.4 counter skins (server/src/skin_counters_server.c): a counter skin the account owns, its copy's stat (m[stat],
@@ -83,7 +86,8 @@ typedef struct {
     int32_t skin;    // store.skins index
     int32_t stat;    // index in SKIN_STATS (shared.h)
     int64_t base;    // the copy's stat when the account was read
-    int64_t pending; // counted since the last commit
+    int64_t pending; // counted since the last commit, on every copy of the index
+    int32_t base_copy; // the owned entry `base` is from (a copy's id, 0 a stack): a plain-index slot's counts go there
 } ServerSkinCounter;
 
 // WP-E part 2c: one challenges.update tally (shared/include/progression.h)

@@ -493,33 +493,45 @@ cJSON *db_owned_skins(Dbx *x, int64_t id) {
         cJSON_AddItemToArray(rows, c);
     }
     cJSON_Delete(copies);
-    /* v10.0.4 counter skins: a counter skin's stat is its copy's m[stat] (deob-10.0.4.js:172726-172728); Box Office keeps it
-     * per store index (skin_stats, 0365), so the first entry of that index carries it */
-    cJSON *counts = dbx_rows(x, SQL(.any = "SELECT skin_id AS ind, stat, count FROM skin_stats WHERE account_id = $1 AND count > 0"),
-                             KN_DB_ARGS(I64S(id)));
+    /* v10 counter skins: a counter skin's stat is the m[stat] of the copy that counted it (takeSkinStats adds to that copy,
+     * deob-10.0.7.js:191929-191932; the base is the worn copy's m[stat] || 0, :173031). skin_stats keeps it per copy (0406):
+     * a copy's count goes on the entry with that id (none when the copy left the account), a stack's (copy 0) on the
+     * stack, else on the index's first entry (a stack row whose units were all painted since). */
+    cJSON *counts = dbx_rows(x,
+        SQL(.any = "SELECT skin_id AS ind, copy_id AS id, stat, count FROM skin_stats WHERE account_id = $1 AND count > 0"
+                   " ORDER BY skin_id, copy_id"),
+        KN_DB_ARGS(I64S(id)));
     if (dbx_failed(x)) {
         cJSON_Delete(counts);
         cJSON_Delete(rows);
         return NULL;
     }
     cJSON_ArrayForEach(row, counts) {
-        const int64_t ind = kn_json_int(row, "ind", -1);
+        const int64_t ind = kn_json_int(row, "ind", -1), copy = kn_json_int(row, "id", 0);
         const char *stat = kn_json_str(row, "stat", "");
         if (ind < 0 || !*stat) continue;
-        cJSON *entry;
+        cJSON *entry, *target = NULL, *first = NULL;
         cJSON_ArrayForEach(entry, rows) {
             if (kn_json_int(entry, "ind", -2) != ind) continue;
-            cJSON *m = cJSON_GetObjectItemCaseSensitive(entry, "m");
-            if (!cJSON_IsObject(m)) {
-                cJSON_DeleteItemFromObjectCaseSensitive(entry, "m");
-                m = cJSON_AddObjectToObject(entry, "m");
+            if (!first) first = entry;
+            if (kn_json_int(entry, "id", 0) == copy) { /* a stack has no id: 0 */
+                target = entry;
+                break;
             }
-            if (m) {
-                cJSON_DeleteItemFromObjectCaseSensitive(m, stat);
-                cJSON_AddNumberToObject(m, stat, (double) kn_json_int(row, "count", 0));
-            }
-            break;
         }
+        if (!target && copy <= 0) target = first;
+        if (!target) continue;
+        cJSON *m = cJSON_GetObjectItemCaseSensitive(target, "m");
+        if (!cJSON_IsObject(m)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(target, "m");
+            m = cJSON_AddObjectToObject(target, "m");
+        }
+        if (!m) continue;
+        /* a stack row landing on a copy that has its own count: the two add up */
+        const cJSON *had = cJSON_GetObjectItemCaseSensitive(m, stat);
+        const double n = (double) kn_json_int(row, "count", 0) + (cJSON_IsNumber(had) ? had->valuedouble : 0.0);
+        cJSON_DeleteItemFromObjectCaseSensitive(m, stat);
+        cJSON_AddNumberToObject(m, stat, n);
     }
     cJSON_Delete(counts);
     /* v10.0.7 item styles (item_styles, 0393): m.style on the stack (copy_id 0) or the copy it was set on; the card and
