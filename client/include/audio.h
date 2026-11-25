@@ -96,6 +96,22 @@ void audio_set_rate(float rate);
 // SOUND.play(name, volume, loop, rate): 2D. A looping sound that is already playing is not
 // restarted (Krunker's `!j || !f.isPlaying`). volume <= 0 means 1, rate <= 0 means 1.
 void audio_play(const char *name, float volume, int loop, float rate);
+// SOUND.play(name, volume, loop, rate, custom, undefined, {fadeIn: fade_ms}) (deob-10.0.7.js:200763-200789): as
+// audio_play, but the voice starts silent and Howl.fade(0, volume x category, fade_ms || 2000) ramps it, and every
+// other 2D voice of the clip, linearly to its volume (the fade waits for the clip to load, as Howler queues it).
+void audio_play_fade_in(const char *name, float volume, int loop, float rate, float fade_ms);
+// SOUND.fadeOut(name, custom, from, ms) (:200799-200807): every 2D voice of `name` jumps to the Howler gain `from`
+// (0: the category volume) and ramps linearly to 0 over ms || 2000. Howler's fade never stops a sound: the voice
+// keeps looping at gain 0 and stops counting as playing, so the next audio_play of it starts a second voice. A
+// category volume change (Howl.volume) ends the fade and brings it back, as in v10.
+void audio_fade_out(const char *name, float from, float ms);
+// The index-th 2D voice of `name` (audio_fade_test): its fade, whether it still counts as playing, and the gain it
+// settles at (the fade's end while a fade holds it, else volume x category). 0 when there is no such voice.
+typedef struct {
+    int faded, playing, looping;
+    float from, to, ms, gain;
+} AudioVoiceFade;
+int audio_voice_fade(const char *name, int index, AudioVoiceFade *out);
 // SOUND.play3D(name, x, y, z, volume, rate, refDistance, rolloff): positional one-shot;
 // volume is multiplied by AUDIO_OTHER_SOUND_MLT like Krunker. ref_distance/rolloff <= 0 use
 // the defaults above.

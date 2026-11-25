@@ -76,6 +76,11 @@ typedef struct {
     float volume;          // Howl `vol`: volume before the category factor
     uint32_t handle;       // audio_handle_play voice (KrunkScript sounds), 0 = none
     int muted;             // audio_handle_mute
+    // A Howl.fade runs on miniaudio's fader with the volume stage at unity: from / to are Howler gains (category
+    // included). Howl.volume() ends a fade (Howler _stopFade), so voice_apply_volume clears it.
+    int faded;
+    float fade_from, fade_to, fade_ms;
+    int faded_out;         // SOUND.fadeOut cleared Howl.isPlaying: the loop keeps playing silent, a play starts another
     ma_audio_buffer_ref buffer;
     ma_decoder decoder;
     ma_sound sound;
@@ -89,6 +94,9 @@ typedef struct {
     float volume, rate, ref_distance, rolloff;
     int distance_model;    // AudioDistanceModel (positional voices)
     uint32_t handle;       // audio_handle_play, 0 = none
+    float fade_in_ms;      // play(..., {fadeIn}): > 0 or < 0 fades the clip's voices in once it plays, 0 none
+    int fade_out;          // SOUND.fadeOut before the clip loaded: Howler queues the fade behind the play
+    float fade_out_from, fade_out_ms;
 } PendingPlay;
 
 static struct {
@@ -464,11 +472,37 @@ static float spatial_compensation(const AudioVoice *voice) {
 
 static void voice_apply_volume(AudioVoice *voice) {
     const AudioClip *clip = &g_audio.clips[voice->clip];
+    if (voice->faded) {
+        voice->faded = 0;
+        ma_sound_set_fade_in_pcm_frames(&voice->sound, 1.0f, 1.0f, 0);
+    }
     if (voice->muted) {
         ma_sound_set_volume(&voice->sound, 0.0f);
         return;
     }
     ma_sound_set_volume(&voice->sound, clamp01(voice->volume * category_factor(clip->category)) * spatial_compensation(voice));
+}
+
+// Howl.fade(from, to, len, id) on Web Audio: the gain jumps to `from` and ramps linearly to `to`
+// (linearRampToValueAtTime), both clamped to 0..1; a ramp whose end is not in the future lands on `to` at once.
+// miniaudio's fader is the same linear ramp, sample accurate on the engine clock.
+static void voice_fade(AudioVoice *voice, const float from, const float to, const float ms) {
+    voice->faded = 1;
+    voice->fade_from = clamp01(from);
+    voice->fade_to = clamp01(to);
+    voice->fade_ms = ms > 0.0f ? ms : 0.0f;
+    ma_sound_set_volume(&voice->sound, voice->muted ? 0.0f : spatial_compensation(voice));
+    ma_sound_set_fade_in_milliseconds(&voice->sound, voice->fade_from, voice->fade_to, (ma_uint64) voice->fade_ms);
+}
+
+// Howl.fade without an id covers every sound of the Howl: each 2D voice of the clip
+static void clip_fade(const int clip, const float from, const float to, const float ms, const int fade_out) {
+    for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
+        AudioVoice *voice = &g_audio.voices[i];
+        if (!voice->in_use || voice->clip != clip || voice->kind != VOICE_2D) continue;
+        if (fade_out) voice->faded_out = 1;
+        voice_fade(voice, from, to, ms);
+    }
 }
 
 static AudioVoice *voice_alloc(void) {
@@ -548,6 +582,11 @@ static void voice_start(const PendingPlay *play) {
     ma_sound_set_pitch(&voice->sound, play->rate);
     ma_sound_set_looping(&voice->sound, play->loop ? MA_TRUE : MA_FALSE);
     voice_apply_volume(voice);
+    // play(..., {fadeIn}): the Howl starts at volume 0 and fade(0, vol, fadeIn || 2000) covers all of its sounds,
+    // a silent faded-out loop of the same clip included (deob-10.0.7.js:200766-200779, Howler fade). Set before the
+    // start, so the mixer thread never plays a period of the new voice at its full volume.
+    if (play->fade_in_ms != 0.0f) clip_fade(play->clip, 0.0f, voice->volume * category_factor(clip->category), play->fade_in_ms, 0);
+    if (play->fade_out) clip_fade(play->clip, play->fade_out_from, 0.0f, play->fade_out_ms, 1);
     ma_sound_start(&voice->sound);
 
     if (g_audio.log) {
@@ -569,17 +608,17 @@ static void voice_start(const PendingPlay *play) {
 static int clip_is_playing(const int clip, const VoiceKind kind) {
     for (int i = 0; i < AUDIO_MAX_VOICES; i++) {
         const AudioVoice *voice = &g_audio.voices[i];
-        if (voice->in_use && voice->clip == clip && voice->kind == kind && ma_sound_is_playing(&voice->sound)) return 1;
+        if (voice->in_use && voice->clip == clip && voice->kind == kind && !voice->faded_out && ma_sound_is_playing(&voice->sound)) return 1;
     }
     for (int i = 0; i < g_audio.pending_count; i++) {
-        if (g_audio.pending[i].clip == clip && g_audio.pending[i].kind == kind) return 1;
+        if (g_audio.pending[i].clip == clip && g_audio.pending[i].kind == kind && !g_audio.pending[i].fade_out) return 1;
     }
     return 0;
 }
 
-static void play_request_handle(const char *name, const VoiceKind kind, const int loop, const vec3 position,
-                                const float volume, const float rate, const float ref_distance, const float rolloff,
-                                const int distance_model, const uint32_t handle) {
+static void play_request_fade(const char *name, const VoiceKind kind, const int loop, const vec3 position,
+                              const float volume, const float rate, const float ref_distance, const float rolloff,
+                              const int distance_model, const uint32_t handle, const float fade_in_ms) {
     if (!g_audio.ready) return;
 
     char key[AUDIO_NAME_MAX];
@@ -603,6 +642,7 @@ static void play_request_handle(const char *name, const VoiceKind kind, const in
         .distance_model = distance_model >= AUDIO_DISTANCE_INVERSE && distance_model <= AUDIO_DISTANCE_EXPONENTIAL ? distance_model
                                                                                                                  : AUDIO_DISTANCE_INVERSE,
         .handle = handle,
+        .fade_in_ms = fade_in_ms,
     };
 
     if (g_audio.clips[clip].state == CLIP_READY) {
@@ -613,6 +653,12 @@ static void play_request_handle(const char *name, const VoiceKind kind, const in
     // Not decoded yet: audio_update() loads it (outside any UI event handler) and plays it.
     if (g_audio.pending_count < AUDIO_MAX_PENDING) g_audio.pending[g_audio.pending_count++] = play;
     if (g_audio.clips[clip].state == CLIP_UNLOADED) g_audio.clips[clip].state = CLIP_QUEUED;
+}
+
+static void play_request_handle(const char *name, const VoiceKind kind, const int loop, const vec3 position,
+                                const float volume, const float rate, const float ref_distance, const float rolloff,
+                                const int distance_model, const uint32_t handle) {
+    play_request_fade(name, kind, loop, position, volume, rate, ref_distance, rolloff, distance_model, handle, 0.0f);
 }
 
 static void play_request(const char *name, const VoiceKind kind, const int loop, const vec3 position,
@@ -1059,6 +1105,55 @@ void audio_play(const char *name, const float volume, const int loop, const floa
     if (scale <= 0.0f) return;
     const vec3 origin = {0};
     play_request(name, VOICE_2D, loop, origin, volume > 0.0f ? volume : 1.0f, rate > 0.0f ? rate * scale : rate, 0.0f, 0.0f);
+}
+
+void audio_play_fade_in(const char *name, const float volume, const int loop, const float rate, const float fade_ms) {
+    const float scale = g_audio.rate_scale;
+    if (scale <= 0.0f) return;
+    const vec3 origin = {0};
+    play_request_fade(name, VOICE_2D, loop, origin, volume > 0.0f ? volume : 1.0f, rate > 0.0f ? rate * scale : rate, 0.0f, 0.0f,
+                      AUDIO_DISTANCE_INVERSE, 0, fade_ms != 0.0f ? fade_ms : 2000.0f);
+}
+
+void audio_fade_out(const char *name, const float from, const float ms) {
+    if (!g_audio.ready) return;
+    char key[AUDIO_NAME_MAX];
+    const int clip = clip_find(sound_key(name, key, sizeof(key)), 0);
+    if (clip < 0) return;
+    const float len = ms != 0.0f ? ms : 2000.0f; // fadeOut: `len || 2000`
+    // from: `from || this.getVolume(name, custom)` (deob-10.0.7.js:200801)
+    const float gain = from != 0.0f ? from : category_factor(g_audio.clips[clip].category);
+    if (g_audio.log) KN_LOG_VERBOSE2("[audio] t=%.3f fadeout %s from=%.3f ms=%.0f\n", audio_now(), name, gain, len);
+    clip_fade(clip, gain, 0.0f, len, 1);
+    for (int i = 0; i < g_audio.pending_count; i++) {
+        PendingPlay *play = &g_audio.pending[i];
+        if (play->clip != clip || play->kind != VOICE_2D) continue;
+        play->fade_out = 1;
+        play->fade_out_from = gain;
+        play->fade_out_ms = len;
+    }
+}
+
+int audio_voice_fade(const char *name, const int index, AudioVoiceFade *out) {
+    if (!g_audio.ready || !name) return 0;
+    char key[AUDIO_NAME_MAX];
+    const int clip = clip_find(sound_key(name, key, sizeof(key)), 0);
+    int n = 0;
+    for (int i = 0; clip >= 0 && i < AUDIO_MAX_VOICES; i++) {
+        const AudioVoice *voice = &g_audio.voices[i];
+        if (!voice->in_use || voice->clip != clip || voice->kind != VOICE_2D || n++ != index) continue;
+        if (out) {
+            out->faded = voice->faded;
+            out->from = voice->fade_from;
+            out->to = voice->fade_to;
+            out->ms = voice->fade_ms;
+            out->playing = !voice->faded_out;
+            out->looping = ma_sound_is_looping(&voice->sound) ? 1 : 0;
+            out->gain = voice->faded ? voice->fade_to : clamp01(voice->volume * category_factor(g_audio.clips[clip].category));
+        }
+        return 1;
+    }
+    return 0;
 }
 
 void audio_play_3d(const char *name, const vec3 position, const float volume, const float rate,

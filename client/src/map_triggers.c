@@ -335,8 +335,10 @@ int client_triggers_handle_event(Client *client, const int type, const void *pay
             return 1;
         }
         case NET_PACKET_AMBIENT_CHANGE: {
-            TRIGGERS_READ(NetAmbientPacket, packet);
-            sound_events_change_ambient(packet.ambient);
+            NetAmbientPacket packet = {0};
+            if (length != sizeof(packet) && length != NET_AMBIENT_PACKET_V1_SIZE) return 1;
+            memcpy(&packet, payload, length);
+            sound_events_change_ambient(packet.ambient, packet.custom, packet.fade_ms);
             return 1;
         }
         case NET_PACKET_STOP_SOUND: {

@@ -2062,6 +2062,14 @@ else ()
         target_include_directories(audio_distance_test PRIVATE client/include client/lib)
         target_link_libraries(audio_distance_test PRIVATE cJSON freetype glfw Threads::Threads m ${CMAKE_DL_LIBS})
         add_test(NAME audio_distance_test COMMAND audio_distance_test)
+        # audio_fade_test: v10 changeAmbient's custom soundscape and fade (client/src/sound_ambient.c) over audio.c's
+        # Howler fades, miniaudio's fader against Web Audio's linear ramp, on the null backend with generated clips
+        add_executable(audio_fade_test client/tests/audio_fade_test.c client/src/sound_ambient.c client/src/audio.c
+                       client/src/miniaudio.c ${SHARED_HEADERS} ${SHARED_SOURCES})
+        target_include_directories(audio_fade_test PRIVATE client/include client/lib)
+        target_link_libraries(audio_fade_test PRIVATE cJSON freetype glfw Threads::Threads m ${CMAKE_DL_LIBS})
+        add_test(NAME audio_fade_test COMMAND audio_fade_test)
+        set_tests_properties(audio_fade_test PROPERTIES SKIP_RETURN_CODE 77)
         # audio_ogg_test: Ogg Vorbis through miniaudio + stb_vorbis (client/src/miniaudio.c), the Skin Manager's .ogg sounds
         add_executable(audio_ogg_test client/tests/audio_ogg_test.c client/src/miniaudio.c)
         target_include_directories(audio_ogg_test PRIVATE client/include client/lib)

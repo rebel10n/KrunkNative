@@ -902,6 +902,9 @@ static void test_fx(void) {
     feed(&link, "is", (KrunkerValue[]) {KRUNKER_V_STR("nuke_0"), KRUNKER_V_STR("img/x")}, 2);
     feed(&link, "camb", (KrunkerValue[]) {KRUNKER_V_STR("3")}, 1);
     feed(&link, "camb", (KrunkerValue[]) {KRUNKER_V_STR("77"), KRUNKER_V_BOOL(1)}, 2);
+    feed(&link, "camb", (KrunkerValue[]) {KRUNKER_V_NUM(123456.9), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2.5)}, 3);
+    feed(&link, "camb", (KrunkerValue[]) {KRUNKER_V_STR(" 0x1fzz"), KRUNKER_V_BOOL(0), KRUNKER_V_STR("0.25")}, 3);
+    feed(&link, "camb", (KrunkerValue[]) {KRUNKER_V_BOOL(1), KRUNKER_V_STR(""), KRUNKER_V_STR("2s")}, 3);
     feed(&link, "shk", (KrunkerValue[]) {KRUNKER_V_NUM(0.4)}, 1);
     feed(&link, "ana", (KrunkerValue[]) {KRUNKER_V_NUM(12), KRUNKER_V_NUM(5), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(1)}, 4);
     feed(&link, "ana", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_STR("Dance"), KRUNKER_V_BOOL(1)}, 3);
@@ -917,6 +920,10 @@ static void test_fx(void) {
         READ_IN(NetCheatPacket, fh, CHEAT, 0);
         READ_IN(NetJumpScarePacket, sc, JUMP_SCARE, 0);
         READ_IN(NetAmbientPacket, am, AMBIENT_CHANGE, 0);
+        READ_IN(NetAmbientPacket, am_c, AMBIENT_CHANGE, 1);
+        READ_IN(NetAmbientPacket, am_f, AMBIENT_CHANGE, 2);
+        READ_IN(NetAmbientPacket, am_h, AMBIENT_CHANGE, 3);
+        READ_IN(NetAmbientPacket, am_n, AMBIENT_CHANGE, 4);
         READ_IN(NetObjectAnimPacket, oa, OBJECT_ANIM, 0);
         READ_IN(NetAIAnimPacket, aa, AI_ANIM, 0);
         uint16_t sl = 0;
@@ -935,7 +942,15 @@ static void test_fx(void) {
         CHECK(rs_p && !rs.add && rs.force && rs.uid == 7 && !find_in(NET_PACKET_PLAYER_SOUND, 2), "rsnd without a name: all; asnd jug_0 skipped");
         CHECK(fh_p && fh.flag == NET_CHEAT_FORCE_HIDE && fh.on, "fh");
         CHECK(sc_p && sc.index == 1, "scr");
-        CHECK(am_p && am.ambient == 3 && !find_in(NET_PACKET_AMBIENT_CHANGE, 1), "camb parseInt, a custom one dropped");
+        // window.changeAmbient(parseInt(id), custom, 1000 * (fade || 0)) (deob-10.0.7.js:227084-227090)
+        CHECK(am_p && am.ambient == 3 && !am.custom && am.fade_ms == 0.0f, "camb parseInt(\"3\"), no fade");
+        CHECK(am_c_p && am_c.ambient == 77 && am_c.custom && am_c.fade_ms == 0.0f, "camb custom: the asset id");
+        CHECK(am_f_p && am_f.ambient == 123456 && am_f.custom && fabsf(am_f.fade_ms - 2500.0f) < 1e-3f,
+              "camb custom asset 123456 with a 2.5 s fade (%d %u %g)", am_f.ambient, am_f.custom, am_f.fade_ms);
+        CHECK(am_h_p && am_h.ambient == 31 && !am_h.custom && fabsf(am_h.fade_ms - 250.0f) < 1e-3f,
+              "camb parseInt(\" 0x1fzz\") = 31, a \"0.25\" fade is 250 ms (%d %g)", am_h.ambient, am_h.fade_ms);
+        CHECK(am_n_p && am_n.ambient == INT32_MIN && !am_n.custom && am_n.fade_ms == 0.0f && !find_in(NET_PACKET_AMBIENT_CHANGE, 5),
+              "camb parseInt(true) is NaN, Number(\"2s\") NaN fades nothing (%d %g)", am_n.ambient, am_n.fade_ms);
         CHECK(shk && fabsf(shake.amount - 0.4f) < 1e-6f, "shk -> NET_EXT_KN_OFFICIAL_SHAKE");
         CHECK(oa_p && oa.uid == 12 && oa.is_object && !oa.raw && !strcmp(oa.clip, "Shoot"), "ana: a map object, clipNames[5]");
         CHECK(aa_p && aa.sid == 3 && aa.raw && !strcmp(aa.clip, "Dance"), "ana: an AI's raw clip");

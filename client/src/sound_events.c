@@ -13,6 +13,7 @@
 #include <sound_events.h>
 #include <class_camera.h> // the listener at the head
 #include <audio.h>
+#include <sound_ambient.h> // changeAmbient
 #include <client_settings.h> // Settings > Game > Gameplay "Always Play HS Sound on Kill"
 #include <ui_logic.h>        // particles / bulletCasings: the case_ sound
 #include <cosmetics.h>
@@ -72,7 +73,6 @@ static struct {
     PlayerTrack remote[MAX_REMOTE];
     const Map *map;
     int map_index;
-    int ambient;            // ambient_N currently looping, 0 = none
     int preloaded;
     float now; // sound_events_tick's clock (the remote Piss spray throttle)
     float plant_tick; // Defuse: interTick, the planter's beep_0 countdown (s)
@@ -122,10 +122,6 @@ static const struct {
 };
 
 // Krunker's amvVols: per-ambience volume, 0.12 otherwise.
-static float ambient_volume(const int index) {
-    return index == 6 ? 0.3f : index == 7 ? 0.4f : 0.12f;
-}
-
 static float rand_float(const float min, const float max) {
     return min + (max - min) * (float) ((double) pcg32_random() / (double) UINT32_MAX);
 }
@@ -220,12 +216,12 @@ static float distance2(const vec3 a, const vec3 b) {
 
 // ---------------------------------------------------------------- map ambience / emitters
 
-static int map_ambient_index(const Map *map) {
-    const cJSON *amb = map && map->raw_data ? cJSON_GetObjectItem(map->raw_data, "ambInd") : NULL;
-    int index = 0;
-    if (cJSON_IsNumber(amb)) index = amb->valueint;
-    else if (cJSON_IsString(amb) && amb->valuestring) index = atoi(amb->valuestring); // parseInt
-    return index > 0 ? index : 1;
+// JS truthiness of a map value
+static int json_truthy(const cJSON *json) {
+    if (!json || cJSON_IsNull(json) || cJSON_IsFalse(json)) return 0;
+    if (cJSON_IsNumber(json)) return cJSON_GetNumberValue(json) != 0;
+    if (cJSON_IsString(json)) return cJSON_GetStringValue(json)[0] != 0;
+    return 1;
 }
 
 // map.js SOUND_EMITTER -> MapManager.addEmitter -> SOUND.play3DL (deob-10.0.3.js:189196-189204,
@@ -258,19 +254,55 @@ static void map_start_emitters(const Map *map) {
     }
 }
 
-// 106.js game init: `H.play("ambient_" + ambInd, amvVols[ambInd] || 0.12, true, 1)`, the
-// previous ambience stopped only when the index changes.
-// WP-C "camb" (v7 window.changeAmbient): the ambience loop switches when the index changes.
-void sound_events_change_ambient(const int ambient) {
-    if (ambient <= 0 || ambient == g_sound.ambient) return;
-    char name[32];
-    if (g_sound.ambient) {
-        snprintf(name, sizeof(name), "ambient_%d", g_sound.ambient);
-        audio_stop(name);
+// parseInt(text): leading blanks, a sign, "0x" hex, decimal digits; SOUND_AMBIENT_NAN without a digit
+static int js_parse_int(const char *text) {
+    const char *c = text;
+    while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r' || *c == '\v' || *c == '\f') c++;
+    int sign = 1;
+    if (*c == '-' || *c == '+') sign = *c++ == '-' ? -1 : 1;
+    int base = 10;
+    if (c[0] == '0' && (c[1] == 'x' || c[1] == 'X')) {
+        base = 16;
+        c += 2;
     }
-    g_sound.ambient = ambient;
-    snprintf(name, sizeof(name), "ambient_%d", ambient);
-    audio_play(name, ambient_volume(ambient), 1, 1.0f); // SOUND.play("ambient_" + id, amvVols[id] || 0.12, true, 1)
+    long long value = 0;
+    int digits = 0;
+    for (;; c++, digits++) {
+        const int d = *c >= '0' && *c <= '9' ? *c - '0' : base == 16 && *c >= 'a' && *c <= 'f' ? *c - 'a' + 10
+                    : base == 16 && *c >= 'A' && *c <= 'F' ? *c - 'A' + 10 : -1;
+        if (d < 0) break;
+        if (value < 0x7fffffffLL) value = value * base + d;
+    }
+    if (!digits) return SOUND_AMBIENT_NAN;
+    if (value > 0x7fffffffLL) value = 0x7fffffffLL;
+    return (int) (sign * value);
+}
+
+// parseInt of a map value
+static int ambient_parse_int(const cJSON *v) {
+    if (cJSON_IsNumber(v)) {
+        const double d = v->valuedouble;
+        if (!isfinite(d)) return SOUND_AMBIENT_NAN;
+        const double t = d < 0 ? ceil(d) : floor(d);
+        return t > 2147483647.0 ? 2147483647 : t < -2147483647.0 ? -2147483647 : (int) t;
+    }
+    if (!cJSON_IsString(v) || !v->valuestring) return SOUND_AMBIENT_NAN;
+    return js_parse_int(v->valuestring);
+}
+
+// The game start's soundscape (deob-10.0.7.js:193909-193915): `mode.ambInd || map.ambInd || 1`, a truthy map
+// ambIndC replacing it as a custom one, then the same switch as changeAmbient without a fade.
+static void map_ambient(const Map *map, const GameMode *mode, int *id, int *custom) {
+    const cJSON *amb = map && map->raw_data ? cJSON_GetObjectItem(map->raw_data, "ambInd") : NULL;
+    const cJSON *amb_c = map && map->raw_data ? cJSON_GetObjectItem(map->raw_data, "ambIndC") : NULL;
+    *custom = 0;
+    if (mode && mode->config.amb_ind) *id = mode->config.amb_ind;
+    else if (amb && json_truthy(amb)) *id = ambient_parse_int(amb);
+    else *id = 1;
+    if (amb_c && json_truthy(amb_c)) {
+        *id = ambient_parse_int(amb_c);
+        *custom = 1;
+    }
 }
 
 static void map_sounds_update(Client *client) {
@@ -283,19 +315,10 @@ static void map_sounds_update(Client *client) {
     nettspend_audio_reset(); // KrunkNative Nettspend: a laced state does not outlive its map
     if (!map) return;
 
-    const int ambient = map_ambient_index(map);
-    char name[32];
-
-    if (ambient != g_sound.ambient) {
-        if (g_sound.ambient) {
-            snprintf(name, sizeof(name), "ambient_%d", g_sound.ambient);
-            audio_stop(name);
-        }
-        g_sound.ambient = ambient;
-    }
-
-    snprintf(name, sizeof(name), "ambient_%d", ambient);
-    audio_play(name, ambient_volume(ambient), 1, 1.0f); // no-op while that loop already plays
+    int ambient, custom;
+    map_ambient(map, client->game.mode, &ambient, &custom);
+    sound_events_change_ambient(ambient, custom, 0.0f);
+    sound_ambient_play(ambient, custom, 0.0f); // the same soundscape again: no-op while its loop plays
 
     map_start_emitters(map);
 }
