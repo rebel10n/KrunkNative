@@ -749,6 +749,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/v10_menu_e2e.py ${CMAKE_BINARY_DIR}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_menu_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "brain;db;ui;e2e")
+    # a shader paint seen by a second client: both draw the paintShader on the worn copy (skin_fx.c)
+    add_test(NAME brain_paint_shader_two_client_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/paint_shader_two_client_e2e.py ${CMAKE_BINARY_DIR}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_paint_shader_two_client_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
     # a K.P.D replay of a map the client lacks: demo_play_start fetches it from the brain first, as v10's initGame
     # GET /maps/<id> (deob-10.0.7.js:226167), instead of building map index 0 after the 20 s wait
     add_test(NAME brain_kpd_replay_map_e2e

@@ -280,6 +280,7 @@ GUEST_SCRIPT = """0 menu
 7600 clickid accPass
 7650 type {pw}
 7700 clickid knV10LoginSubmit
+7710 waitfor ![id=knV10Login]
 12000 vis @loggedin knV10Login signedInHeaderBar signedOutHeaderBar
 12100 quit
 """
