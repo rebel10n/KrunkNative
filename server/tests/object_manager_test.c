@@ -1764,7 +1764,8 @@ static void test_map_edits(TestClient *a, TestClient *b, TestClient *late) {
     CHECK(game->map->objects[block] == original && !object_manager_map_edited(game, block) && !object_manager_map_edited(game, pad),
           "round start: the map as it was");
 
-    bc->local = 1;
+    // join(late) realloc'd g_server->clients after bc was taken: look b up again
+    conn(b)->local = 1;
     p->god_mode = q->god_mode = 0;
     leave(late);
     clean_up(a);
@@ -2141,7 +2142,8 @@ static void test_field_edits(TestClient *a, TestClient *b, TestClient *late) {
           !mirror.map->objects[trig]->map_edit, "b's client has the map's own objects back");
 
     // a spawned object: its owner's colour edit (OM_SPAWNED_UPDATE), undone
-    bc->local = 1;
+    // join(late) realloc'd g_server->clients after bc was taken: look b up again
+    conn(b)->local = 1;
     stand_near(p, block0);
     pump(20);
     r = request_at(a, OM_ACTION_SPAWN_OBJECT, entry_index(OM_TAB_OBJECTS, "Crate"), -0.5f, p->direction.y + 1.2f);
