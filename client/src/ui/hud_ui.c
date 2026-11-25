@@ -3976,8 +3976,8 @@ static int hud_end_stat_index(const char *const *stats, const char *key) {
 // key the endStats lack counts 0), funds = the reward cell, else MMR, else "NONE". 0 without the end rows.
 static int hud_end_my_stats(const Client *client, int *rank, int *score, int *kills, int *deaths, char *funds,
                             const size_t funds_size) {
-    int uids[NET_MODE_END_MAX];
-    const int rows = hud_modes_end_rows(uids, NET_MODE_END_MAX);
+    int uids[NET_END_ROWS_MAX]; // the rank of a row past 16 too (NET_EXT_KN_END_ROW)
+    const int rows = hud_modes_end_rows(uids, NET_END_ROWS_MAX);
     const Player *me = client->me;
     if (!rows || !me) return 0;
     const char *const *stats = hud_modes_end_stats(client);
@@ -4222,7 +4222,7 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
 }
 
 static void hud_end_card_render(const Client *client) {
-    enum { END_CARD_HTML = 65536 }; // the leaderboard tab's table (END_TABLE_HTML) and the card around it
+    enum { END_CARD_HTML = HUD_MODES_END_TABLE_HTML + 24576 }; // the leaderboard tab's table and the card around it
     char *html = malloc(END_CARD_HTML);
     if (!html) return;
     hud_end_card_html(client, html, END_CARD_HTML);

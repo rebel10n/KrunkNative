@@ -32,15 +32,13 @@ void hud_modes_scenario(Client*, const struct cJSON *mode_hud); // --render-scen
 const char *const *hud_modes_end_stats(const Client*);
 int  hud_modes_end_rows(int *uids, int max);
 void hud_modes_end_cell(const Player*, const char *stat, char *out, size_t size);
-#define HUD_MODES_END_TABLE_HTML 40960 // room for NET_MODE_END_MAX rows with every icon of the player cell
+#define HUD_MODES_END_TABLE_HTML 163840 // room for NET_END_ROWS_MAX rows (2400 bytes each) with every icon of the player cell
 int  hud_modes_end_table_html(const Client*, char *html, size_t size); // the live #endTable rows (hud_modes.c); 0 without MODE_END
 int  hud_modes_end_team_score(int team);
 int  hud_modes_end_winner_team(void); // MODE_END's winner team: 1 / 2, -1 none (a draw, FFA, a public match), 0 no MODE_END yet
 // An official "end" row (net_ext.h NET_EXT_KN_OFFICIAL_END_ROW, before its END): #endTable prints it
 // even when its player already left (its name cell), and its "dmg" cell.
 void hud_modes_end_row(const NetOfficialEndRowPacket*);
-// NET_EXT_KN_END_STATS of our own server, right before its MODE_END: the "dmg" cells #endTable prints.
-void hud_modes_end_extras(const NetEndStatsPacket*);
 
 // WP-D: the v7.1.4 mode state the HUD shows (ui-v7 owns the DOM): team scores 1..5 (sdm), rounds
 // ("rds"), lockout ("lkt"), the local KR Tags ("krt"), the last "tx" / "Switching Sides" popup.
