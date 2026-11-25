@@ -15,7 +15,7 @@
       ],
       "ref_offset": [
         0,
-        23
+        22
       ],
       "kind": "text",
       "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button)"
@@ -47,7 +47,7 @@
       ],
       "ref_offset": [
         0,
-        -23
+        -22
       ],
       "kind": "image",
       "fuzz": 12,
@@ -64,10 +64,10 @@
       ],
       "ref_offset": [
         0,
-        -23
+        -22
       ],
       "kind": "text",
-      "note": "Official Customs, Custom Games (85 online: the custom games). The window is 78 CSS px taller than v10's (the tab strip, 48 px, and its 30 px margin), so the list sits 22.58 device px lower: offset 23 leaves 0.42 px of anti-aliasing (README, 2026-11-23 triage)"
+      "note": "Official Customs, Custom Games (85 online: the custom games). The window is 76 CSS px taller than v10's (the tab strip, 48 px, and its 28 px margin), so the list sits a whole 22 device px lower"
     },
     {
       "name": "region-groups",
@@ -79,10 +79,10 @@
       ],
       "ref_offset": [
         0,
-        -23
+        -22
       ],
       "kind": "text",
-      "note": "New York, Frankfurt, Sydney below KrunkNative's krunk.io / krunker.io tab bar (732c9bfe): 22.58 device px lower than in v10, offset 23 leaves 0.42 px"
+      "note": "New York, Frankfurt, Sydney below KrunkNative's krunk.io / krunker.io tab bar (732c9bfe): 22 device px lower than in v10"
     },
     {
       "name": "footer",
@@ -94,7 +94,7 @@
       ],
       "ref_offset": [
         0,
-        -23
+        -22
       ],
       "kind": "text",
       "note": "137 In Game: the In Game count only. KrunkNative leaves a count it has not read blank (3cec1138: the scenario reads no editor / social count), where the v10 capture shows 0 in Editor, 0 on Social"

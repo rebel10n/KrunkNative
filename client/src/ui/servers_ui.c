@@ -3296,8 +3296,11 @@ static char *gen_list(void) {
 #else
     // the two tabs, one per backend (krunk.io, krunker.io); each shows the map carousel and the groups of its list
     const char *tabs[SERVER_TAB_COUNT] = {I18N("kn.servers.tabKrunk", "krunk.io"), I18N("kn.servers.tabKrunker", "krunker.io")};
-    // srvTabs (krunknative.css) sets the tabs' padding and line-height: the label sits in the middle of each tab
-    sb_append(&sb, "<div class='bigMenTabs srvTabs' style='margin-top:0px !important;margin-bottom:30px !important;'>");
+    // srvTabs (krunknative.css) sets the tabs' padding and line-height: the label sits in the middle of each tab.
+    // The 48px strip and its 28px margin make the centred window 76 CSS px taller than v10's, 38 px each way: a
+    // whole 22 device px at 1280x720, so the uidiff captures line up at a whole-pixel ref_offset (a 30px margin
+    // gave 22.58 px, and the kn-servers-carousel list failed on the 0.42 px left over).
+    sb_append(&sb, "<div class='bigMenTabs srvTabs' style='margin-top:0px !important;margin-bottom:28px !important;'>");
     for (int i = 0; i < SERVER_TAB_COUNT; i++) sb_appendf(&sb, "<div class='bigMenTab%s' onclick='playSelect();windows[1].switchTab(%d)'>%s</div>", g_server_tab == i ? " bigMenTabA" : "", i, tabs[i]);
     sb_append(&sb, "</div>");
 #endif

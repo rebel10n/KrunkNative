@@ -15,7 +15,7 @@
       ],
       "ref_offset": [
         0,
-        17
+        16
       ],
       "kind": "text",
       "note": "+ Host Game, the search field, Hide Full (left of KrunkNative's download button)"
@@ -30,7 +30,7 @@
       ],
       "ref_offset": [
         0,
-        -17
+        -16
       ],
       "kind": "text",
       "note": "Official Customs and Custom Games"
@@ -45,7 +45,7 @@
       ],
       "ref_offset": [
         0,
-        -17
+        -16
       ],
       "kind": "text",
       "note": "the open official region group: New York, Quick Join, 14 online (below KrunkNative's krunk.io / krunker.io tab bar, 732c9bfe, hence the offset)"
@@ -60,7 +60,7 @@
       ],
       "ref_offset": [
         0,
-        -17
+        -16
       ],
       "kind": "text",
       "max_pct": 5.0,
@@ -76,7 +76,7 @@
       ],
       "ref_offset": [
         0,
-        -17
+        -16
       ],
       "kind": "text",
       "note": "Frankfurt and Sydney"
