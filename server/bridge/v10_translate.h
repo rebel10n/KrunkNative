@@ -359,14 +359,37 @@ void v10_map_game_announcement(V10Out *o, const uint8_t *body, size_t n);
 
 /* ---- SKINS, SPAWN, the add record, START, LEADERBOARD, LEADER_STATS */
 
-/* NetSkinsPacket, or V2 with each worn skin's paint (patch 6): paint_color 0xRRGGBB and paint_shader per slot (primary,
- * secondary, melee), -1 none. has_paint is 0 for a V1 SKINS (and a zeroed struct), so a slot carries no paint then. */
+/* What a player's worn copies carry, kept by uid for its next add record: SKINS (or V2 with each worn skin's paint,
+ * patch 6: paint_color 0xRRGGBB and paint_shader per slot, primary, secondary, melee, -1 none), then the EXTs the server
+ * sends with it (net.c net_send_skins / net_send_spawn): NET_EXT_KN_SKIN_COPIES (each weapon slot's counter base, -1
+ * none, seed, 0 none, and wear, -1 none), NET_EXT_KN_SKIN_META (the wear, serial and name tag of each worn store index)
+ * and NET_EXT_KN_SKIN_STYLES (each worn cosmetic's style and wear). A zeroed struct carries none of them (the has_
+ * flags and counts are 0). */
 typedef struct V10Skins {
     int32_t uid, primary, secondary, melee;
     int32_t paint_color[3], paint_shader[3];
     int has_paint;
+    int has_copies;
+    int32_t base[3], seed[3];
+    float copy_wear[3];
+    int meta_count;
+    NetSkinMetaEntry meta[NET_SKIN_META_MAX];
+    int style_count;
+    int32_t style_skin[NET_SKIN_STYLES_MAX], style[NET_SKIN_STYLES_MAX];
+    float style_wear[NET_SKIN_STYLES_MAX];
 } V10Skins;
 int v10_parse_skins(const uint8_t *p, size_t n, V10Skins *out);
+/* The bodies (after the EXT subtype) of NET_EXT_KN_SKIN_COPIES (28 or 40 bytes), NET_EXT_KN_SKIN_META (440) and
+ * NET_EXT_KN_SKIN_STYLES (72 or 104): *uid is the player, and only that packet's fields of `into` are written (the rest
+ * stay as the SKINS left them). 0 for a malformed body (nothing written). */
+int v10_parse_skin_copies(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into);
+int v10_parse_skin_meta(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into);
+int v10_parse_skin_styles(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into);
+/* The stat a counter skin counts (store.skins attach type 1: attach.stat when it is one of SKIN_STATS, else "kills",
+ * deob-10.0.7.js:106684-106686), NULL for another skin. Read once from <KRUNKNATIVE_ASSETS_DIR or assets>/skins.json, or from
+ * the text given to v10_counter_stats_load first. */
+const char *v10_counter_stat(int32_t skin);
+int v10_counter_stats_load(const char *json, size_t n); /* 1 read, 0 not JSON (no counter skins then) */
 
 typedef struct V10Spawn {
     int32_t uid;
@@ -385,8 +408,9 @@ typedef struct V10Spawn {
 } V10Spawn;
 int v10_parse_spawn(const uint8_t *p, size_t n, V10Spawn *out);
 
-/* The add record (ADD_PLAYERS "0" arguments: the record, then 1). socket_id is our own player's id. A painted weapon
- * slot (skins [12] and melee [19]) is {i: index, m: {paint, paintShader}}, the plain index otherwise. */
+/* The add record (ADD_PLAYERS "0" arguments: the record, then 1). socket_id is our own player's id. A weapon slot (skins
+ * [12] and melee [19]) or a cosmetic slot whose copy carries anything is v10's {i: index, m}, m with the copy's paint /
+ * paintShader, seed, wear, serial, name, style and counter stat; the plain index otherwise. */
 KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *spawn, const V10Skins *skins, int has_skins, const char *socket_id);
 /* START_GAME ("start") for our own spawn: gameTimer, team, spectating, challMode, moveLock, 1, null, classIndex. */
 void v10_start_game(const V10Spawn *spawn, int32_t game_timer, int32_t chall_mode, KrunkerValue out[8]);

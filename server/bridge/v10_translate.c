@@ -1429,6 +1429,7 @@ int v10_parse_skins(const uint8_t *p, size_t n, V10Skins *out) {
     out->secondary = rd_i32(p, 8);
     out->melee = rd_i32(p, 12);
     out->has_paint = n == 40;
+    out->has_copies = out->meta_count = out->style_count = 0; /* a SKINS starts the uid's copies over: its EXTs follow it */
     for (int k = 0; k < 3; k++) {
         out->paint_color[k] = out->has_paint ? rd_i32(p, 16 + 8 * (size_t)k) : -1;
         out->paint_shader[k] = out->has_paint ? rd_i32(p, 20 + 8 * (size_t)k) : -1;
@@ -1436,30 +1437,210 @@ int v10_parse_skins(const uint8_t *p, size_t n, V10Skins *out) {
     return 1;
 }
 
-/* A weapon slot of the add record. v10.0.7's getPlayerAddData sends player.skins and meleeIndex as the server holds them
- * (deob-10.0.7.js:176753): an index, or an owned copy's {i, m} object. The client takes the index from i (iiîiîîî,
- * :24322-24333) and the paint from m (iïîìîîï, :24335-24337): m.paint "#rrggbb" or a numeric m.paintShader
- * (generateMeshes, :174108-174113 for the melee, :174190-174195 for a weapon). A plain index has no m: it shows no paint. */
-static KrunkerValue skin_slot(V10Out *o, int32_t index, const V10Skins *skins, int has_skins, int k) {
-    if (!has_skins) return KRUNKER_V_NUM(-1);
-    const int32_t color = skins->has_paint ? skins->paint_color[k] : -1, shader = skins->has_paint ? skins->paint_shader[k] : -1;
-    if (index < 0 || (color < 0 && shader < 0)) return KRUNKER_V_NUM(index);
-    const char *keys[2];
-    KrunkerValue vals[2];
+int v10_parse_skin_copies(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into) {
+    if (n != sizeof(NetSkinCopiesPacket) && n != sizeof(NetSkinCopiesPacketV2)) return 0;
+    *uid = rd_i32(body, 0);
+    into->has_copies = 1;
+    for (int k = 0; k < 3; k++) {
+        into->base[k] = rd_i32(body, 4 + 4 * (size_t)k);
+        into->seed[k] = rd_i32(body, 16 + 4 * (size_t)k);
+        into->copy_wear[k] = n == sizeof(NetSkinCopiesPacketV2) ? rd_f32(body, 28 + 4 * (size_t)k) : -1.0f;
+    }
+    return 1;
+}
+
+int v10_parse_skin_meta(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into) {
+    NetSkinMetaPacket m;
+    if (n != sizeof m) return 0;
+    memcpy(&m, body, sizeof m);
+    if (m.count < 0 || m.count > NET_SKIN_META_MAX) return 0;
+    *uid = m.uid;
+    into->meta_count = m.count;
+    for (int i = 0; i < m.count; i++) {
+        into->meta[i] = m.e[i];
+        into->meta[i].name[NET_SKIN_META_NAME - 1] = 0; /* a name that fills the field is cut, never read past */
+    }
+    return 1;
+}
+
+int v10_parse_skin_styles(const uint8_t *body, size_t n, int32_t *uid, V10Skins *into) {
+    NetSkinStylesPacketV2 st;
+    if (n != sizeof st.v1 && n != sizeof st) return 0;
+    memset(&st, 0, sizeof st);
+    memcpy(&st, body, n);
+    if (st.v1.count < 0 || st.v1.count > NET_SKIN_STYLES_MAX) return 0;
+    *uid = st.v1.uid;
+    into->style_count = st.v1.count;
+    for (int i = 0; i < st.v1.count; i++) {
+        into->style_skin[i] = st.v1.skin[i];
+        into->style[i] = st.v1.style[i];
+        into->style_wear[i] = n == sizeof st ? st.wear[i] : -1.0f;
+    }
+    return 1;
+}
+
+/* store.skins' counter skins: few (six in v10.0.7's assets), so a short list */
+#define V10_COUNTER_MAX 64
+static struct {
+    int32_t skin;
+    int stat; /* index in SKIN_STATS */
+} g_counters[V10_COUNTER_MAX];
+static int g_counter_count, g_counters_read;
+
+int v10_counter_stats_load(const char *json, size_t n) {
+    g_counters_read = 1;
+    g_counter_count = 0;
+    cJSON *root = json ? cJSON_ParseWithLength(json, n) : NULL;
+    if (!cJSON_IsArray(root)) {
+        cJSON_Delete(root);
+        return 0;
+    }
+    int index = 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, root) {
+        const cJSON *attach = cJSON_IsObject(item) ? cJSON_GetObjectItemCaseSensitive(item, "attach") : NULL;
+        const cJSON *type = cJSON_IsObject(attach) ? cJSON_GetObjectItemCaseSensitive(attach, "type") : NULL;
+        if (cJSON_IsNumber(type) && type->valueint == 1 && g_counter_count < V10_COUNTER_MAX) {
+            const cJSON *stat = cJSON_GetObjectItemCaseSensitive(attach, "stat");
+            const int si = cJSON_IsString(stat) ? skin_stat_index(stat->valuestring) : -1;
+            g_counters[g_counter_count].skin = index;
+            g_counters[g_counter_count++].stat = si >= 0 ? si : skin_stat_index("kills");
+        }
+        index++;
+    }
+    cJSON_Delete(root);
+    return 1;
+}
+
+static void counter_stats_read(void) {
+    if (g_counters_read) return;
+    g_counters_read = 1;
+    const char *dir = getenv("KRUNKNATIVE_ASSETS_DIR");
+    char path[1024];
+    snprintf(path, sizeof path, "%s/skins.json", dir && dir[0] ? dir : "assets");
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "[v10-bridge] %s: cannot read it, counter skins carry no count\n", path);
+        return;
+    }
+    char *buf = NULL;
+    size_t len = 0, cap = 0, got;
+    char chunk[65536];
+    while ((got = fread(chunk, 1, sizeof chunk, f)) > 0) {
+        if (len + got > cap) {
+            cap = (len + got) * 2;
+            char *nb = realloc(buf, cap);
+            if (!nb) break;
+            buf = nb;
+        }
+        memcpy(buf + len, chunk, got);
+        len += got;
+    }
+    fclose(f);
+    v10_counter_stats_load(buf, len);
+    free(buf);
+}
+
+const char *v10_counter_stat(int32_t skin) {
+    static const char *const stats[SKIN_STAT_COUNT] = SKIN_STATS;
+    counter_stats_read();
+    for (int i = 0; i < g_counter_count; i++)
+        if (g_counters[i].skin == skin) return stats[g_counters[i].stat];
+    return NULL;
+}
+
+/* One slot of the add record. v10.0.7's getPlayerAddData sends player.skins, meleeIndex and the cosmetic indexes as the
+ * server holds them (deob-10.0.7.js:176753): an index, or an owned copy's {i, m} object. The client takes the index from
+ * i (iiîiîîî, :24322-24333) and the copy's data from m (iïîìîîï, :24335-24337): m.paint "#rrggbb" or a numeric
+ * m.paintShader and m.wear (generateMeshes, :174100-174113 for the melee, :174182-174195 for a weapon; generateMeshData
+ * :173593-173651 for a cosmetic, m from :173681-173691), m.seed (iiiíìiî, :24346-24352), m.style (:173602), m[stat] of
+ * a counter skin (:173031), m.serial and m.name (the name tag, :176428-176440). A plain index has no m. */
+typedef struct {
+    int32_t color, shader, seed, serial, style;
+    int64_t base;
+    float wear;
+    const char *name, *stat;
+} V10SlotM;
+
+/* A float32 off the wire as the shortest decimal that reads back to it: the account's m.wear is that decimal (0.05,
+ * not 0.0500000007) */
+static double short_float(float f) {
+    char buf[32];
+    for (int prec = 6; prec <= 9; prec++) {
+        snprintf(buf, sizeof buf, "%.*g", prec, (double)f);
+        const double d = strtod(buf, NULL);
+        if ((float)d == f) return d;
+    }
+    return (double)f;
+}
+
+static KrunkerValue slot_value(V10Out *o, int32_t index, const V10SlotM *c) {
+    if (index < 0) return KRUNKER_V_NUM(index);
+    const char *keys[8];
+    KrunkerValue vals[8];
     uint32_t n = 0;
-    if (color >= 0) {
+    if (c->color >= 0) {
         char hex[8];
-        snprintf(hex, sizeof hex, "#%06x", (unsigned)color & 0xffffffu);
+        snprintf(hex, sizeof hex, "#%06x", (unsigned)c->color & 0xffffffu);
         keys[n] = "paint";
         vals[n++] = v10_text(o, (const uint8_t *)hex, 7);
     }
-    if (shader >= 0) {
-        keys[n] = "paintShader";
-        vals[n++] = KRUNKER_V_NUM(shader);
-    }
+    if (c->shader >= 0) { keys[n] = "paintShader"; vals[n++] = KRUNKER_V_NUM(c->shader); }
+    if (c->wear >= 0.0f) { keys[n] = "wear"; vals[n++] = KRUNKER_V_NUM(short_float(c->wear)); }
+    if (c->serial > 0) { keys[n] = "serial"; vals[n++] = KRUNKER_V_NUM(c->serial); }
+    if (c->name && c->name[0]) { keys[n] = "name"; vals[n++] = v10_text(o, (const uint8_t *)c->name, strlen(c->name)); }
+    if (c->style > 0) { keys[n] = "style"; vals[n++] = KRUNKER_V_NUM(c->style); }
+    /* the seed the server computed (m.seed, else the copy id's hash, skin_copy_seed): as m.seed it reads back the same */
+    if (c->seed > 0) { keys[n] = "seed"; vals[n++] = KRUNKER_V_NUM(c->seed); }
+    if (c->stat && c->base > 0) { keys[n] = c->stat; vals[n++] = KRUNKER_V_NUM((double)c->base); }
+    if (!n) return KRUNKER_V_NUM(index);
     static const char *const slot_keys[2] = {"i", "m"};
     const KrunkerValue slot_vals[2] = {KRUNKER_V_NUM(index), v10_obj(o, keys, vals, n)};
     return v10_obj(o, slot_keys, slot_vals, 2);
+}
+
+/* the wear, serial and name tag NET_EXT_KN_SKIN_META gives store index `index` (the copy its slot names, else the
+ * plain-index rule's), and the style and wear NET_EXT_KN_SKIN_STYLES gives it */
+static void slot_meta(const V10Skins *skins, int32_t index, V10SlotM *c) {
+    for (int i = 0; i < skins->meta_count; i++) {
+        if (skins->meta[i].skin != index) continue;
+        if (c->wear < 0.0f) c->wear = skins->meta[i].wear;
+        c->serial = skins->meta[i].serial;
+        c->name = skins->meta[i].name;
+        break;
+    }
+    for (int i = 0; i < skins->style_count; i++) {
+        if (skins->style_skin[i] != index) continue;
+        c->style = skins->style[i];
+        if (c->wear < 0.0f) c->wear = skins->style_wear[i];
+        break;
+    }
+}
+
+/* weapon slot k (primary, secondary, melee) */
+static KrunkerValue skin_slot(V10Out *o, int32_t index, const V10Skins *skins, int has_skins, int k) {
+    if (!has_skins) return KRUNKER_V_NUM(-1);
+    V10SlotM c = {.color = -1, .shader = -1, .wear = -1.0f, .base = -1};
+    if (skins->has_paint) {
+        c.color = skins->paint_color[k];
+        c.shader = skins->paint_shader[k];
+    }
+    if (skins->has_copies) {
+        c.seed = skins->seed[k];
+        c.wear = skins->copy_wear[k];
+        c.base = skins->base[k];
+        c.stat = c.base >= 0 ? v10_counter_stat(index) : NULL;
+    }
+    slot_meta(skins, index, &c);
+    return slot_value(o, index, &c);
+}
+
+/* a cosmetic slot (hat, body, shoe, waist, face, pet, wrist, back, head) */
+static KrunkerValue cosmetic_slot(V10Out *o, int32_t index, const V10Skins *skins, int has_skins) {
+    if (!has_skins) return KRUNKER_V_NUM(index);
+    V10SlotM c = {.color = -1, .shader = -1, .wear = -1.0f, .base = -1};
+    slot_meta(skins, index, &c);
+    return slot_value(o, index, &c);
 }
 
 /* NetSpawnPacket, protocol 1.3.1 with the WP-C and WP-F tails (150 bytes): see parseSpawn in v10Translate.ts. */
@@ -1521,8 +1702,8 @@ KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *s, const V10Skins 
     f[10] = KRUNKER_V_NUM(0); /* level (not in SPAWN) */
     f[11] = KRUNKER_V_NUM(0); /* clan */
     f[12] = v10_arr(o, pair, 2);
-    f[13] = KRUNKER_V_NUM(s->hat);
-    f[14] = KRUNKER_V_NUM(s->body); /* the v7 ent[4] slot */
+    f[13] = cosmetic_slot(o, s->hat, skins, has_skins);
+    f[14] = cosmetic_slot(o, s->body, skins, has_skins); /* the v7 ent[4] slot */
     f[15] = s->secondary_index >= 0 ? KRUNKER_V_NUM(s->secondary_index) : nil;
     f[16] = KRUNKER_V_NUM(0); /* hack */
     f[17] = nil;              /* customLoadout */
@@ -1537,8 +1718,8 @@ KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *s, const V10Skins 
     f[26] = KRUNKER_V_NUM(-1); /* flg */
     f[27] = KRUNKER_V_NUM(0); /* premium */
     f[28] = f[5];             /* getName */
-    f[29] = KRUNKER_V_NUM(s->shoe);
-    f[30] = KRUNKER_V_NUM(s->waist);
+    f[29] = cosmetic_slot(o, s->shoe, skins, has_skins);
+    f[30] = cosmetic_slot(o, s->waist, skins, has_skins);
     f[31] = KRUNKER_V_NUM(0); /* account id */
     if (s->hair_color < 0) {
         f[32] = KRUNKER_V_NUM(0);
@@ -1547,16 +1728,16 @@ KrunkerValue v10_player_add_record(V10Out *o, const V10Spawn *s, const V10Skins 
         snprintf(hex, sizeof hex, "#%06llx", (unsigned long long)s->hair_color);
         f[32] = v10_text(o, (const uint8_t *)hex, strlen(hex));
     }
-    f[33] = KRUNKER_V_NUM(s->face);
-    f[34] = KRUNKER_V_NUM(s->pet);
+    f[33] = cosmetic_slot(o, s->face, skins, has_skins);
+    f[34] = cosmetic_slot(o, s->pet, skins, has_skins);
     f[35] = KRUNKER_V_NUM(s->badge);
-    f[36] = KRUNKER_V_NUM(s->wrist);
+    f[36] = cosmetic_slot(o, s->wrist, skins, has_skins);
     f[37] = KRUNKER_V_NUM(0); /* isJuggernaut */
     f[38] = KRUNKER_V_NUM(s->head_mlt);
     f[39] = v10_arr(o, charms, 2);
     f[40] = KRUNKER_V_NUM(0); /* upgrades */
-    f[41] = KRUNKER_V_NUM(s->back);
-    f[42] = KRUNKER_V_NUM(s->head);
+    f[41] = cosmetic_slot(o, s->back, skins, has_skins);
+    f[42] = cosmetic_slot(o, s->head, skins, has_skins);
     f[43] = KRUNKER_V_NUM(s->player_card);
     for (int i = 44; i <= 51; i++) f[i] = KRUNKER_V_NUM(0); /* isBot, isBusy, rank, clanId, clanLogo, clan, clanBannerColor, verified */
     f[52] = KRUNKER_V_NUM(-1); /* titleIndex */

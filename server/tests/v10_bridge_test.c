@@ -795,6 +795,91 @@ int main(void) {
         krunker_frame_free(&addo);
     }
 
+    // a player whose worn copies carry data: SKINS V2, then NET_EXT_KN_SKIN_COPIES, SKIN_META and SKIN_STYLES (net.c
+    // net_send_skins / net_send_spawn), then its SPAWN. The add record carries each slot as v10.0.7's owned copy {i, m}
+    // (getPlayerAddData, deob-10.0.7.js:176753; read at :24322-24352): paint, wear, serial, name, style, seed and the
+    // counter skin's m[stat] (V-CORE 01, 7937, counts kills, :173031)
+    {
+        uint8_t sk3[40];
+        const int32_t sk3v[10] = {3, 7937, 8, 9, 0x112233, -1, -1, -1, -1, -1};
+        for (int i = 0; i < 10; i++) w_i32(sk3, (size_t)i * 4, sk3v[i]);
+        native_send(&g_native, NET_PACKET_SKINS, sk3, sizeof sk3);
+        NetSkinCopiesPacketV2 cp;
+        memset(&cp, 0, sizeof cp);
+        cp.v1.uid = 3;
+        cp.v1.base[0] = 120, cp.v1.base[1] = -1, cp.v1.base[2] = -1;
+        cp.v1.seed[0] = 4242;
+        cp.wear[0] = 0.05f, cp.wear[1] = -1.0f, cp.wear[2] = -1.0f;
+        uint8_t cpb[2 + sizeof cp];
+        w_u16(cpb, 0, NET_EXT_KN_SKIN_COPIES);
+        memcpy(cpb + 2, &cp, sizeof cp);
+        native_send(&g_native, NET_PACKET_EXT, cpb, sizeof cpb);
+        NetSkinMetaPacket meta;
+        memset(&meta, 0, sizeof meta);
+        meta.uid = 3;
+        meta.count = 2;
+        meta.e[0].skin = 9, meta.e[0].wear = -1.0f, meta.e[0].serial = 3;
+        snprintf(meta.e[0].name, sizeof meta.e[0].name, "Bob");
+        meta.e[1].skin = 7794, meta.e[1].wear = 0.9f, meta.e[1].serial = 5;
+        uint8_t mb[2 + sizeof meta];
+        w_u16(mb, 0, NET_EXT_KN_SKIN_META);
+        memcpy(mb + 2, &meta, sizeof meta);
+        native_send(&g_native, NET_PACKET_EXT, mb, sizeof mb);
+        NetSkinStylesPacketV2 sty;
+        memset(&sty, 0, sizeof sty);
+        sty.v1.uid = 3;
+        sty.v1.count = 1;
+        sty.v1.skin[0] = 7794, sty.v1.style[0] = 2;
+        for (int i = 0; i < NET_SKIN_STYLES_MAX; i++) sty.wear[i] = -1.0f;
+        sty.wear[0] = 0.9f;
+        uint8_t sb[2 + sizeof sty];
+        w_u16(sb, 0, NET_EXT_KN_SKIN_STYLES);
+        memcpy(sb + 2, &sty, sizeof sty);
+        native_send(&g_native, NET_PACKET_EXT, sb, sizeof sb);
+        uint8_t sp3[150];
+        spawn_buf(sp3, 3, 0, 1, 3, 1, 90, 4, 2, 3, 0, 0, "copies");
+        w_i32(sp3, 86, 7794); /* the hat */
+        const int adds_before = client_count("0");
+        native_send(&g_native, NET_PACKET_SPAWN, sp3, sizeof sp3);
+        WAIT_FOR(client_count("0") > adds_before);
+        CHECK(v10_bridge_untranslated("EXT 0x8160") == 0 && v10_bridge_untranslated("EXT 0x81d1") == 0 &&
+                  v10_bridge_untranslated("EXT 0x8190") == 0,
+              "SKIN_COPIES, SKIN_META and SKIN_STYLES are consumed, the session goes on");
+        KrunkerFrame a3;
+        int found3 = 0;
+        for (int k = adds_before; k < client_count("0") && !found3; k++) {
+            if (client_get("0", k, &a3) && a3.argc == 2 && a3.args[0].type == KRUNKER_ARRAY && a3.args[0].len == 53 &&
+                vequal(&a3.args[0].u.items[1], &KRUNKER_V_NUM(3)))
+                found3 = 1;
+            else
+                krunker_frame_free(&a3);
+        }
+        CHECK(found3, "the add record of uid 3");
+        if (found3) {
+            const KrunkerValue *rec = &a3.args[0];
+            const KrunkerValue *pair = &rec->u.items[12];
+            const KrunkerValue *prim = pair->type == KRUNKER_ARRAY && pair->len == 2 ? &pair->u.items[0] : NULL;
+            const KrunkerValue *pm = prim ? map_get(prim, "m") : NULL;
+            CHECK(prim && vequal(map_get(prim, "i"), &KRUNKER_V_NUM(7937)) && pm && is_str(map_get(pm, "paint"), "#112233") &&
+                      vequal(map_get(pm, "wear"), &KRUNKER_V_NUM(0.05)) && vequal(map_get(pm, "seed"), &KRUNKER_V_NUM(4242)) &&
+                      vequal(map_get(pm, "kills"), &KRUNKER_V_NUM(120)) && pm->len == 4,
+                  "the primary is {i: 7937, m: {paint, wear: 0.05, seed: 4242, kills: 120}}");
+            CHECK(pair->len == 2 && vequal(&pair->u.items[1], &KRUNKER_V_NUM(8)), "the secondary with no copy data stays the index 8");
+            const KrunkerValue *mel = &rec->u.items[19];
+            const KrunkerValue *mm = map_get(mel, "m");
+            CHECK(vequal(map_get(mel, "i"), &KRUNKER_V_NUM(9)) && mm && vequal(map_get(mm, "serial"), &KRUNKER_V_NUM(3)) &&
+                      is_str(map_get(mm, "name"), "Bob") && mm->len == 2,
+                  "the melee is {i: 9, m: {serial: 3, name: \"Bob\"}}");
+            const KrunkerValue *hat = &rec->u.items[13];
+            const KrunkerValue *hm = map_get(hat, "m");
+            CHECK(vequal(map_get(hat, "i"), &KRUNKER_V_NUM(7794)) && hm && vequal(map_get(hm, "wear"), &KRUNKER_V_NUM(0.9)) &&
+                      vequal(map_get(hm, "serial"), &KRUNKER_V_NUM(5)) && vequal(map_get(hm, "style"), &KRUNKER_V_NUM(2)) && hm->len == 3,
+                  "the hat is {i: 7794, m: {wear: 0.9, serial: 5, style: 2}}");
+            CHECK(vequal(&rec->u.items[14], &KRUNKER_V_NUM(-1)), "an empty cosmetic slot stays -1");
+            krunker_frame_free(&a3);
+        }
+    }
+
     // the held entity spawn after our start, then a baseline, an attachment and a live object (deob-10.0.3.js:261720-261742)
     WAIT_FOR(client_count("e+") == 1);
     KrunkerFrame ent;
