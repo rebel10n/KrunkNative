@@ -1428,7 +1428,14 @@ static void hub_render_listing(const cJSON *t);
 static void update_window(const char *e, const char *a, const char *t, const char *n, const char *r, const int s) {
     if (!s) {
         if (r && *r) hub_sound(r, 0.5f);
-        // the market ambience loops (ambient_4 / ambient_8) are not played
+        // The Black Market's ambience (hub-10.0.7.js:6960-6964): SOUND.play("ambient_8", 0.3, loop, rate 0.8) on the
+        // blackm page, stopped on any other; v10 no longer loops ambient_4 on the market. ambient_8 is an ambient
+        // sound (SOUND.soundCats 2), so the hub's Ambient Volume (setVolume(v, 2)) scales it too.
+        if (a && !strcmp(a, "blackm")) {
+            if (g_hub.volume > 0) audio_play("ambient_8", 0.3f * (float) (g_hub.volume * g_hub.ambient_volume), 1, 0.8f);
+        } else {
+            audio_stop("ambient_8");
+        }
         hide_all(0);
     }
     // v3.1.1 pages v7.1.4 dropped (no holder, no nav button: v7's updateWindow would throw on
@@ -9372,6 +9379,7 @@ static void social_tick(Client *client, const float now, const float delta) {
 
 static void social_leave(Client *client) {
     (void) client;
+    audio_stop("ambient_8"); // the Black Market's loop ends with the page, as a browser's does when it leaves social.html
     backend_social_unlisten(hub_on_social, NULL);
     if (g_delayed_timer) html_timer_cancel(g_delayed_timer);
     g_delayed_timer = 0;
