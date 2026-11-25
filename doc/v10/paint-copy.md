@@ -336,7 +336,10 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   4ed623ad): `copy_take` / `copy_give` carry its `skin_stats` rows through live trades, offers and market list /
   unlist / buy (escrowed in `market_listings.stats` / `trade_copies.stats`, migration 0407), `m` carries the counts,
   and a quick sale or a craft drops them with the copy; a stack's count stays with the seller's stack
-  (`brain_economy` copy_counts, `brain_live_trade`).
+  (`brain_economy` copy_counts, `brain_live_trade`). Market browse rows and the market inventory (9cd96a25) and the
+  trade picker and offer rows (f7a7b3b2, deob-10.0.7.js:111239, :111450-111456) show the counts in `m`. Migration
+  0408 moves counts left on a copy another account now owns to that owner, or into the one open offer or listing
+  they belong to; a count it cannot place stays where it is (8301e7f4).
 - A shader paint (`paintShader`) is drawn: `client/src/skin_fx.c:1300-1324` (`client/tests/paint_shader_two_client_e2e.py`,
   not in CTest). The official client gets native players' paint from the bridge's add record (above).
 - `paintTargets` is checked by the brain (f1eb3de1, Routes above; `brain_paint_e2e`, `brain_v10_api_market`,

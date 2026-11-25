@@ -298,6 +298,7 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x8142 | `NET_EXT_KN_RANKED_NOTICE` | (KN: the brain's "queued for ranked" line in the ranked green, the queued player apart from the text by name (no uid yet; numbered as an official line's name); `NetRankedNoticePacket`) | S to C |
 | 0x8150 | `NET_EXT_KN_END_ITEM` | (KN: one event kill pool item of the END's `otherData.items` {t: "skin", i, r}, `NetEndItemPacket` {skin, icon}, after the END; doc/v10/kill-pools.md) | S to C |
 | 0x81E0 | `NET_EXT_KN_END_STATS` | (KN: what endGame puts in `endData` that MODE_END lacks: every team's score, round wins and flag text, the teamScores key mask, `has_round_wins`, and each row's `dmg`, in MODE_END's order, at most 16 rows; `NetEndStatsPacket`, 372 bytes. Sent to every peer with minor >= 4 right before MODE_END; the bridge builds `endData.tms` (getTeamScores(true), deob-10.0.7.js:193975-193985) and the team-mode end tables from it; 51897029, 69cc71f9) | S to C |
+| 0x81E1 | `NET_EXT_KN_END_ROW` | (KN: one end-table row past END's 16, 64 bytes, in end order up to 64 rows, after END_STATS and before MODE_END; v10's end table has no cap, deob-10.0.7.js:195244; 4f064770) | S to C |
 
 Each range belongs to the feature that implements it; body layouts are documented next to their
 structs. Which official S2C packets the link translates, and why the others are not, is doc/v10/s2c-coverage.md. `cc` / `ccr` (CHEAT_CHECK, server-sent JS eval) have no subtype: KN's protocol does not carry
