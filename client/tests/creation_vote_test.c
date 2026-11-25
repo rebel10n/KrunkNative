@@ -15,7 +15,8 @@ static int g_fail;
 
 // ---- stubs: a tiny id -> {html, display, removed} table
 typedef struct { const char *id; char html[1024]; char display[16]; int removed; } El;
-static El g_els[] = {{"mapVote"}, {"modVote"}, {"modVoteName"}, {"modVoteHold"}, {"mapVoteU"}, {"mapVoteD"}, {"modVotePair"}};
+// modVoteU's parent stands for the thumbs' box of #modVoteHold's markup (v10 gives it no id)
+static El g_els[] = {{"mapVote"}, {"modVote"}, {"modVoteName"}, {"modVoteHold"}, {"mapVoteU"}, {"mapVoteD"}, {"(modVoteU's parent)"}, {"modVoteU"}};
 #define NELS ((int) (sizeof(g_els) / sizeof(g_els[0])))
 HtmlElem html_dom_by_id(const char *id) {
     for (int i = 0; i < NELS; i++)
@@ -26,6 +27,7 @@ void html_dom_set_html(HtmlElem e, const char *html) { snprintf(g_els[e - 1].htm
 void html_dom_set_text(HtmlElem e, const char *t) { snprintf(g_els[e - 1].html, sizeof(g_els[0].html), "%s", t); }
 void html_dom_set_display(HtmlElem e, const char *v) { snprintf(g_els[e - 1].display, sizeof(g_els[0].display), "%s", v); }
 void html_dom_remove(HtmlElem e) { g_els[e - 1].removed = 1; }
+HtmlElem html_dom_parent(HtmlElem e) { return e == 8 ? (HtmlElem) 7 : 0; }
 const char *i18n_tr(const char *key, const char *english) { (void) key; return english; }
 
 static char g_notice[256];
@@ -61,9 +63,15 @@ int main(void) {
 
     // a hosted map fills #mapVote with both buttons
     creation_vote_set_map(4242, "Arena", "alice");
-    CHECK(strstr(g_els[0].html, "id=\"mapVoteU\"") && strstr(g_els[0].html, "id=\"mapVoteD\""), "map buttons rendered");
-    // the tip opens the creator's profile with autoGift 2 and the map's name (deob-10.0.7.js:226239)
+    CHECK(strstr(g_els[0].html, "id='mapVoteU'") && strstr(g_els[0].html, "id='mapVoteD'"), "map buttons rendered");
+    // Donate opens the creator's profile with autoGift 2 and the map's name (deob-10.0.7.js:226239)
     CHECK(strstr(g_els[0].html, "voteMap(4242,1)") && strstr(g_els[0].html, "openPlayerProfile(\"alice\",2,\"Arena\")"), "map handlers");
+    // v10's label and markup: a voteHint div "Donate", the thumbs in a float:right div (:226239)
+    CHECK(strstr(g_els[0].html, "<div class='voteHint'  onclick='openPlayerProfile(\"alice\",2,\"Arena\")'>Donate</div>"
+                                "<div style='float:right;'><i id='mapVoteD' onclick='voteMap(4242,-1)' class='material-icons vote'>thumb_down</i>"
+                                "<i id='mapVoteU' onclick='voteMap(4242,1)' class='material-icons vote'>thumb_up</i></div>") != NULL,
+          "map panel: v10's Donate link and thumbs markup");
+    CHECK(!strstr(g_els[0].html, "Tip the creator"), "map panel: no Box Office tip wording");
 
     // a creator name cannot break out of the inline handler
     creation_vote_set_map(4242, "Arena", "al\"ice');x()//");
@@ -112,9 +120,13 @@ int main(void) {
     // a loaded mod shows #modVote; its vote posts to /mods/:id/vote and hides the thumbs, not Donate
     reset_els();
     creation_vote_set_mod(55, "Neon", "carol");
-    CHECK(!strcmp(g_els[1].display, "block") && !strcmp(g_els[2].html, "Neon"), "mod panel shown with its name");
-    CHECK(strstr(g_els[3].html, "voteMod(55,-1)") && strstr(g_els[3].html, "id=\"modVoteU\""), "mod buttons rendered");
-    CHECK(strstr(g_els[3].html, "openPlayerProfile(\"carol\",1,\"Neon\")") != NULL, "mod tip: autoGift 1 and the mod's name (deob-10.0.7.js:225878)");
+    CHECK(!strcmp(g_els[1].display, "block") && !strcmp(g_els[2].html, "Neon Mod"), "mod panel shown as \"<name> Mod\" (:225875)");
+    CHECK(strstr(g_els[3].html, "voteMod(55, -1)") && strstr(g_els[3].html, "id=\"modVoteU\""), "mod buttons rendered");
+    CHECK(strstr(g_els[3].html, "openPlayerProfile(\"carol\",1,\"Neon\")") != NULL, "mod Donate: autoGift 1 and the mod's name (deob-10.0.7.js:225878)");
+    CHECK(strstr(g_els[3].html, "<div class=\"voteHint vHR\" onclick='openPlayerProfile(\"carol\",1,\"Neon\")'>Donate</div>\n"
+                                "\t\t\t\t<div style=\"float:right;\">\n"
+                                "\t\t\t\t\t<i id=\"modVoteD\" onclick=\"voteMod(55, -1);\" class='material-icons vote'>thumb_down</i>") != NULL,
+          "mod panel: v10's Donate link and thumbs markup (:225878)");
     press("voteMod", 55, -1);
     CHECK(!strcmp(g_path, "POST /mods/55/vote") && g_sent_vote == -1 && !strcmp(g_els[6].display, "none") && g_els[3].display[0] == 0,
           "mod downvote hides the thumbs and leaves Donate");

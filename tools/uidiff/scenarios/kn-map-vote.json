@@ -25,5 +25,5 @@
       }
     }
   },
-  "note": "KN's #mapVote (creation_vote.c, NET_EXT_KN_CREATION_INFO): a hosted published map's tip link and thumbs down / up in the menu's server-info column, where v10 puts mapVote (deob-10.0.7.js:149587-149595, :226239). Markup, wording and CSS (kn-alt.css .kn-vote-pair) are Box Office's own. Reference: KN's own render."
+  "note": "KN's #mapVote (creation_vote.c, NET_EXT_KN_CREATION_INFO): a hosted published map's Donate link and thumbs down / up in the menu's server-info column, where v10 puts mapVote (deob-10.0.7.js:149587-149595, :226239). Markup and wording are v10's. Reference: KN's own render."
 }

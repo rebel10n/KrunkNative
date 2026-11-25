@@ -1,7 +1,7 @@
 // The menu's vote on the community map this game hosts (#mapVote) and on the player's loaded mod (#modVote).
 //
-// Behaviour follows Krunker v10.0.7; the markup and wording are Box Office's own:
-//   - a hosted published map fills #mapVote with a tip link for its creator and thumbs down / up
+// Behaviour, markup and wording follow Krunker v10.0.7:
+//   - a hosted published map fills #mapVote with a Donate link for its creator and thumbs down / up
 //     (deob-10.0.7.js:226239, from INIT's custom map id and creator; here NET_EXT_KN_CREATION_INFO);
 //     an official map or a map the brain does not know leaves it empty (:226235);
 //   - voteMap(id, v) (:227018-227031): pressing the side already chosen clears the vote (0), the other
@@ -9,8 +9,10 @@
 //     "Map Upvoted" line runs only when a third argument is passed, and the panel's onclick does not
 //     pass one, so a vote from the panel is silent. A guest's press just empties the panel (:227031);
 //   - voteMod(id, v) (:227008-227016): the same three-way choice for the loaded mod, then the thumbs'
-//     box is hidden and the Donate link stays; #modVote shows while a mod with a brain id is loaded
-//     (:225872-225880).
+//     box (modVoteU's parent) is hidden and the Donate link stays; #modVote shows "<name> Mod" while a mod
+//     with a brain id is loaded (:225872-225880).
+// The Donate links call openPlayerProfile with KrunkNative's positional arguments (name, autoGift, assetName)
+// where v10 passes {autoGift, assetName}: the page's inline handlers take no object literals.
 // Krunker sends the vote on the game socket (MAP_VOTE "vote"); Box Office's maps and mods live in kn_brain,
 // so the client posts it there (services/brain/v10_catalog.c POST /maps/:id/vote, v10_mods.c POST
 // /mods/:id/vote), which keeps one vote per account and the net count.
@@ -18,7 +20,6 @@
 
 #include <backend_ui.h>
 #include <html_dom.h>
-#include <i18n.h>
 #include <ui_logic.h>
 #include <v10_social.h>
 
@@ -85,18 +86,15 @@ static void render_map(void) {
         html_dom_set_html(box, "");
         return;
     }
-    char who[48], what[160], label[80], html[800];
+    char who[48], what[160], html[800];
     js_arg(who, sizeof(who), g_map.creator);
     js_arg(what, sizeof(what), g_map.name);
-    esc(label, sizeof(label), I18N("kn.creationVote.tip", "Tip the creator"));
     // openPlayerProfile(creator, {autoGift: 2, assetName: map}) (:226239): the gift view says "I like your <map> map"
     snprintf(html, sizeof(html),
-             "<span class=\"voteHint\" onclick='openPlayerProfile(\"%s\",2,\"%s\")'>%s</span>"
-             "<span class=\"kn-vote-pair\">"
-             "<i id=\"mapVoteD\" class=\"material-icons vote\" onclick=\"voteMap(%d,-1)\">thumb_down</i>"
-             "<i id=\"mapVoteU\" class=\"material-icons vote\" onclick=\"voteMap(%d,1)\">thumb_up</i>"
-             "</span>",
-             who, what, label, g_map.id, g_map.id);
+             "<div class='voteHint'  onclick='openPlayerProfile(\"%s\",2,\"%s\")'>Donate</div>"
+             "<div style='float:right;'><i id='mapVoteD' onclick='voteMap(%d,-1)' class='material-icons vote'>thumb_down</i>"
+             "<i id='mapVoteU' onclick='voteMap(%d,1)' class='material-icons vote'>thumb_up</i></div>",
+             who, what, g_map.id, g_map.id);
     html_dom_set_html(box, html);
 }
 
@@ -107,27 +105,25 @@ static void render_mod(void) {
         html_dom_set_display(box, "none");
         return;
     }
-    char name[96], text[128];
-    esc(name, sizeof(name), g_mod.name[0] ? g_mod.name : "Mod");
+    char text[128];
     const HtmlElem title = html_dom_by_id("modVoteName");
-    if (title) {
-        snprintf(text, sizeof(text), "%s", g_mod.name[0] ? g_mod.name : "Mod");
+    if (title) { // name + " Mod" (:225875)
+        snprintf(text, sizeof(text), "%s Mod", g_mod.name);
         html_dom_set_text(title, text);
     }
     const HtmlElem hold = html_dom_by_id("modVoteHold");
     if (hold) {
-        char who[48], what[160], label[80], html[800];
+        char who[48], what[160], html[800];
         js_arg(who, sizeof(who), g_mod.creator);
         js_arg(what, sizeof(what), g_mod.name);
-        esc(label, sizeof(label), I18N("kn.creationVote.tip", "Tip the creator"));
         // openPlayerProfile(creator, {autoGift: 1, assetName: mod}) (:225878): "I like your <mod> mod"
         snprintf(html, sizeof(html),
-                 "<span class=\"voteHint vHR\" onclick='openPlayerProfile(\"%s\",1,\"%s\")'>%s</span>"
-                 "<span class=\"kn-vote-pair\" id=\"modVotePair\">"
-                 "<i id=\"modVoteD\" class=\"material-icons vote\" onclick=\"voteMod(%d,-1)\">thumb_down</i>"
-                 "<i id=\"modVoteU\" class=\"material-icons vote\" onclick=\"voteMod(%d,1)\">thumb_up</i>"
-                 "</span>",
-                 who, what, label, g_mod.id, g_mod.id);
+                 "\n\t\t\t\t<div class=\"voteHint vHR\" onclick='openPlayerProfile(\"%s\",1,\"%s\")'>Donate</div>\n"
+                 "\t\t\t\t<div style=\"float:right;\">\n"
+                 "\t\t\t\t\t<i id=\"modVoteD\" onclick=\"voteMod(%d, -1);\" class='material-icons vote'>thumb_down</i>\n"
+                 "\t\t\t\t\t<i id=\"modVoteU\" onclick=\"voteMod(%d, 1);\" class='material-icons vote'>thumb_up</i>\n"
+                 "\t\t\t\t</div>\n\t\t\t",
+                 who, what, g_mod.id, g_mod.id);
         html_dom_set_html(hold, html);
         html_dom_set_display(hold, "");
     }
@@ -196,7 +192,8 @@ int creation_vote_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
         remove_by_id("mapVoteU");
     } else {
         // the thumbs' box (modVoteU's parent), not the Donate link beside it (:227016)
-        const HtmlElem pair = html_dom_by_id("modVotePair");
+        const HtmlElem up = html_dom_by_id("modVoteU");
+        const HtmlElem pair = up ? html_dom_parent(up) : 0;
         if (pair) html_dom_set_display(pair, "none");
     }
     return 0;
