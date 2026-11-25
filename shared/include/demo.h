@@ -88,9 +88,24 @@ size_t demo_suspect_segments(const Demo *demo, int32_t suspect_uid, DemoSegment 
 // clampToSegments (:201739-201751): t inside a span stays, else the nearest span edge.
 uint32_t demo_clamp_to_segments(const DemoSegment *segments, size_t count, uint32_t t_ms);
 
-// hideIdentities (:201752-201782): every SPAWN name and chat sender becomes "Player_<uid>", every
-// PLAYER_INFO loses its account id, level, clan and account flags (a bot keeps its bot bit). In place.
+// hideIdentities (:201752-201782): every SPAWN name becomes "Player_<uid>"; every chat line's sender (CHAT,
+// SCRIPT_CHAT, CHAT_V7, a bot's CHAT_NAMES; server lines too) becomes "Player_<uid>" of the player whose
+// PLAYER_INFO had the sender's account, or "Player" when none did (a server line, a guest), and a CHAT_V7
+// loses its account id; chat text is left as it is. Every PLAYER_INFO loses its account id, level, clan and
+// account flags (a bot keeps its bot bit). In place.
 void demo_anonymize(Demo *demo);
+
+// The maps a demo's INITs name (MAP_INFO), in the order they first come: the hash, and the name to fetch it
+// by (the published map's, from the CREATION_INFO after that INIT, else MAP_INFO's). Returns the count (<= max).
+typedef struct {
+    uint32_t hash;
+    int32_t published_id; // CREATION_INFO map_id, 0 when it named no published map
+    char name[64];
+} DemoMap;
+size_t demo_maps(Demo *demo, DemoMap *out, size_t max);
+// Every MAP_INFO naming map `from` names `to` instead (a fetched copy of the map whose JSON hashes to `to`), so
+// the client's INIT finds that copy by its hash. Returns how many MAP_INFOs changed. In place.
+size_t demo_retarget_map(Demo *demo, uint32_t from, uint32_t to);
 
 // The meta's suspect (resolveSuspectSid, :201666-201690): the call whose token is call_token, else the
 // first of suspects; -1 none.

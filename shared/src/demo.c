@@ -1,6 +1,7 @@
 // K.P.D demo files (shared/include/demo.h, doc/v10/replays.md).
 #include <demo.h>
-#include <net_ext.h> // NET_EXT_KN_PLAYER_RANK_FLAG, NET_EXT_KN_PLAYER_TITLE
+#include <net_ext.h> // NET_EXT_KN_PLAYER_RANK_FLAG, NET_EXT_KN_PLAYER_TITLE, NET_EXT_KN_CHAT_NAMES, NET_EXT_KN_CREATION_INFO
+#include <social_v7.h> // NET_PACKET_CHAT_V7, NetChatV7Packet
 #include <shared.h>
 #include <cJSON.h>
 #include <stdio.h>
@@ -264,13 +265,75 @@ static void player_name(char *out, const size_t size, const int32_t uid) {
     snprintf(out, size, "Player_%d", (int) uid);
 }
 
+// hideIdentities' chat rule (deob-10.0.7.js:201759-201781): the rosters give an account -> sid map (roster
+// [31] accid -> [1] sid, a later entry overwrites, a falsy accid is left out), then every "ch" frame's sender
+// name becomes Player_<sid> of its account (data[6]), or plain "Player" when no roster had that account (a
+// server line's data[6] is unset, a guest's 0), and data[6] becomes 0. The text (data[2]) is never touched,
+// so a server line keeps any name written into it. Here the accounts come from PLAYER_INFO (uid, account_id).
+#define DEMO_ACCOUNTS_MAX 512
+typedef struct {
+    int32_t account[DEMO_ACCOUNTS_MAX], uid[DEMO_ACCOUNTS_MAX];
+    size_t count;
+} DemoAccounts;
+
+static int collect_account(void *user, const uint8_t type, uint8_t *payload, const uint16_t length) {
+    DemoAccounts *a = user;
+    if (type != NET_PACKET_PLAYER_INFO || length < sizeof(NetPlayerInfoPacket)) return 1;
+    NetPlayerInfoPacket info;
+    memcpy(&info, payload, sizeof(info));
+    if (!info.account_id) return 1;
+    for (size_t i = 0; i < a->count; i++) {
+        if (a->account[i] == info.account_id) {
+            a->uid[i] = info.uid;
+            return 1;
+        }
+    }
+    if (a->count < DEMO_ACCOUNTS_MAX) {
+        a->account[a->count] = info.account_id;
+        a->uid[a->count++] = info.uid;
+    }
+    return 1;
+}
+
+// A NET_PACKET_CHAT names its sender by uid, not by account: the account is the one that uid's PLAYER_INFO gave
+static int32_t uid_account(const DemoAccounts *a, const int32_t uid) {
+    for (size_t i = 0; uid >= 0 && i < a->count; i++)
+        if (a->uid[i] == uid) return a->account[i];
+    return 0;
+}
+
+static void chat_sender_name(const DemoAccounts *a, const int32_t account, char *name, const size_t size) {
+    for (size_t i = 0; account && i < a->count; i++) {
+        if (a->account[i] == account) {
+            player_name(name, size, a->uid[i]);
+            return;
+        }
+    }
+    memset(name, 0, size);
+    snprintf(name, size, "Player");
+}
+
 static int anonymize_packet(void *user, const uint8_t type, uint8_t *payload, const uint16_t length) {
-    (void) user;
+    const DemoAccounts *accounts = user;
     if (type == NET_PACKET_SPAWN && length >= offsetof(NetSpawnPacket, name) + sizeof(((NetSpawnPacket *) 0)->name)) {
         player_name((char *) payload + offsetof(NetSpawnPacket, name), sizeof(((NetSpawnPacket *) 0)->name), read_i32(payload));
     } else if (type == NET_PACKET_CHAT && length >= offsetof(NetChatPacket, text)) {
+        // every "ch", a server line (uid -1) as well
         const int32_t uid = read_i32(payload + offsetof(NetChatPacket, uid));
-        if (uid >= 0) player_name((char *) payload + offsetof(NetChatPacket, name), sizeof(((NetChatPacket *) 0)->name), uid);
+        chat_sender_name(accounts, uid_account(accounts, uid), (char *) payload + offsetof(NetChatPacket, name),
+                         sizeof(((NetChatPacket *) 0)->name));
+    } else if (type == NET_PACKET_SCRIPT_CHAT && length >= offsetof(NetScriptChatPacket, chat) + offsetof(NetChatPacket, text)) {
+        // GAME.CHAT's line, which v10 sends as "ch" -1, null, text, 2 (deob-10.0.7.js:185742-185745)
+        uint8_t *chat = payload + offsetof(NetScriptChatPacket, chat);
+        const int32_t uid = read_i32(chat + offsetof(NetChatPacket, uid));
+        chat_sender_name(accounts, uid_account(accounts, uid), (char *) chat + offsetof(NetChatPacket, name),
+                         sizeof(((NetChatPacket *) 0)->name));
+    } else if (type == NET_PACKET_CHAT_V7 && length >= offsetof(NetChatV7Packet, chat) + offsetof(NetChatPacket, text)) {
+        // the v7 "ch" carries the account itself (accountId, v10's data[6]), which goes to 0 too
+        const int32_t account = read_i32(payload + offsetof(NetChatV7Packet, account_id));
+        uint8_t *chat = payload + offsetof(NetChatV7Packet, chat);
+        chat_sender_name(accounts, account, (char *) chat + offsetof(NetChatPacket, name), sizeof(((NetChatPacket *) 0)->name));
+        memset(payload + offsetof(NetChatV7Packet, account_id), 0, sizeof(int32_t));
     } else if (type == NET_PACKET_PLAYER_INFO && length >= sizeof(NetPlayerInfoPacket)) {
         NetPlayerInfoPacket info;
         memcpy(&info, payload, sizeof(info));
@@ -294,12 +357,98 @@ static int anonymize_packet(void *user, const uint8_t type, uint8_t *payload, co
         memcpy(&title, payload + NET_EXT_HEADER_SIZE, sizeof(title));
         title.title_index = -1;
         memcpy(payload + NET_EXT_HEADER_SIZE, &title, sizeof(title));
+    } else if (type == NET_PACKET_EXT && length == NET_EXT_HEADER_SIZE + sizeof(NetChatNamesPacket) &&
+               (payload[0] | payload[1] << 8) == NET_EXT_KN_CHAT_NAMES) {
+        // a bot's "ch" line naming a player: its sender as any "ch" sender; the player it names is part of the
+        // line's text, which v10 leaves alone
+        uint8_t *sender = payload + NET_EXT_HEADER_SIZE + offsetof(NetChatNamesPacket, sender);
+        const int32_t uid = read_i32(sender + offsetof(NetServerNameEntry, uid));
+        chat_sender_name(accounts, uid_account(accounts, uid), (char *) sender + offsetof(NetServerNameEntry, name),
+                         sizeof(((NetServerNameEntry *) 0)->name));
     }
     return 1;
 }
 
 void demo_anonymize(Demo *demo) {
-    for (size_t i = 0; i < demo->count; i++) demo_frames_each(demo->records[i].bytes, demo->records[i].length, anonymize_packet, NULL);
+    DemoAccounts *accounts = calloc(1, sizeof(*accounts));
+    if (!accounts) return;
+    // the accounts first: a chat line can come before its sender's PLAYER_INFO (v10 reads every roster first)
+    for (size_t i = 0; i < demo->count; i++) demo_frames_each(demo->records[i].bytes, demo->records[i].length, collect_account, accounts);
+    for (size_t i = 0; i < demo->count; i++) demo_frames_each(demo->records[i].bytes, demo->records[i].length, anonymize_packet, accounts);
+    free(accounts);
+}
+
+// ------------------------------------------------------------------ maps
+
+static void map_name_copy(char *out, const size_t size, const char *in, const size_t in_size) {
+    snprintf(out, size, "%.*s", (int) strnlen(in, in_size), in);
+}
+
+typedef struct {
+    DemoMap *out;
+    size_t max, count;
+    int map_info; // this record's MAP_INFO: its index in out, -1 none
+} MapScan;
+
+static int map_packet(void *user, const uint8_t type, uint8_t *payload, const uint16_t length) {
+    MapScan *s = user;
+    if (type == NET_PACKET_MAP_INFO && length >= sizeof(NetMapInfoPacket)) {
+        NetMapInfoPacket info;
+        memcpy(&info, payload, sizeof(info));
+        s->map_info = -1;
+        for (size_t i = 0; i < s->count; i++)
+            if (s->out[i].hash == info.hash) s->map_info = (int) i;
+        if (s->map_info < 0 && s->count < s->max) {
+            DemoMap *m = &s->out[s->count];
+            memset(m, 0, sizeof(*m));
+            m->hash = info.hash;
+            map_name_copy(m->name, sizeof(m->name), info.name, sizeof(info.name));
+            s->map_info = (int) s->count++;
+        }
+    } else if (type == NET_PACKET_EXT && length == NET_EXT_HEADER_SIZE + sizeof(NetCreationInfoPacket) &&
+               (payload[0] | payload[1] << 8) == NET_EXT_KN_CREATION_INFO && s->map_info >= 0) {
+        // the published map's own name: MAP_INFO's is the map JSON's "name", cut at 31 bytes
+        NetCreationInfoPacket info;
+        memcpy(&info, payload + NET_EXT_HEADER_SIZE, sizeof(info));
+        DemoMap *m = &s->out[s->map_info];
+        if (info.map_id > 0 && info.name[0]) {
+            m->published_id = info.map_id;
+            map_name_copy(m->name, sizeof(m->name), info.name, sizeof(info.name));
+        }
+    }
+    return 1;
+}
+
+size_t demo_maps(Demo *demo, DemoMap *out, const size_t max) {
+    MapScan s = {.out = out, .max = max, .map_info = -1};
+    for (size_t i = 0; out && i < demo->count; i++) {
+        s.map_info = -1; // CREATION_INFO follows its INIT in the same record (server/src/net.c net_send_init)
+        demo_frames_each(demo->records[i].bytes, demo->records[i].length, map_packet, &s);
+    }
+    return s.count;
+}
+
+typedef struct {
+    uint32_t from, to;
+    size_t changed;
+} MapRetarget;
+
+static int retarget_packet(void *user, const uint8_t type, uint8_t *payload, const uint16_t length) {
+    MapRetarget *r = user;
+    if (type != NET_PACKET_MAP_INFO || length < sizeof(NetMapInfoPacket)) return 1;
+    NetMapInfoPacket info;
+    memcpy(&info, payload, sizeof(info));
+    if (info.hash != r->from) return 1;
+    info.hash = r->to;
+    memcpy(payload, &info, sizeof(info));
+    r->changed++;
+    return 1;
+}
+
+size_t demo_retarget_map(Demo *demo, const uint32_t from, const uint32_t to) {
+    MapRetarget r = {.from = from, .to = to};
+    for (size_t i = 0; i < demo->count; i++) demo_frames_each(demo->records[i].bytes, demo->records[i].length, retarget_packet, &r);
+    return r.changed;
 }
 
 int32_t demo_resolve_suspect(const Demo *demo, const char *call_token) {
