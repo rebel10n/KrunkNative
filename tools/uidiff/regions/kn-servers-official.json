@@ -30,7 +30,7 @@
       ],
       "ref_offset": [
         0,
-        -17
+        -16
       ],
       "kind": "text",
       "note": "Official Customs and Custom Games: v10's headers (name, Quick Join, N online). The rect starts below the tab strip (it ends at 240 px; the reference has the window background there): until 2026-11-23 it began at 227 px and compared the strip's bottom with v10's header (15.4 %)"
@@ -45,10 +45,10 @@
       ],
       "ref_offset": [
         0,
-        -17
+        -16
       ],
       "kind": "text",
-      "note": "the user's case: official region groups New York, Frankfurt, Sydney in krunker.io's order, each the place name, Quick Join, then N online, no badge. The reference sits 17 px higher here (16.79 px: 29 CSS px at 0.579): KrunkNative's tab strip comes before the groups, 30 px above the first one as in v10's tabbed windows"
+      "note": "the user's case: official region groups New York, Frankfurt, Sydney in krunker.io's order, each the place name, Quick Join, then N online, no badge. The reference sits 16 px higher here (the strip and its 28 px margin, 2026-11-25: -16 gives 1.21 %, -17 9.23 %): KrunkNative's tab strip comes before the groups"
     },
     {
       "name": "footer",
@@ -60,7 +60,7 @@
       ],
       "ref_offset": [
         0,
-        -17
+        -16
       ],
       "kind": "text",
       "note": "61 In Game (krunker.io's totalPlayerCount): the In Game count only. KrunkNative leaves a count it has not read blank (3cec1138: the scenario reads no editor / social count), where the v10 capture shows 0 in Editor, 0 on Social"

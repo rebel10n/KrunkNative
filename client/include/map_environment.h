@@ -20,5 +20,6 @@ void map_environment_restore(void);
 
 // Every frame with the camera position: switches RenderLighting / sky / fog / shadows to the
 // environment zone the camera is in (-1 = the map's own). Returns the active zone index.
-// The zone's ambient sound (ambInd / ambIndC) is not switched here (sound_events.c).
+// The soundscape switches with it: the zone's ambIndC (or ambInd) over its ambFadeTime, the map's own on leaving
+// every zone (sound_ambient.c sound_ambient_environment).
 int map_environment_update(const Map *map, vec3 camera_position);

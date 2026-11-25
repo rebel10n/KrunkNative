@@ -649,8 +649,10 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
             break;
         case TRIGGER_ACTION_CHANGE_AMBIENT:
             if (a->constant >= 0 && a->constant < TRIGGER_SOUND_SCAPE_COUNT) {
+                // broadcast("camb", soundScape): no custom flag, no fade, so the 4-byte form a client from before
+                // NetAmbientPacket grew them still reads (its size check drops the 12-byte one)
                 const NetAmbientPacket packet = {.ambient = g_trigger_sound_scapes[a->constant]};
-                game_send(game, NET_TARGET_ALL, NET_PACKET_AMBIENT_CHANGE, &packet, sizeof(packet)); // broadcast("camb", soundScape)
+                game_send(game, NET_TARGET_ALL, NET_PACKET_AMBIENT_CHANGE, &packet, NET_AMBIENT_PACKET_V1_SIZE);
             }
             break;
         case TRIGGER_ACTION_PLAY_ANIMATION_SELF:

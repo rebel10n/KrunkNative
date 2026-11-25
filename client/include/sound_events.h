@@ -15,7 +15,7 @@ void sound_events_hitmarker(int crit);                   // DO_DAMAGE: crit_0 fo
 void sound_events_kill(int headshot, const Player *killer, int weapon_index); // getKillSnd: headshot_0 or the melee skin's killSnd
 void sound_events_remote_shot(Client *client, const Player *shooter, int blast); // "s": play3D weapon sound (blast: + "_blast")
 void sound_events_explosion(vec3 position);              // gb: play3D explosion
-void sound_events_change_ambient(int ambient);           // WP-C "camb": changeAmbient(soundscape) (the next map resets it)
+#include <sound_ambient.h> // sound_events_change_ambient: "camb" changeAmbient
 
 // Inline page handlers (client/src/ui/ui_sound.c) for ui_handlers.c's table:
 // "playTick" -> tick_0 at 0.2, "SOUND.play" -> SOUND.play(name, volume, loop, rate).

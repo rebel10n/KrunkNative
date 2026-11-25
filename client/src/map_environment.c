@@ -15,6 +15,7 @@
 #include <shadow.h>
 #include <ocean.h>
 #include <env_map.h>
+#include <sound_ambient.h> // updateEnvironment's changeAmbient
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -215,6 +216,10 @@ int map_environment_update(const Map *map, const vec3 camera_position) {
     if (zone == g_env_zone) return zone;
 
     env_apply_state(zone);
+    // v10 updateEnvironment switches the soundscape with the lighting (deob-10.0.7.js:208571-208575): the first
+    // zone holding the camera wins where zones overlap, leaving every zone gives the map's own back
+    sound_ambient_environment(zone >= 0 ? env_zone_raw(map, zone) : NULL, map->raw_data,
+                              g_env_mode ? g_env_mode->config.amb_ind : 0);
     g_env_zone = zone;
     return zone;
 }

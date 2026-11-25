@@ -4011,8 +4011,13 @@ typedef struct {
 } NetGuiTogglePacket;
 
 typedef struct {
-    int32_t ambient;  // config.soundScapes value: "ambient_<n>"
+    int32_t ambient;  // parseInt(soundscape): config.soundScapes value "ambient_<n>", or the asset id when custom;
+                      // INT32_MIN for NaN
+    float fade_ms;    // 1000 * (fade || 0): the old loop fades out and the new one in over it, 0 switches at once
+    uint8_t custom;   // the soundscape is a user asset sound (user-assets/<id>/sound.mp3)
+    uint8_t pad[3];
 } NetAmbientPacket;
+#define NET_AMBIENT_PACKET_V1_SIZE 4 // a server before the fade and custom fields sends the soundscape alone
 
 typedef struct {
     char name[NET_SOUND_NAME_SIZE]; // emitter sound name or the asset id digits

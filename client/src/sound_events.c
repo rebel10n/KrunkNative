@@ -13,6 +13,7 @@
 #include <sound_events.h>
 #include <class_camera.h> // the listener at the head
 #include <audio.h>
+#include <sound_ambient.h> // changeAmbient
 #include <client_settings.h> // Settings > Game > Gameplay "Always Play HS Sound on Kill"
 #include <ui_logic.h>        // particles / bulletCasings: the case_ sound
 #include <cosmetics.h>
@@ -72,7 +73,6 @@ static struct {
     PlayerTrack remote[MAX_REMOTE];
     const Map *map;
     int map_index;
-    int ambient;            // ambient_N currently looping, 0 = none
     int preloaded;
     float now; // sound_events_tick's clock (the remote Piss spray throttle)
     float plant_tick; // Defuse: interTick, the planter's beep_0 countdown (s)
@@ -122,10 +122,6 @@ static const struct {
 };
 
 // Krunker's amvVols: per-ambience volume, 0.12 otherwise.
-static float ambient_volume(const int index) {
-    return index == 6 ? 0.3f : index == 7 ? 0.4f : 0.12f;
-}
-
 static float rand_float(const float min, const float max) {
     return min + (max - min) * (float) ((double) pcg32_random() / (double) UINT32_MAX);
 }
@@ -220,14 +216,6 @@ static float distance2(const vec3 a, const vec3 b) {
 
 // ---------------------------------------------------------------- map ambience / emitters
 
-static int map_ambient_index(const Map *map) {
-    const cJSON *amb = map && map->raw_data ? cJSON_GetObjectItem(map->raw_data, "ambInd") : NULL;
-    int index = 0;
-    if (cJSON_IsNumber(amb)) index = amb->valueint;
-    else if (cJSON_IsString(amb) && amb->valuestring) index = atoi(amb->valuestring); // parseInt
-    return index > 0 ? index : 1;
-}
-
 // map.js SOUND_EMITTER -> MapManager.addEmitter -> SOUND.play3DL (deob-10.0.3.js:189196-189204,
 // :186572-186580): the sound is config.emitterSounds[es] (v10.0.3's 74; an index past it plays
 // emitterSounds[0]) or the user asset esa ("asset:<id>", user-assets/<id>/sound.mp3), with ev / er /
@@ -258,21 +246,6 @@ static void map_start_emitters(const Map *map) {
     }
 }
 
-// 106.js game init: `H.play("ambient_" + ambInd, amvVols[ambInd] || 0.12, true, 1)`, the
-// previous ambience stopped only when the index changes.
-// WP-C "camb" (v7 window.changeAmbient): the ambience loop switches when the index changes.
-void sound_events_change_ambient(const int ambient) {
-    if (ambient <= 0 || ambient == g_sound.ambient) return;
-    char name[32];
-    if (g_sound.ambient) {
-        snprintf(name, sizeof(name), "ambient_%d", g_sound.ambient);
-        audio_stop(name);
-    }
-    g_sound.ambient = ambient;
-    snprintf(name, sizeof(name), "ambient_%d", ambient);
-    audio_play(name, ambient_volume(ambient), 1, 1.0f); // SOUND.play("ambient_" + id, amvVols[id] || 0.12, true, 1)
-}
-
 static void map_sounds_update(Client *client) {
     const Map *map = client->game.ready ? client->game.map : NULL;
     if (map == g_sound.map && client->game.current_map_index == g_sound.map_index) return;
@@ -283,19 +256,11 @@ static void map_sounds_update(Client *client) {
     nettspend_audio_reset(); // KrunkNative Nettspend: a laced state does not outlive its map
     if (!map) return;
 
-    const int ambient = map_ambient_index(map);
-    char name[32];
-
-    if (ambient != g_sound.ambient) {
-        if (g_sound.ambient) {
-            snprintf(name, sizeof(name), "ambient_%d", g_sound.ambient);
-            audio_stop(name);
-        }
-        g_sound.ambient = ambient;
-    }
-
-    snprintf(name, sizeof(name), "ambient_%d", ambient);
-    audio_play(name, ambient_volume(ambient), 1, 1.0f); // no-op while that loop already plays
+    // the game start's soundscape (deob-10.0.7.js:193909-193915): the map data's, switched without a fade
+    int ambient, custom;
+    sound_ambient_map(map->raw_data, client->game.mode ? client->game.mode->config.amb_ind : 0, &ambient, &custom, NULL);
+    sound_events_change_ambient(ambient, custom, 0.0f);
+    sound_ambient_play(ambient, custom, 0.0f); // the same soundscape again: no-op while its loop plays
 
     map_start_emitters(map);
 }

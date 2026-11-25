@@ -2611,14 +2611,59 @@ static void on_player_sound_loop(KrunkerLink *l, const KrunkerFrame *f, const in
     emit(l, NET_PACKET_PLAYER_SOUND, &s, sizeof(s));
 }
 
-// "camb" CHANGE_AMBIENT [soundscape, custom, fade] (window.changeAmbient :220206): config.soundScapes
-// value; a custom soundscape (asset) and the fade are not supported by our client
+// parseInt(String(v)): leading blanks, a sign, "0x" hex, else decimal digits; INT32_MIN (NaN) without a digit, as for
+// a bool, null or a missing value ("true", "null", "undefined")
+static int32_t js_parse_int(const KrunkerValue *v) {
+    char text[64];
+    id_string(v, text, sizeof(text));
+    const char *c = text;
+    while (*c == ' ' || *c == '\t' || *c == '\n' || *c == '\r' || *c == '\v' || *c == '\f') c++;
+    const int negative = *c == '-';
+    if (*c == '-' || *c == '+') c++;
+    int base = 10;
+    if (c[0] == '0' && (c[1] == 'x' || c[1] == 'X')) {
+        base = 16;
+        c += 2;
+    }
+    long long value = 0;
+    int digits = 0;
+    for (;; c++, digits++) {
+        const int d = *c >= '0' && *c <= '9' ? *c - '0' : base == 16 && *c >= 'a' && *c <= 'f' ? *c - 'a' + 10
+                    : base == 16 && *c >= 'A' && *c <= 'F' ? *c - 'A' + 10 : -1;
+        if (d < 0) break;
+        if (value <= INT32_MAX) value = value * base + d;
+    }
+    if (!digits) return INT32_MIN;
+    if (value > INT32_MAX) value = INT32_MAX;
+    return (int32_t) (negative ? -value : value);
+}
+
+// 1000 * (v || 0): JS ToNumber of a number, a numeric string or a bool; NaN (a non-numeric string) is falsy, so 0
+static float js_fade_ms(const KrunkerValue *v) {
+    double x = 0.0;
+    if (krunker_is(v, KRUNKER_NUM)) x = v->u.num;
+    else if (krunker_is(v, KRUNKER_BOOL)) x = v->u.boolean ? 1.0 : 0.0;
+    else if (krunker_is(v, KRUNKER_STR)) {
+        char s[64];
+        id_string(v, s, sizeof(s));
+        char *end = NULL;
+        x = strtod(s, &end);
+        while (end && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end++;
+        if (!end || *end) x = 0.0; // Number("2a") is NaN
+    }
+    if (!isfinite(x)) x = 0.0;
+    return (float) (1000.0 * x);
+}
+
+// "camb" CHANGE_AMBIENT [soundscape, custom, fade] (window.changeAmbient, deob-10.0.7.js:227084-227090): the id is
+// parseInt'd, a truthy custom makes it a user asset sound (user-assets/<id>/sound.mp3), the fade is in seconds
+// (client/src/sound_events.c sound_events_change_ambient switches the loop)
 static void on_ambient(KrunkerLink *l, const KrunkerFrame *f) {
-    if (truthy(arg(f, 1))) return;
-    char text[32];
-    id_string(arg(f, 0), text, sizeof(text));
-    if (!text[0]) return;
-    const NetAmbientPacket a = {.ambient = (int32_t) strtol(text, NULL, 10)}; // parseInt
+    NetAmbientPacket a;
+    memset(&a, 0, sizeof(a));
+    a.ambient = js_parse_int(arg(f, 0));
+    a.custom = (uint8_t) truthy(arg(f, 1));
+    a.fade_ms = js_fade_ms(arg(f, 2));
     emit(l, NET_PACKET_AMBIENT_CHANGE, &a, sizeof(a));
 }
 
