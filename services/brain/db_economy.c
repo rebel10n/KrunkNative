@@ -1575,7 +1575,7 @@ const kn_proc P_KR_HISTORY = {"kr_history", NULL, run_kr_history};
     "SELECT l.skin_id AS i, l.skin_id AS s, l.skin_id AS sk, l.id AS m, l.id AS id, l.price AS f, l.price AS kr," \
     " {epoch_ms:l.created_at} AS ms, {epoch_ms:l.created_at} AS ss, a.username AS p, 1 AS c,"                \
     " l.paint_color AS paint_color, l.paint_shader AS paint_shader, l.wear AS wear, l.serial AS serial,"      \
-    " l.name_tag AS nametag, l.seller_id AS seller_id"                                                        \
+    " l.name_tag AS nametag, l.seller_id AS seller_id, l.stats AS stats"                                      \
     " FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
 /* (player) -> the player's open listings (v7.1.4 "uml" -> "ul": {sk, skid, kr, c, ms, id}) */

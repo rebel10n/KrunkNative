@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 try:
     import websockets
@@ -818,7 +819,8 @@ async def copy_counts(url, db):
     deob-10.0.7.js:191932; the item view draws the stats of a listing's m, :106682, :106774): a listing escrows it
     (market_listings.stats, 0407), an unlist gives it back, a sale gives it to the buyer; an offer escrows the sender's
     copy's count (trade_copies.stats), an accept gives both sides' copies' counts across, a cancel gives it back. A stack
-    unit's count stays with the seller's stack (a stack listing has no m)."""
+    unit's count stays with the seller's stack (a stack listing has no m). The browse rows show it as v10's cards read
+    it, in the copy's m (deob-10.0.7.js:131335): GET /market/listings and the market inventory."""
     names = {k: "%s%s" % (k, STAMP) for k in ("cks", "ckb", "ckr")}
     ids = {k: await register(url, n) for k, n in names.items()}
     S, B, R = ids["cks"], ids["ckb"], ids["ckr"]
@@ -833,9 +835,17 @@ async def copy_counts(url, db):
         res = await s.call(("lir", "po"), "li", 4, c1, 7, 1000, op())
         lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
         check(lid and kills_of(db, 4) == [[S, 0, 9]], "a listed copy's 120 kills leave the seller with it: %r %r" % (res, kills_of(db, 4)))
+        row = browse_listing(url, 4, lid)
+        check((row.get("m") or {}).get("kills") == 120, "GET /market/listings: the listed copy's m has its 120 kills: %r" % (row,))
         await s.call(("ulir", "po"), "uli", 4, lid, 7, op())
         c2 = copy_of(db, S, 4)
         check(kills_of(db, 4) == [[S, 0, 9], [S, c2, 120]], "an unlist gives the copy back with its kills: %r" % kills_of(db, 4))
+        page = await s.call("0", "r", "market", "inventory", S, names["cks"], None, 0)
+        rows = [x for x in (page[3] if isinstance(page[3], list) else []) if x.get("i") == 4]
+        copy_row = next((x for x in rows if x.get("sid") == c2), {})
+        stack_row = next((x for x in rows if "sid" not in x), {})
+        check((copy_row.get("m") or {}).get("kills") == 120 and "stats" not in copy_row and not stack_row.get("m"),
+              "the market inventory: copy %d's m has its 120 kills, the stack's row no m: %r" % (c2, rows))
         res = await s.call(("lir", "po"), "li", 4, c2, 7, 1000, op())
         lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
         set_listing_old(db, lid)
@@ -847,6 +857,8 @@ async def copy_counts(url, db):
         # a stack unit: its listing carries no count, the seller's stack keeps it
         res = await s.call(("lir", "po"), "li", 4, 4, 7, 1000, op())
         lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
+        row = browse_listing(url, 4, lid)
+        check(row.get("marketid") == lid and not row.get("m"), "GET /market/listings: a stack unit's listing has no m: %r" % (row,))
         set_listing_old(db, lid)
         res = await b.call(("br", "po"), "pi", lid, 4, op())
         check(res[0] == "br" and kills_of(db, 4) == [[S, 0, 9], [B, bc, 120]] and not (res[1] or {}).get("m"),
@@ -871,6 +883,15 @@ async def copy_counts(url, db):
     finally:
         for c in (s, b, r):
             await c.__aexit__()
+
+
+def browse_listing(url, item, lid):
+    """Listing `lid`'s row of GET /market/listings?item_id=`item` (v10_market.c listing_row), {} when it is not there."""
+    base = url.replace("ws://", "http://").split("/social/")[0]
+    with urllib.request.urlopen("%s/market/listings?item_id=%d&limit=100" % (base, item), timeout=10) as r:
+        body = json.loads(r.read())
+    rows = ((body.get("data") or {}) if isinstance(body, dict) else {}).get("listings")
+    return next((x for x in (rows if isinstance(rows, list) else []) if isinstance(x, dict) and x.get("marketid") == lid), {})
 
 
 def set_listing_old(db, lid):

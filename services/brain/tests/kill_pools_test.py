@@ -13,7 +13,9 @@ commit with itemRewards [{id, quantity}] adds them to the inventory (skin_transa
 "killpool"); the same match committed again adds nothing; a commit's items stop at 30; an unknown skin
 or a bad quantity is skipped; a game server's named give_skin (ref) is granted once per ref (v10.0.7 lost raid drops); counter skins' skinStats
 rows count on the copy they name (0406), a row without one on the index's first owned entry, and 0406 moves an
-older brain's per-index counts onto that entry.
+older brain's per-index counts onto that entry. 0408 moves a copy's counts to the account that owns the copy now (summed
+into a count it has), into an open offer's escrowed copy (trade_copies.stats), and drops the counts of a copy that is
+gone.
 """
 import asyncio
 import json
@@ -224,6 +226,56 @@ def legacy_setup():
     return account
 
 
+# copy ids no skin_copies row takes in this test (the sequence starts at 1000000): a quick-sold or crafted copy, an
+# open offer's escrowed copy and an accepted offer's copy
+GONE, ESCROWED, TRADED = 1999990, 1999991, 1999992
+
+
+def stats_of(copy):
+    """skin_stats rows of `copy` as sorted [account, skin, stat, count] (concat: query() reads one column)."""
+    rows = query("SELECT concat(account_id, ':', skin_id, ':', stat, ':', count) FROM skin_stats WHERE copy_id = %d"
+                 " ORDER BY account_id, stat" % copy)
+    return [[int(a), int(b), c, int(d)] for a, b, c, d in (r.split(":") for r in rows or [])]
+
+
+def stranded_setup(legacy):
+    """On the schema before 0408 (0407): counts whose copy changed hands under a brain before 0407's, left on the old
+    owner (copy_take did not take them), or whose copy is gone."""
+    name = "kpown" + str(os.getpid() % 100000)
+    query("INSERT INTO accounts (username, password_hash) VALUES ('%s', 'x')" % name)
+    ids = query("SELECT id FROM accounts WHERE username = '%s'" % name)
+    owner = int(ids[0]) if ids else 0
+    check(owner > 0, "a second pre-0408 account (%s)" % ids)
+    query("INSERT INTO inventory (account_id, skin_id, count) VALUES (%d, 7939, 1)" % owner)
+    query("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES (%d, 7939, '#dc3c3c', NULL)" % owner)
+    moved = int(query("SELECT max(copy_id) FROM skin_copies WHERE account_id = %d" % owner)[0])
+    for who, skin, copy, stat, n in ((legacy, 7939, moved, "kills", 7), (legacy, 7939, moved, "jumps", 4), (owner, 7939, moved, "kills", 3),
+                                     (legacy, 7937, GONE, "kills", 9), (legacy, 7937, ESCROWED, "headshots", 11),
+                                     (legacy, 7937, TRADED, "kills", 2)):
+        query("INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES (%d, %d, %d, '%s', %d)" % (who, skin, copy, stat, n))
+    for status, copy in (("open", ESCROWED), ("accepted", TRADED)):
+        query("INSERT INTO trades (sender_id, receiver_id, status) VALUES (%d, %d, '%s')" % (legacy, owner, status))
+        trade = int(query("SELECT max(id) FROM trades WHERE sender_id = %d" % legacy)[0])
+        query("INSERT INTO trade_copies (trade_id, side, copy_id, skin_id, paint_color) VALUES (%d, 's', %d, 7937, '#dc3c3c')" % (trade, copy))
+    return owner, moved
+
+
+def stranded_check(owner, moved):
+    rows = stats_of(moved)
+    check(rows == [[owner, 7939, "jumps", 4], [owner, 7939, "kills", 10]],
+          "0408: copy %d's counts left on its old owner go to its owner, 7 kills summed into its 3 (%s)" % (moved, rows))
+    check(stats_of(GONE) == [] and stats_of(TRADED) == [],
+          "0408: a gone copy's counts are dropped (%s, %s)" % (stats_of(GONE), stats_of(TRADED)))
+    esc = query("SELECT stats FROM trade_copies WHERE copy_id = %d" % ESCROWED) or [""]
+    try:
+        got = json.loads(esc[0])
+    except ValueError:
+        got = None
+    check(got == {"headshots": 11} and stats_of(ESCROWED) == [],
+          "0408: an open offer's copy carries its 11 headshots in its escrow row, none left on the sender (%r, %s)" %
+          (esc, stats_of(ESCROWED)))
+
+
 async def scenario(port, feed, legacy):
     now = time.time()
     async with Node(port) as node:
@@ -432,11 +484,21 @@ def main():
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=oldenv, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
         legacy = legacy_setup()
+        # then up to 0407, with counts stranded on a copy's old owner, then the rest
+        mid = os.path.join(work, "migrations0407", DRIVER)
+        os.makedirs(mid)
+        for f in os.listdir(src):
+            if re.match(r"\d{4}_.*\.sql$", f) and int(f[:4]) < 408:
+                os.symlink(os.path.join(src, f), os.path.join(mid, f))
+        subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=dict(env, KN_DATABASE_MIGRATIONS_DIR=os.path.dirname(mid)),
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        owner, moved = stranded_setup(legacy)
         # this tree's migrations by path: a config/config.json found above the tree (a worktree nested in a checkout)
         # roots the default directory in that other checkout
         newenv = dict(env, KN_DATABASE_MIGRATIONS_DIR=os.path.join(ROOT, "services", "db", "migrations"))
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=newenv, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
+        stranded_check(owner, moved)
         proc, port = start_brain(env, log_path, ["--brain.community.feed=" + feed])
         asyncio.run(scenario(port, feed, legacy))
     finally:
