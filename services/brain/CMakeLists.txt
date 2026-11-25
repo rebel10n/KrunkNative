@@ -742,6 +742,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/v10_menu_e2e.py ${CMAKE_BINARY_DIR}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_menu_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "brain;db;ui;e2e")
+    # a K.P.D replay of a map the client lacks: demo_play_start fetches it from the brain first, as v10's initGame
+    # GET /maps/<id> (deob-10.0.7.js:226167), instead of building map index 0 after the 20 s wait
+    add_test(NAME brain_kpd_replay_map_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/kpd_replay_map_e2e.py ${CMAKE_BINARY_DIR}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_kpd_replay_map_e2e PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
     # v10.0.7's sandbox Skin Manager through a headless client_bin --sandbox (client/src/ui/v10_skin_manager.c)
     add_test(NAME brain_v10_skin_manager_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/v10_skin_manager_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
