@@ -26,6 +26,7 @@
 #include <flavor_rules.h> /* /mm/hot-seek: flavor_rotation_modes, the default mode list */
 #include <modes.h>        /* mode_config: a valid seek mode */
 #include <shared.h>       /* g_rotation_maps: the default map list */
+#include <krunker_maps.h> /* KRUNKER_OFFICIAL_MAP_COUNT: dsma room */
 
 /* ---- helpers */
 
@@ -284,7 +285,13 @@ static void with_account(kn_http_req *req, Brain *b, AccountCb cb, void *ctx) {
 
 /* ---- /mm/seek-game */
 
-#define MM_SEEK_PREFS_MAX 32
+/* Room for every official map and mode. At 32 the rotation's last two maps (Barnyard 45, Candy Heist 46 of
+ * g_rotation_maps' 34) fell off the default dsma and /mm/hot-seek's list, so a Quick Match never found a lobby
+ * playing either (v10_menu_e2e: NoOtherLobby whenever the other lobby rolled Barnyard). */
+#define MM_SEEK_PREFS_MAX 64
+_Static_assert(MM_SEEK_PREFS_MAX >= KRUNKER_OFFICIAL_MAP_COUNT, "dsma: every official map index");
+_Static_assert(MM_SEEK_PREFS_MAX >= (int) (sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0])), "the default map list");
+_Static_assert(MM_SEEK_PREFS_MAX >= MODE_COUNT, "dsmo: every mode");
 
 /* dataQuery dsmo / dsma: v10 sends the saved list as numbers ([1,3]); a "1,3" string or numeric
  * strings are accepted too. Returns the count (<= cap). */

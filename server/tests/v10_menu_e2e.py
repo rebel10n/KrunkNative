@@ -48,6 +48,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
@@ -520,6 +521,19 @@ def brain_case(brain_port, games):
         code, rep = http(brain_port, "/mm/seek-game?hostname=krunknative&region=local&ruleset=v10&excludeGame=%s&excludeRecent=%s" % (a, b))
         check("3: excludeGame + excludeRecent covering every lobby: the recent one, not excludeGame's",
               code == 200 and rep.get("gameId") == b, "%s %s" % (code, rep))
+        # a dsma past 32 entries (the rotation has 34) with the lobby's map last: the brain once kept the first 32
+        # only, so a Quick Match never found a lobby on Barnyard (45) or Candy Heist (46)
+        lst = http(brain_port, "/mm/game-list?hostname=krunknative")[1]
+        meta = {g[0]: g[4] for g in (lst.get("games") or []) if len(g) > 4} if isinstance(lst, dict) else {}
+        m = (meta.get(b) or {}).get("mapIndex", -1)
+        if isinstance(m, int) and m >= 0:
+            dq = json.dumps({"dsma": [i for i in range(47) if i != m][:40] + [m]}, separators=(",", ":"))
+            code, rep = http(brain_port, "/mm/seek-game?hostname=krunknative&region=local&ruleset=v10&excludeGame=%s&dataQuery=%s"
+                             % (a, urllib.parse.quote(dq)))
+            check("3: a 41-map dsma with the lobby's map (%d) last still finds it" % m, code == 200 and rep.get("gameId") == b,
+                  "%s %s" % (code, rep))
+        else:
+            check("3: the other lobby lists its mapIndex", False, str(meta.get(b)))
 
 
 def main():
