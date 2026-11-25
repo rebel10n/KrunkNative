@@ -87,6 +87,9 @@ const char *accounts_published_map(void);
 const char *accounts_published_creator(void); // the hosted published map's creator ("" none / unknown)
 // WP6: v7 game.krRewards: the host option krRewards on a hosted published map.
 int accounts_kr_rewards(void);
+// v10 game.defaultSetts (deob-10.0.7.js:229449) of the current custom game: Force Default Settings or KR Rewards was
+// on (game_config_default_setts). Online storage needs it ("Storage only supported on published maps", :192068).
+int accounts_default_setts(void);
 
 // Templates of config.serverMessages[0/1] ("" = off).
 const char *accounts_join_message(void);

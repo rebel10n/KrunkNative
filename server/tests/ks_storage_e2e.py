@@ -9,7 +9,11 @@ a map whose scripts.server saves and loads on spawn, hosts it through /mm/host-g
 rewards on, and joins with the host ticket over the raw protocol: the server's "storage" /
 "storage_load" ops reach the database and come back to the script (SCRIPT_LOG lines), a second
 join reads the stored value again, giveKR is refused for lack of map funds, and a lobby that is
-not a published map refuses storage. Exit 77 when the database or python websockets is missing.
+not a published map refuses storage. KR Rewards forces v10's default settings (deob-10.0.7.js:204284):
+the host's own gameTime / classes give way to the map's config (GAME_CONFIG). The same map hosted
+again with Force Default Settings off keeps the host's settings and refuses storage (v10
+`!this.defaultSetts && isProd`, deob-10.0.7.js:192068). Exit 77 when the database or python
+websockets is missing.
 """
 import asyncio
 import json
@@ -107,6 +111,21 @@ def logs(conn):
     return [p[1:].decode(errors="replace") for t, p in conn.packets if t == SCRIPT_LOG]
 
 
+def game_config(conn):
+    """The last complete GAME_CONFIG (183) JSON the connection received (game_config_e2e.py's reader)."""
+    text, done = b"", None
+    for t, p in conn.packets:
+        if t != 183:
+            continue
+        total, offset = struct.unpack("<II", p[:8])
+        if offset == 0:
+            text = b""
+        text += p[8:]
+        if len(text) == total:
+            done = json.loads(text.decode())
+    return done or {}
+
+
 def pump(c, secs):
     end = time.time() + secs
     while time.time() < end:
@@ -150,7 +169,9 @@ def main():
             arena = json.load(f)
         arena["name"] = mapname
         arena["scripts"] = {"server": SERVER_SCRIPT}
-        token, published = asyncio.run(register_and_publish(port, account, json.dumps(arena)))
+        # the creator's own settings: what a default-settings game plays
+        published_arena = dict(arena, config={"settings": {"gameTime": 3}, "classes": [1]})
+        token, published = asyncio.run(register_and_publish(port, account, json.dumps(published_arena)))
         check("map published", published == "Map Published!", str(published))
         other_token, _ = asyncio.run(register_and_publish(port, "kso" + stamp, json.dumps(dict(arena, name="KsO" + stamp))))
         public_map = os.path.join(WORK, "public.json")
@@ -183,12 +204,17 @@ def main():
         o.close()
         time.sleep(1.0)
 
-        code, seek = http(port, "/mm/host-game?token=" + token, {"config": {"customMap": mapname, "krRewards": True}})
+        host_rows = {"gameTime": 9, "classes": [0, 2]}
+        code, seek = http(port, "/mm/host-game?token=" + token, {"config": dict(host_rows, customMap=mapname, krRewards=True)})
         check("hosted the published map", code == 200 and seek.get("clientId"), "%s %s" % (code, str(seek)[:200]))
         if code != 200:
             return 1
         a = play(seek)
         la = logs(a)
+        gc = game_config(a)
+        check("KR Rewards forces the default settings: the map's gameTime 3 and classes [1], not the host's",
+              gc.get("settings", {}).get("gameTime") == 3 and gc.get("classes") == [1],
+              "%s %s" % (gc.get("settings", {}).get("gameTime"), gc.get("classes")))
         check("the script sees the account", ("account " + account) in la, str(la))
         check("STORAGE.update reached the database", "saved true 1" in la, str(la))
         check("STORAGE.load reads it back", "loaded true 1" in la, str(la))
@@ -202,6 +228,24 @@ def main():
         game = open(game_log, errors="replace").read()
         check("giveKR goes to kn_brain and is refused (no map funds)", "refused: Not enough map funds" in game,
               "\n".join(l for l in game.splitlines() if "storage" in l)[-400:])
+
+        # the host left: the lobby goes public again, then the same map hosted with Force Default Settings off
+        check("the custom game ends when its host leaves", wait_for(game_log, r"custom game over", 15) is not None)
+        end = time.time() + 15
+        while True:  # the brain hands the server out again once its next status says the lobby is public
+            code, seek = http(port, "/mm/host-game?token=" + token, {"config": dict(host_rows, customMap=mapname, defaultSetts=False)})
+            if code != 503 or time.time() > end:
+                break
+            time.sleep(0.5)
+        check("hosted again without default settings", code == 200 and seek.get("clientId"), "%s %s" % (code, str(seek)[:200]))
+        if code == 200:
+            b = play(seek)
+            lb, gc = logs(b), game_config(b)
+            check("defaultSetts off: the host's gameTime 9 and classes [0, 2]",
+                  gc.get("settings", {}).get("gameTime") == 9 and gc.get("classes") == [0, 2],
+                  "%s %s" % (gc.get("settings", {}).get("gameTime"), gc.get("classes")))
+            check("defaultSetts off: storage refused", "Storage only supported on published maps" in lb and "saved false undefined" in lb, str(lb))
+            b.close()
         check("no runtime errors", "RUNTIME ERROR" not in game)
     finally:
         for p in procs:

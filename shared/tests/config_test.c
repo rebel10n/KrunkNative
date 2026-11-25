@@ -524,6 +524,59 @@ static void test_map_config(cJSON *sandstorm) {
     cJSON_Delete(plaza);
 }
 
+// v10 Force Default Settings (createPrivateRoom's defaultSetts, deob-10.0.7.js:204709): toggleDefault hides the
+// forcedSettings block (modes, classes, the serverConfig rows, weps / cls / prks, :219764-219779, :219967-220145),
+// so with the switch on (or KR Rewards, which "forces the Server to use Default Settings", :204284) every round
+// plays the map's own config, or the defaults on a map without one. The Server tab (private, passCode, the paid
+// upgrades) still applies.
+static void test_default_setts(cJSON *sandstorm) {
+    printf("Force Default Settings: the host's game settings are ignored, the map's own config applies...\n");
+    cJSON *eterno = load("assets/maps/custom/eterno_jump.json");
+    CHECK(eterno != NULL, "eterno_jump loads");
+    if (!eterno) return;
+    const cJSON *maps[2] = {eterno, sandstorm};
+    Game game;
+    memset(&game, 0, sizeof(game));
+    game_configure(&game, NULL, memcpy(malloc(sizeof(maps)), maps, sizeof(maps)), 2, NULL, 0, NULL, 0, NULL, 0);
+    game.hooks.send = test_send;
+
+    static const char *const host_rows = "\"gameTime\":9,\"maxPlayers\":7,\"classes\":[0,1],\"cls\":{\"9\":{\"health\":33}},"
+                                         "\"weps\":{\"0\":{\"ammo\":77}},\"private\":true,\"maxPS\":true";
+    char text[512];
+    snprintf(text, sizeof(text), "{\"defaultSetts\":true,%s}", host_rows);
+    cJSON *request = cJSON_Parse(text);
+    game_config_host(&game, request, GAME_HOST_CUSTOM);
+    cJSON_Delete(request);
+    game_init(&game, 0, 0, 1);
+    CHECK(game.ready && game.config.game_time == 0 && game.config.max_players == 20, "defaultSetts: eterno_jump's gameTime 0 / maxPlayers 20, not the host's 9 / 7 (%g, %d)",
+          (double) game.config.game_time, game.config.max_players);
+    CHECK(game.config.class_list_count == 1 && game.config.class_list[0] == 9, "defaultSetts: eterno_jump's classes [9], not the host's [0, 1]");
+    CHECK(game.classes[9].health == rules_classes()[9].health && !game.classes[9].wall_jump && game.weapons[0]->ammo != 77,
+          "defaultSetts: the host's cls / weps are dropped, the map's cls 9 wallJ false applies");
+    CHECK(game.config.is_private && game.config.max_ps, "defaultSetts: the Server tab (private, 40 Player Server) still applies");
+    game_init(&game, 1, 0, 1);
+    CHECK(game.ready && game.config.game_time == g_default_game_config.game_time && !game.config.class_list_count && game.config.is_private,
+          "defaultSetts on a map without config: the defaults, not the host's gameTime");
+
+    snprintf(text, sizeof(text), "{\"krRewards\":true,%s}", host_rows);
+    request = cJSON_Parse(text);
+    game_config_host(&game, request, GAME_HOST_CUSTOM);
+    cJSON_Delete(request);
+    game_init(&game, 0, 0, 1);
+    CHECK(game.config.game_time == 0 && game.config.class_list_count == 1 && game.classes[9].health == rules_classes()[9].health,
+          "krRewards forces the default settings too");
+
+    snprintf(text, sizeof(text), "{\"defaultSetts\":false,%s}", host_rows);
+    request = cJSON_Parse(text);
+    game_config_host(&game, request, GAME_HOST_CUSTOM);
+    cJSON_Delete(request);
+    game_init(&game, 0, 0, 1);
+    CHECK(game.config.game_time == 9 && game.config.max_players == 7 && game.classes[9].health == 33 && game.config.class_list_count == 2,
+          "defaultSetts off: the host's settings win over the map's");
+    game_off(&game);
+    cJSON_Delete(eterno);
+}
+
 static void test_mimic_pubs(cJSON *sandstorm) {
     printf("mimicPubs (game.isPubType): a host's request (operator preset, Host Game) and forced hosts carry it, a map's settings do not...\n");
     // setupGameConfig: forceDat (Zombies) sets it, overDat (Comp) has no key, a custom host keeps the request's
@@ -919,6 +972,7 @@ int main(void) {
     test_host_clamp();
     test_class_overrides(sandstorm);
     test_map_config(sandstorm);
+    test_default_setts(sandstorm);
     test_mimic_pubs(sandstorm);
     test_sync(sandstorm);
     test_votes();

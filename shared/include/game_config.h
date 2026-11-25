@@ -126,6 +126,14 @@ cJSON *game_config_from_map(const cJSON *map_config);
 // extra, comp sizes, preventCustomGames, forceDat / allowedDat. New object; `requested` is
 // not modified (v7 mutates overDat in place, a bug not reproduced).
 cJSON *game_config_setup(int host_index, const cJSON *requested, const cJSON *extra, int allow_prevented);
+// v10 Force Default Settings: 1 when the request has createPrivateRoom's defaultSetts on (deob-10.0.7.js:204709),
+// or krRewards, since "Enabling KR Rewards forces the Server to use Default Settings" (windows.host.rewards,
+// :204284; toggleKRRew turns the switch on with it, :219757-219763). The game then plays the map's own config.
+int game_config_default_setts(const cJSON *request);
+// The request without the rows Force Default Settings hides (toggleDefault, :219764-219779, hides #forcedSettings,
+// :219967-220145): modes, classes, every serverConfig key, weps, cls and prks. The Select and Server tabs (maps,
+// customMap, private, passCode, share, the servUp keys maxPS / promServ) and the host's flags stay. New object.
+cJSON *game_config_without_host_settings(const cJSON *request);
 
 // ---- applying to a Game ----
 // applyConfig(cfg, clamp, hostIndex) on a game: game->config (maps / modes pointers kept),
