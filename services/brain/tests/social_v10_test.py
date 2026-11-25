@@ -502,6 +502,11 @@ async def scenario(names):
     check(st == 200 and r["data"]["post"]["vot"] == 0, "unlike")
     st, r = await A.gapi("GET", "/social/news")
     check(st == 200 and r["data"]["news"] == ["<b>KN news</b>"], "news from accounts.news")
+    # v10.0.7's hub fills #leftABox from a "news" push that comes with the socket (its socket table's 'news')
+    N = await Sock().open()
+    f = await N.recv_until(lambda f: f[0] == "news", 4.0)
+    check(f == ["news", {"data": ["<b>KN news</b>"]}], "the socket's news push: accounts.news without the empty item (%r)" % f)
+    await N.close()
     # --- reports: v10's page sends the reason's index (0..6), v7's hub the name; the Reports tab lists them
     await B.send(["rpt", an, 0, "They are using an aimbot in the lobby"])
     f = await B.recv_until(lambda f: f[0] == "rptr")

@@ -706,10 +706,41 @@ static void open_settings(void) {
 }
 
 // ------------------------------------------------------------------ side boxes
-// v10 (social/renamed.js:2389-2391): only the ad box; v7.1.4's f492 also filled Krunk TV
-// (#leftBox) and Who to Follow (#rightFollBox), which v10's page no longer has.
+// v10 (social/renamed.js:2389-2391) shows #aBox: the Krunker News box (#leftABox) and the ad box. v7.1.4's f492
+// also filled Krunk TV (#leftBox) and Who to Follow (#rightFollBox), which v10's page no longer has.
 static void side_boxes(void) {
     set_display("aBox", "block");
+}
+
+// The hub socket's "news" handler of v10.0.7's social-CURLIuB7.js (registered as 'news' in its socket table):
+// the header, then one sideBarItem per non-empty value of data (an object or an array, as v10's for-in walks
+// either), or "No news today." when data is missing or has no keys.
+static void hub_news(const cJSON *data) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='sideBarHeader'>Krunker News</div>");
+    const cJSON *it;
+    int any = 0;
+    if (cJSON_IsObject(data) || cJSON_IsArray(data)) {
+        cJSON_ArrayForEach(it, data) {
+            any = 1;
+            if (!cJSON_IsString(it) || !it->valuestring[0]) continue;
+            sb_append(&sb, "<div class='sideBarItem'>");
+            sb_append(&sb, it->valuestring);
+            sb_append(&sb, "</div>");
+        }
+    }
+    if (!any) sb_append(&sb, "<div class='sideBarItem'>No news today.</div>");
+    char *html = sb_finish(&sb);
+    set_html("leftABox", html);
+    free(html);
+}
+
+// A hub visit on a socket that is already open missed the brain's "news" push (it comes with the socket's
+// open, as v10's page opens its own socket): the same items from GET /social/news (accounts.news).
+static void hub_news_loaded(void *user, const int status, const cJSON *data, const cJSON *error) {
+    (void) user; (void) error;
+    if (!g_hub.entered || status < 200 || status >= 300) return;
+    hub_news(cJSON_GetObjectItemCaseSensitive(data, "news"));
 }
 
 // ------------------------------------------------------------------ maps / mods lists (windows[0], windows[1])
@@ -5081,6 +5112,10 @@ static void handle_reply_frame(const cJSON *frame) {
         profile_reports(cJSON_GetArrayItem(frame, 1));
         return;
     }
+    if (!strcmp(label, "news")) { // io_news({data}): the Krunker News box
+        hub_news(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(frame, 1), "data"));
+        return;
+    }
     if (!strcmp(label, "msg")) {
         io_msg((int) cJSON_GetNumberValue(cJSON_GetArrayItem(frame, 1)), cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2)));
         return;
@@ -9327,8 +9362,10 @@ static void social_enter(Client *client, const char *query) {
     html_ui_set_listener("chatBoxInput", "keyup", l_chat_keyup);
     g_hub.brain = backend_enabled();
     if (g_hub.brain) {
+        const int was_open = backend_social_is_open();
         backend_social_listen(hub_on_social, NULL);
         backend_social_open();
+        if (was_open) v10_gapi("GET", "/social/news", NULL, hub_news_loaded, NULL);
     }
 
     settings_load(); // re[...].set(saved) at load: B, D, j, F, volume + onResize()
@@ -9381,6 +9418,7 @@ static void social_leave(Client *client) {
     (void) client;
     audio_stop("ambient_8"); // the Black Market's loop ends with the page, as a browser's does when it leaves social.html
     backend_social_unlisten(hub_on_social, NULL);
+    v10_gapi_cancel(hub_news_loaded, NULL);
     if (g_delayed_timer) html_timer_cancel(g_delayed_timer);
     g_delayed_timer = 0;
     hub_lists_free();

@@ -181,8 +181,11 @@ these runs.
   and the input window messages, so the widget on Windows is not yet verified on a real runtime. The macOS backend
   is verified against the stub page, not the live challenge; its keyboard path in the game is the gap above.
 - Windows packages ship `runtime/WebView2Loader.dll` (the lock's pinned copy) when `client.exe` has the WebView2
-  backend (tools/release/package-client.sh, f316b6a1). CI and local builds do not stage the SDK (`make webview2`
-  downloads it), so they have no backend; without the DLL the challenge is unavailable, as without the runtime.
+  backend (tools/release/package-client.sh, f316b6a1). A build has the backend only where `make webview2` has
+  staged the SDK (`~/.cache/krunknative/webview2`, checked against tools/webview2/webview2.lock). devbox has it
+  since 2026-11-25: the local-ci windows job on ec7912dd packaged `runtime/WebView2Loader.dll` (194912 bytes) with
+  the WebView2 `client.exe`. A host without the SDK builds no backend, and without the DLL the challenge is
+  unavailable, as without the runtime.
 - Every Linux client package bundles WebKitGTK (tools/release/bundle-webkit.sh: `lib/`, `libexec/`), so the captcha
   needs no system package there. The client's Linux build is the dynamic one (glibc 2.35, built on Ubuntu 22.04):
   there is no webkit2gtk-4.1 for the glibc 2.17 floor of the polyfilled build, which is the server's only. WebKit 2.52 compiles in the directory of its helper processes and has

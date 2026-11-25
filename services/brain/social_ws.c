@@ -23,6 +23,7 @@
 #include "captcha.h"
 #include "hot.h"
 #include "knsvc/buf.h"
+#include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
@@ -1161,6 +1162,12 @@ static void on_open(kn_ws *ws, void *ud) {
     s->ws = ws; /* on_open may run inside kn_ws_accept, before it returns */
     social_send_n(s, "pi", 1, cJSON_CreateNull());
     social_send_n(s, "io-init", 1, cJSON_CreateString(s->socket_id));
+    /* v10.0.7's hub fills its Krunker News box from a "news" push ({data}) and never asks for it: one per
+     * socket, from accounts.news (the same list GET /social/news answers) */
+    cJSON *news = cJSON_CreateObject(), *list = cJSON_AddArrayToObject(news, "data");
+    const cJSON *it, *cfg = g_acct_brain ? kn_config_get(g_acct_brain->cfg, "accounts.news") : NULL;
+    cJSON_ArrayForEach(it, cfg) if (cJSON_IsString(it) && it->valuestring[0]) cJSON_AddItemToArray(list, cJSON_CreateString(it->valuestring));
+    social_send_n(s, "news", 1, news);
 }
 
 static void on_message(kn_ws *ws, const void *data, size_t len, int is_binary, void *ud) {

@@ -25,6 +25,9 @@ sys.path.insert(0, os.path.join(ROOT, "server", "tests"))
 from kn_proto import free_ports  # noqa: E402
 
 FAILS = []
+# v10.0.7's profile dot has no title, only its colour (social-CURLIuB7.js: #27ab32 online, #7f7f7f offline)
+ONLINE_DOT = ".onStatProf[style=\"background:#27ab32\"]"
+OFFLINE_DOT = ".onStatProf[style=\"background:#7f7f7f\"]"
 WORK = tempfile.mkdtemp(prefix="kn-hub-staff.", dir=os.path.expanduser("~/.cache"))
 DB = os.path.join(WORK, "coordinator.db")
 PORT = free_ports(1)[0]
@@ -261,8 +264,11 @@ def main():
         check(hub.visible("verifyBtn", 20.0), "a developer sees Verify on another player's profile")
         check(hub.visible("badgeBtn"), "a developer sees Give Badge")
         check(hub.visible("flagBtn"), "a developer sees the flag button")
-        check(hub.count(".onStatProf[title=\"Online\"]") == 1, "the target's profile dot is Online (its socket is signed in)")
+        check(hub.count(ONLINE_DOT) == 1, "the target's profile dot is Online (its socket is signed in)")
         check(hub.text_of("verifyBtn") == "Verify", "the button reads Verify (the target is not verified)")
+        # v10.0.7's 'news' socket handler: the Krunker News box from the socket's news push (accounts.news)
+        check(hub.count("#leftABox .sideBarItem") == 1 and hub.text_of("#leftABox .sideBarItem") == "KN news",
+              "the Krunker News box lists accounts.news (got %r)" % hub.text_of("#leftABox .sideBarItem"))
 
         # ---- verify, then unverify (ver -> verr; the page shows the new state)
         hub.click("verifyBtn")
@@ -339,10 +345,10 @@ def main():
         # ---- presence: a signed-out target is Offline in the profile and the chat header
         hub.ui("updateWindow('profile','%s')" % off_n)
         time.sleep(2.0)
-        check(hub.count(".onStatProf[title=\"Offline\"]") == 1, "the signed-out account's profile dot is Offline")
+        check(hub.count(OFFLINE_DOT) == 1, "the signed-out account's profile dot is Offline")
         hub.ui("updateWindow('profile','%s')" % tgt_n)
         time.sleep(2.0)
-        check(hub.count(".onStatProf[title=\"Online\"]") == 1, "back on the online target: the dot is Online again")
+        check(hub.count(ONLINE_DOT) == 1, "back on the online target: the dot is Online again")
         # the chat header shows startChat's own status argument (hub-10.0.7.js:2249-2255): a friend row passes its raw sm,
         # and none (or "undefined") reads Offline whatever the peer's presence
         hub.ui("startChat(%d,0,'%s',null,1,'In game','')" % (tgt, tgt_n))

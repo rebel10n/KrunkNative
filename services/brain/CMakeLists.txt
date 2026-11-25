@@ -814,6 +814,10 @@ if (Python3_FOUND)
     add_test(NAME brain_hub_creator_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/hub_creator_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_hub_creator_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+    # the hub's staff buttons (Verify, badges, Flag, Report), the profile dot and the Krunker News box through client_bin
+    add_test(NAME brain_social_hub_staff_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_hub_staff_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_social_hub_staff_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
     # v10.0.7's email preference through the client (account_ui.c, v10_auth.c, 0391): the opt-in popup, Accept / Decline, the toggle
     add_test(NAME brain_email_prefs_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/email_prefs_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

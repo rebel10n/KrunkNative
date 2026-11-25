@@ -140,10 +140,10 @@ v10's hub is still v7's social.js with targeted changes (S10 routes, settings an
 | Page markup and CSS | P10 social.html, css/social.css (+`.oCurrencyLine`, `.oCurrencyItem`, `.playerProfileRank`, `.pStTitle`; −`twoFA*`; `#popupHolder` z-index), shared `static/index.css` (`io-*`, CSS variables) | v7.1.4 | **done** (v10 files) |
 | navBar, menu buttons feed / market / leaders / maps / mods / items, `updateWindow(p,q,s,i)` routes, `?games` | S10:6943-7003 | v7 | **done** |
 | Settings popup (13 settings) | S10:1749, 1949 (= v7) | v7 | **done** |
-| Krunk TV, Who to Follow side boxes | removed from the page | still written | **done** (`side_boxes`: the ad box only, S10:2389) |
+| Krunk TV, Who to Follow side boxes | removed from the page | still written | **done** (`side_boxes`: `#aBox` (News box and ad box) only, S10:2389) |
 | App badges: Android only | S10:1514-1518; no `#steamDB` | iOS + Android (+ Steam in scenarios) | **done** (KN: opens the Download window) |
 | `#hackText` BANNED | page markup | from markup | **done** |
-| Krunker News side box | S10:4342 (`news`), hub-10.0.7.js:4350-4361 | static | **missing**: v10 fills `#leftABox` from a `news` socket message ("No news today." when empty). Porting it needs that hub bundle's lines 4351-4354 (not on disk) and a brain `news` push (2026-11-25) |
+| Krunker News side box | S10:4342 (`news`), social-CURLIuB7.js (the hub bundle krunker.io served on 2026-11-25, sha256 059e3aeb7a17abb4...) | static | **done** (2026-11-25): `hub_news` in `social_ui.c` fills `#leftABox` from the `news` push ({data}: one `sideBarItem` per non-empty value, else "No news today."); kn_brain pushes `accounts.news` on every social socket's open (`social_ws.c` `on_open`), and a hub visit on a socket that is already open reads the same list from `GET /social/news`. Tests: brain_social_v10, brain_social_hub_staff_e2e |
 | Market ambient loop dropped (ambient_8 Black Market kept) | S10:6953, hub-10.0.7.js:6954-6964 | neither | **done**: ambient_8 at 0.3, rate 0.8, looped on the Black Market page and stopped on any other; `app_mode_frame` runs `audio_update` so page sounds start (28a3f475) |
 | Page title per route | S10:7095 | none | **done** (`social_ui.c:4614-4628`, `app_set_page_title`, "Krunker Hub" by default; doc/v10/parity-audit-2026-11-20-social.md) |
 | Deep links autoReport / autoGift / autoTrade / openPubMo | S10:2810-2831, 2178 | none | **done** (`social_ui.c:1760-1774`, `?openPubMo` at :4656; doc/v10/parity-audit-2026-11-20-social.md) |
