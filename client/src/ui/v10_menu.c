@@ -59,6 +59,7 @@
 #include <v10_wallet.h>       // the header's Wallet: the Wallet and Inventory modal (v10_wallet.c)
 #include <v10_social.h>       // the Social hub's gapi reads (v10_gapi.c)
 #include <html_ui.h>
+#include <hud_v10.h> // hud_v10_chat_on_login: the login's #chatUIHolder
 #include <ui_logic.h>
 #include <store_spins.h>
 #include <ks_game.h> // ks_wall_ms: the portable wall clock
@@ -440,7 +441,10 @@ void v10_menu_account_changed(void) {
     if (!v10_menu_page()) return;
     v10_market_account_changed(); // the open exchange's tab follows the account (a no-op when the account is the same)
     const AccountInfo *acc = active_account(); // krunker.io's in an official game, krunk.io's elsewhere
-    if (acc && V.signed_in != 1) g_rejoin_check = 1;
+    if (acc && V.signed_in != 1) {
+        g_rejoin_check = 1;
+        hud_v10_chat_on_login(); // chatUIHolder 'block' in the login handler (deob-10.0.7.js:216833)
+    }
     header_update(acc);
     nav_update(acc);
     sandbox_apply();

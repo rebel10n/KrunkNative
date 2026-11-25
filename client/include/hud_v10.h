@@ -13,6 +13,10 @@ int hud_v10_page(void);
 // chat's test of hud_ui.c (hud_chat_wanted: up on every page but while the game loads).
 void hud_v10_tick(int chat_wanted);
 
+// A login's chatUIHolder 'block' (deob-10.0.7.js:216833) in the same frame (v10_menu_account_changed), not on the
+// next tick; nothing while the game loads (the last tick's chat_wanted).
+void hud_v10_chat_on_login(void);
+
 // GUI.endScreen.tabs.performance.gen() of v10 (Combat Earnings + Combat Record) for the current
 // match: kr_html is the earned-KR cell ("NONE" = nothing earned), the rest the local player's
 // end stats (iiíïíïï, deob-10.0.7.js:25068: score_label = mode.scoreLabel || "Score", rank 0 when the

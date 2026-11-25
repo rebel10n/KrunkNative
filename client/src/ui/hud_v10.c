@@ -28,6 +28,7 @@
 static unsigned g_page_serial = ~0u;
 static int g_is_v10;
 static char g_chat_shown[8]; // last #chatUIHolder display written ("" = none yet)
+static int g_chat_wanted;    // the last tick's chat_wanted (hud_chat_wanted: 0 while the game loads)
 
 int hud_v10_page(void) {
     if (!html_ui_available() || !html_ui_is_ready()) return 0;
@@ -63,12 +64,25 @@ void hud_v10_tick(const int chat_wanted) {
     // MenuUi.menu_open (#uiBase.onMenu). KrunkNative: and none while the game loads (chat_wanted).
     const MenuUi *menu = menu_ui();
     const int on_menu = menu && menu->menu_open;
+    g_chat_wanted = chat_wanted;
     const char *want = chat_wanted && (!on_menu || active_account()) ? "block" : "none";
     if (!strcmp(want, g_chat_shown)) return;
     const HtmlElem el = html_dom_by_id("chatUIHolder");
     if (!el) return;
     html_dom_set_display(el, want);
     snprintf(g_chat_shown, sizeof(g_chat_shown), "%s", want);
+}
+
+void hud_v10_chat_on_login(void) {
+    // A login writes chatUIHolder.style.display = 'block' in its own handler (deob-10.0.7.js:216833), so the chat
+    // is up in the frame the account arrives. Waiting for the next hud_v10_tick left one frame with the signed-in
+    // header and no chat (v10_menu_e2e's "signed in: the chat is up on the idle menu"). While the game loads
+    // KrunkNative keeps it hidden, as the tick does.
+    if (!hud_v10_page() || !g_chat_wanted) return;
+    const HtmlElem el = html_dom_by_id("chatUIHolder");
+    if (!el) return;
+    html_dom_set_display(el, "block");
+    snprintf(g_chat_shown, sizeof(g_chat_shown), "%s", "block");
 }
 
 static void ap(char *out, const size_t size, size_t *len, const char *fmt, ...) {
