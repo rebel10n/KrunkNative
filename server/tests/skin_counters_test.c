@@ -4,6 +4,8 @@
 // when not saved) and the SKINS' counter bases. Run from the repository root (assets/skins.json).
 #include <server.h>
 #include <server_skin_counters.h>
+#include <server_accounts.h>
+#include <net_ext.h>
 #include <ruleset.h>
 #include <shared.h>
 #include <cJSON.h>
@@ -137,6 +139,42 @@ int main(void) {
     rows = skin_counters_take(&client, 1);
     CHECK(rows == NULL, "a guest counts nothing");
     cJSON_Delete(rows);
+
+    printf("Running a slot that names a copy...\n");
+    // two V-CORE 01 copies with their own kills: a "<copyId>#<index>" slot counts from that copy (deob-10.0.7.js:173031,
+    // the slot's m), a plain index from the first counted copy; takeSkinStats adds to the copy counted on (:191929-191932)
+    cJSON *account = cJSON_Parse("{\"skins\":[{\"ind\":7937,\"cnt\":1,\"st\":0,\"id\":3001,\"m\":{\"kills\":120}},"
+                                 "{\"ind\":7937,\"cnt\":1,\"st\":0,\"id\":3002,\"m\":{\"kills\":7}},"
+                                 "{\"ind\":7937,\"cnt\":1,\"st\":0,\"id\":3003,\"m\":{\"paint\":\"#112233\"}}]}");
+    accounts_load_skins(&client, account);
+    CHECK(client.acct.skin_copy_count == 3 && client.acct.skin_counter_count == 1, "three copies of one counter skin (%u, %u)",
+          client.acct.skin_copy_count, client.acct.skin_counter_count);
+    player->skins = (PlayerSkins) {VCORE_01, -1, -1};
+    memset(&client.worn_copies, 0, sizeof(client.worn_copies));
+    for (int k = 0; k < SKIN_COPY_SLOTS; k++) client.worn_copies.skin[k] = -1;
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 120, "a plain index: the first counted copy's 120 kills (%d)", base[0]);
+    client.worn_copies.skin[SKIN_COPY_SLOT_PRIMARY] = VCORE_01;
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 3002;
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 7, "the slot names copy 3002: its own 7 kills, not the first copy's 120 (%d)", base[0]);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 3003;
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 0, "a named copy with no kills in its m counts from 0 (%d)", base[0]);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 3002;
+    game_count_skin_stat(&server.game, player, 18, "kills", 2);
+    rows = skin_counters_take(&client, 1);
+    CHECK(row_count(rows, VCORE_01, "kills") == 2, "the two kills are taken (%lld)", (long long) row_count(rows, VCORE_01, "kills"));
+    cJSON_Delete(rows);
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 9, "the take adds to the named copy: 7 + 2 (%d)", base[0]);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 3001;
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 120, "the other copy keeps its own 120 (%d)", base[0]);
+    client.worn_copies.copy_id[SKIN_COPY_SLOT_PRIMARY] = 9999;
+    skin_counters_bases(&client, &player->skins, base, NULL);
+    CHECK(base[0] == 122, "a copy the account no longer has: the plain-index rule, the index's count with the take (%d)", base[0]);
+    cJSON_Delete(account);
 
     cJSON_Delete(skins);
     cJSON_Delete(map);

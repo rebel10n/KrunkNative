@@ -13,8 +13,8 @@ int skin_counters_stat_of(int skin);
 // entry of each counter skin's index is its base; and each index's copy seed (the first entry with an id or m.seed).
 // Called by accounts_load_skins.
 void skin_counters_load(ClientConnection *client, const cJSON *skins);
-// The counter base of each worn skin, PlayerSkins order, -1 = none, and each worn copy's seed, 0 none
-// (NET_EXT_KN_SKIN_COPIES). seed may be NULL.
+// The counter base of each worn skin, PlayerSkins order, -1 = none (the m[stat] of the copy the slot names, else the
+// index's first counted copy), and each worn copy's seed, 0 none (NET_EXT_KN_SKIN_COPIES). seed may be NULL.
 void skin_counters_bases(const ClientConnection *owner, const PlayerSkins *skins, int32_t base[3], int32_t seed[3]);
 // NET_EXT_KN_SKIN_COPIES of `player` to `to` (an EXT peer), after its SKINS. Nothing when no worn copy has a base or a seed.
 void skin_counters_send(ClientConnection *to, const ClientConnection *owner, const Player *player);

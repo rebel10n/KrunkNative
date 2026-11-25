@@ -71,6 +71,9 @@ typedef struct {
     float wear;
     int32_t serial;                    // m.serial, 0 none
     char name[SERVER_SKIN_META_NAME];  // m.name (a Name Tag), "" none
+    // m[stat] of a counter skin's copy, -1 none (skin_counters_load): a slot naming this copy counts from it, not from the
+    // index's first counted copy (v10.0.7 counts from the slot's own m, deob-10.0.7.js:173031, m from :174120)
+    int64_t counter;
 } ServerSkinCopy;
 
 // v10.0.4 counter skins (server/src/skin_counters_server.c): a counter skin the account owns, its copy's stat (m[stat],

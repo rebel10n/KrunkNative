@@ -101,10 +101,18 @@ static void sc_note_seed(ClientConnection *client, const int skin, const int32_t
     client->acct.skin_seed_count++;
 }
 
+// The copy (accounts_load_skins' skin_copies) with this id and store index, NULL none
+static ServerSkinCopy *sc_copy(ClientConnection *client, const int32_t id, const int skin) {
+    for (uint16_t i = 0; id > 0 && i < client->acct.skin_copy_count; i++)
+        if (client->acct.skin_copies[i].id == id) return client->acct.skin_copies[i].skin == skin ? &client->acct.skin_copies[i] : NULL;
+    return NULL;
+}
+
 void skin_counters_load(ClientConnection *client, const cJSON *skins) {
     if (!client) return;
     client->acct.skin_counter_count = 0;
     client->acct.skin_seed_count = 0;
+    for (uint16_t i = 0; i < client->acct.skin_copy_count; i++) client->acct.skin_copies[i].counter = -1;
     static const char *const stats[SKIN_STAT_COUNT] = SKIN_STATS;
     const cJSON *e;
     cJSON_ArrayForEach(e, skins) {
@@ -116,6 +124,11 @@ void skin_counters_load(ClientConnection *client, const cJSON *skins) {
         if (t < 0) continue;
         ServerSkinCounter *c = sc_find(client, ind->valueint);
         const int64_t n = sc_entry_stat(e, stats[g_table[t].stat]);
+        // each copy keeps its own m[stat]: a slot that names it counts from that (skin_counters_bases)
+        const cJSON *id = cJSON_IsObject(e) ? cJSON_GetObjectItemCaseSensitive(e, "id") : NULL;
+        ServerSkinCopy *copy = cJSON_IsNumber(id) && id->valuedouble >= 1 && id->valuedouble <= 0x7fffffff
+                                   ? sc_copy(client, (int32_t) id->valuedouble, ind->valueint) : NULL;
+        if (copy) copy->counter = n;
         if (c) { // a later entry of the same index (a copy): the first entry with a count keeps it
             if (c->base <= 0 && n > 0) c->base = n;
             continue;
@@ -147,9 +160,16 @@ void skin_counters_bases(const ClientConnection *owner, const PlayerSkins *skins
     const int32_t worn[3] = {skins->primary, skins->secondary, skins->melee};
     for (int k = 0; k < 3; k++) {
         if (worn[k] < 0) continue;
+        // a slot naming a copy ("<copyId>#<index>") counts from that copy's m[stat], 0 when it has none (v10.0.7's base is
+        // the slot's m[stat] || 0, deob-10.0.7.js:173031, the slot's m from getSkinForLoadout at :174120); a plain index
+        // keeps the first counted copy of the index (the plain-index rule, doc/v10/paint-copy.md)
+        const ServerSkinCopy *copy = accounts_worn_copy(owner, SKIN_COPY_SLOT_PRIMARY + k, worn[k]);
         for (uint16_t i = 0; i < owner->acct.skin_counter_count; i++) {
             const ServerSkinCounter *c = &owner->acct.skin_counters[i];
-            if (c->skin == worn[k]) base[k] = (int32_t) (c->base > 0x7fffffff ? 0x7fffffff : c->base);
+            if (c->skin != worn[k]) continue;
+            const int64_t b = copy ? (copy->counter > 0 ? copy->counter : 0) : c->base;
+            base[k] = (int32_t) (b > 0x7fffffff ? 0x7fffffff : b);
+            break;
         }
         for (uint16_t i = 0; seed && i < owner->acct.skin_seed_count; i++)
             if (owner->acct.skin_seeds[i].skin == worn[k]) seed[k] = owner->acct.skin_seeds[i].seed;
@@ -192,6 +212,10 @@ cJSON *skin_counters_take(ClientConnection *client, const int save) {
             cJSON_AddNumberToObject(row, "count", (double) c->pending);
             cJSON_AddItemToArray(rows, row);
             c->base += c->pending; // the account's copy: m[stat] += count (:191579)
+            // takeSkinStats adds to the copy the count was made on (account.skins.find(id), deob-10.0.7.js:191929-191932):
+            // the copy a slot names, so its next spawn counts on from the new total
+            ServerSkinCopy *copy = sc_copy(client, net_skin_copy_id_of(&client->worn_copies, -1, c->skin), c->skin);
+            if (copy) copy->counter = (copy->counter > 0 ? copy->counter : 0) + c->pending;
         }
         c->pending = 0;
     }
