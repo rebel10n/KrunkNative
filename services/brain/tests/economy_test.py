@@ -794,6 +794,85 @@ async def paint_targets(url, db):
         await s.__aexit__()
 
 
+def give_copy(db, aid, skin, kills):
+    """A painted copy (0352) of `skin` with a counter skin's kills on it (skin_stats, 0406); its copy id."""
+    give(db, aid, skin, 1)
+    db.q("INSERT INTO skin_copies (account_id, skin_id, paint_color, paint_shader) VALUES ($1, $2, '#dc3c3c', NULL)", aid, skin)
+    copy = db.one("SELECT max(copy_id) FROM skin_copies WHERE account_id = $1 AND skin_id = $2", aid, skin)
+    db.q("INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES ($1, $2, $3, 'kills', $4)", aid, skin, copy, kills)
+    return copy
+
+
+def kills_of(db, skin):
+    """[[account, copy, kills], ...] of every skin_stats kills row of `skin`."""
+    return sorted([int(v) for v in r] for r in db.q("SELECT account_id, copy_id, count FROM skin_stats WHERE skin_id = $1"
+                                                     " AND stat = 'kills'", skin))
+
+
+def copy_of(db, aid, skin):
+    return db.one("SELECT max(copy_id) FROM skin_copies WHERE account_id = $1 AND skin_id = $2", aid, skin)
+
+
+async def copy_counts(url, db):
+    """A counter skin's count goes with its copy, as v10 keeps it in the copy's m[stat] (takeSkinStats,
+    deob-10.0.7.js:191932; the item view draws the stats of a listing's m, :106682, :106774): a listing escrows it
+    (market_listings.stats, 0407), an unlist gives it back, a sale gives it to the buyer; an offer escrows the sender's
+    copy's count (trade_copies.stats), an accept gives both sides' copies' counts across, a cancel gives it back. A stack
+    unit's count stays with the seller's stack (a stack listing has no m)."""
+    names = {k: "%s%s" % (k, STAMP) for k in ("cks", "ckb", "ckr")}
+    ids = {k: await register(url, n) for k, n in names.items()}
+    S, B, R = ids["cks"], ids["ckb"], ids["ckr"]
+    for aid in (S, B, R):
+        set_player(db, aid, funds=50000, level=40)
+    c1 = give_copy(db, S, 4, 120)
+    give(db, S, 4, 1)  # a stack unit next to the copy, with its own count
+    db.q("INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES ($1, 4, 0, 'kills', 9)", S)
+    s, b, r = await user(url, names["cks"]), await user(url, names["ckb"]), await user(url, names["ckr"])
+    try:
+        # ---- the market: list, unlist, list again, buy
+        res = await s.call(("lir", "po"), "li", 4, c1, 7, 1000, op())
+        lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
+        check(lid and kills_of(db, 4) == [[S, 0, 9]], "a listed copy's 120 kills leave the seller with it: %r %r" % (res, kills_of(db, 4)))
+        await s.call(("ulir", "po"), "uli", 4, lid, 7, op())
+        c2 = copy_of(db, S, 4)
+        check(kills_of(db, 4) == [[S, 0, 9], [S, c2, 120]], "an unlist gives the copy back with its kills: %r" % kills_of(db, 4))
+        res = await s.call(("lir", "po"), "li", 4, c2, 7, 1000, op())
+        lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
+        set_listing_old(db, lid)
+        res = await b.call(("br", "po"), "pi", lid, 4, op())
+        bc = copy_of(db, B, 4)
+        check(res[0] == "br" and kills_of(db, 4) == [[S, 0, 9], [B, bc, 120]],
+              "a sale gives the copy's kills to the buyer's copy; the seller's stack keeps its 9: %r %r" % (res, kills_of(db, 4)))
+        check(isinstance(res[1], dict) and (res[1].get("m") or {}).get("kills") == 120, "the buy's m has the copy's kills: %r" % (res,))
+        # a stack unit: its listing carries no count, the seller's stack keeps it
+        res = await s.call(("lir", "po"), "li", 4, 4, 7, 1000, op())
+        lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
+        set_listing_old(db, lid)
+        res = await b.call(("br", "po"), "pi", lid, 4, op())
+        check(res[0] == "br" and kills_of(db, 4) == [[S, 0, 9], [B, bc, 120]] and not (res[1] or {}).get("m"),
+              "a stack unit sold: no count moves (%r, %r)" % (res, kills_of(db, 4)))
+
+        # ---- an offer: the sender's copy escrowed, the receiver's copy read at accept
+        sc = give_copy(db, S, 2, 30)
+        rc = give_copy(db, R, 3, 5)
+        res = await s.call(("trR", "po"), "ctr", R, [{"i": 2, "c": 1, "iids": [sc]}], [{"i": 3, "c": 1, "iids": [rc]}], "", op())
+        trid = res[1]["trid"] if res[0] == "trR" and isinstance(res[1], dict) else 0
+        check(trid and kills_of(db, 2) == [], "an offered copy's 30 kills leave the sender with it: %r %r" % (res, kills_of(db, 2)))
+        res = await r.call(("trR", "po"), "trA", trid, op())
+        check(res[0] == "trR" and kills_of(db, 2) == [[R, copy_of(db, R, 2), 30]] and kills_of(db, 3) == [[S, copy_of(db, S, 3), 5]],
+              "an accept moves both copies' kills across: %r %r %r" % (res, kills_of(db, 2), kills_of(db, 3)))
+        # a cancelled offer gives the copy back with its kills
+        rc2 = copy_of(db, R, 2)
+        res = await r.call(("trR", "po"), "ctr", S, [{"i": 2, "c": 1, "iids": [rc2]}], [], "", op())
+        trid = res[1]["trid"] if res[0] == "trR" and isinstance(res[1], dict) else 0
+        res = await r.call(("trR", "po"), "trC", trid, op())
+        check(res[0] == "trR" and kills_of(db, 2) == [[R, copy_of(db, R, 2), 30]] and copy_of(db, R, 2) != rc2,
+              "a cancel gives the copy back with its kills: %r %r" % (res, kills_of(db, 2)))
+    finally:
+        for c in (s, b, r):
+            await c.__aexit__()
+
+
 def set_listing_old(db, lid):
     db.q("UPDATE market_listings SET created_at = created_at - interval '10 minutes' WHERE id = $1" if DRIVER == "postgres" else
          ("UPDATE market_listings SET created_at = datetime(created_at, '-10 minutes') WHERE id = $1" if DRIVER == "sqlite" else
@@ -804,6 +883,7 @@ async def main_async(url, db):
     ids, names = await scenario(url, db)
     await concurrency(url, db, ids, names)
     await paint_targets(url, db)
+    await copy_counts(url, db)
 
 
 def main():

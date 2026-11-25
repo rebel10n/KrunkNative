@@ -83,10 +83,20 @@ typedef struct CopyPaint {
     double wear;
     int64_t serial;
     char name[96];
+    /* a counter skin's counts on this copy, COPY_STATS order (skin_stats rows of the copy, 0406): v10 keeps them in the
+     * copy's m[stat] (takeSkinStats, deob-10.0.7.js:191932), so they go wherever the copy goes */
+    int64_t stats[8];
 } CopyPaint;
+/* the stats a counter skin counts (shared.h SKIN_STATS, v10's list at deob-10.0.7.js:106682) */
+#define COPY_STAT_COUNT 8
+#define COPY_STATS {"kills", "hskills", "aikills", "headshots", "hits", "shots", "jumps", "candy"}
+/* the escrow column of a listed / offered copy's counts (market_listings.stats, trade_copies.stats, 0407): JSON
+ * {stat: count} in buf, NULL for none; copy_stats_parse reads it back into p->stats */
+const char *copy_stats_text(const CopyPaint *p, char *buf, size_t cap);
+void copy_stats_parse(const char *text, CopyPaint *p);
 /* no paint, wear, serial or name tag */
 void copy_meta_none(CopyPaint *p);
-/* 1 when the copy carries a paint, a wear, a serial or a name tag (a row of a copy, not of a stack) */
+/* 1 when the copy carries a paint, a wear, a serial, a name tag or a count (a row of a copy, not of a stack) */
 int copy_meta_any(const CopyPaint *p);
 /* the five copy columns paint_color, paint_shader, wear, serial, name_tag of a result row, from column col
  * (skin_copies, market_listings and trade_copies all have them: COPY_META_COLS) */
@@ -98,7 +108,7 @@ void copy_meta_params(const CopyPaint *p, const char **color, const char **shade
                       char buf[3][32]);
 /* the name_tag column as a statement parameter (NULL none) */
 const char *copy_meta_name(const CopyPaint *p);
-/* the owned entry's m of the copy: {paint | paintShader, wear, serial, name}, NULL for none */
+/* the owned entry's m of the copy: {paint | paintShader, wear, serial, name, <stat>}, NULL for none */
 cJSON *copy_meta_json(const CopyPaint *p);
 /* A name tag as kn_brain stores it (skin_copies.name_tag, 0401): 1..20 characters of UTF-8 after trimming the
  * spaces around it, no control characters, quotes, backslash, backquote or angle brackets, at most 23 bytes (the game
@@ -109,7 +119,8 @@ int copy_name_tag_valid(const char *in, char *out, size_t out_size);
 int copy_mint(Dbx *x, int64_t acc, int64_t skin, double wear, const char *source, const char *ref, int64_t *copy_id, int64_t *serial);
 /* The painted copies: copy_take removes one owned copy of `skin` (its paint in *paint, its unit out of the
  * inventory: db_add_skin, so the audit row is written); copy_give adds a unit of `skin` as a copy with `paint`
- * and returns its new copy id. A copy the account does not own is refused ("You don't own that copy."). Both
+ * and returns its new copy id. The copy's counts (skin_stats) leave with it into paint->stats and are written for
+ * the new copy id. A copy the account does not own is refused ("You don't own that copy."). Both
  * return 0 or -1 (the refusal recorded). db_take_units takes `want` units of a skin for a craft: the unpainted
  * units first, then painted copies (oldest first), the paint going with a copy. */
 int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint, const char *source, const char *ref);

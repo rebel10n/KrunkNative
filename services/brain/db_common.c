@@ -264,7 +264,35 @@ void copy_meta_none(CopyPaint *p) {
 }
 
 int copy_meta_any(const CopyPaint *p) {
-    return p->color[0] != '\0' || p->shader >= 0 || p->has_wear || p->serial > 0 || p->name[0] != '\0';
+    int counted = 0;
+    for (int i = 0; i < COPY_STAT_COUNT; i++) counted |= p->stats[i] > 0;
+    return p->color[0] != '\0' || p->shader >= 0 || p->has_wear || p->serial > 0 || p->name[0] != '\0' || counted;
+}
+
+const char *copy_stats_text(const CopyPaint *p, char *buf, const size_t cap) {
+    static const char *const stats[COPY_STAT_COUNT] = COPY_STATS;
+    size_t n = 0;
+    for (int i = 0; i < COPY_STAT_COUNT && n < cap; i++) {
+        if (p->stats[i] <= 0) continue;
+        const int w = snprintf(buf + n, cap - n, "%s\"%s\":%lld", n ? "," : "{", stats[i], (long long) p->stats[i]);
+        if (w < 0 || (size_t) w >= cap - n) return NULL;
+        n += (size_t) w;
+    }
+    if (!n || n + 2 > cap) return NULL;
+    buf[n++] = '}';
+    buf[n] = '\0';
+    return buf;
+}
+
+void copy_stats_parse(const char *text, CopyPaint *p) {
+    static const char *const stats[COPY_STAT_COUNT] = COPY_STATS;
+    memset(p->stats, 0, sizeof p->stats);
+    cJSON *o = text && *text ? cJSON_Parse(text) : NULL;
+    for (int i = 0; cJSON_IsObject(o) && i < COPY_STAT_COUNT; i++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, stats[i]);
+        if (cJSON_IsNumber(v) && v->valuedouble >= 1) p->stats[i] = (int64_t) v->valuedouble;
+    }
+    cJSON_Delete(o);
 }
 
 void copy_meta_read(const kn_db_result *r, const int row, const int col, CopyPaint *p) {
@@ -327,12 +355,19 @@ void copy_meta_params(const CopyPaint *p, const char **color, const char **shade
 
 cJSON *copy_meta_json(const CopyPaint *p) {
     cJSON *m = v10_paint_meta(p->color, p->color[0] ? -1 : (int) p->shader);
-    if (!p->has_wear && p->serial <= 0 && !p->name[0]) return m;
+    int counted = 0;
+    for (int i = 0; i < COPY_STAT_COUNT; i++) counted |= p->stats[i] > 0;
+    if (!p->has_wear && p->serial <= 0 && !p->name[0] && !counted) return m;
     if (!m) m = cJSON_CreateObject();
     if (!m) return NULL;
     if (p->has_wear) cJSON_AddNumberToObject(m, "wear", p->wear);
     if (p->serial > 0) cJSON_AddNumberToObject(m, "serial", (double) p->serial);
     if (p->name[0]) cJSON_AddStringToObject(m, "name", p->name);
+    /* a counter skin's count is the copy's m[stat] (deob-10.0.7.js:191932); a listing's m carries it to the item
+     * item view, which draws each of the eight stats it finds (:106682, :106774) */
+    static const char *const stats[COPY_STAT_COUNT] = COPY_STATS;
+    for (int i = 0; i < COPY_STAT_COUNT; i++)
+        if (p->stats[i] > 0) cJSON_AddNumberToObject(m, stats[i], (double) p->stats[i]);
     return m;
 }
 
@@ -349,6 +384,19 @@ int copy_take(Dbx *x, int64_t acc, int64_t copy, int64_t skin, CopyPaint *paint,
     CopyPaint p;
     copy_meta_read(r, 0, 0, &p);
     kn_db_result_free(r);
+    /* a counter skin's counts are the copy's m[stat] in v10 (takeSkinStats, deob-10.0.7.js:191932): they leave the
+     * account with the copy (a trade, a listing) and are gone with it (a quick sale, a craft) */
+    static const char *const stats[COPY_STAT_COUNT] = COPY_STATS;
+    kn_db_result *sr = dbx_q(x, SQL(.any = "SELECT stat, count FROM skin_stats WHERE account_id = $1 AND skin_id = $2 AND copy_id = $3"),
+                             KN_DB_ARGS(I64S(acc), I64S(skin), I64S(copy)));
+    if (!sr) return -1;
+    for (int i = 0; i < kn_db_rows(sr); i++)
+        for (int k = 0; k < COPY_STAT_COUNT; k++)
+            if (!strcmp(kn_db_get(sr, i, 0), stats[k])) p.stats[k] += kn_db_get_int64(sr, i, 1, 0);
+    kn_db_result_free(sr);
+    if (dbx_exec(x, SQL(.any = "DELETE FROM skin_stats WHERE account_id = $1 AND skin_id = $2 AND copy_id = $3"),
+                 KN_DB_ARGS(I64S(acc), I64S(skin), I64S(copy))) < 0)
+        return -1;
     /* the copy row goes first: db_add_skin's guard then sees one painted unit fewer */
     if (dbx_exec(x, SQL(.any = "DELETE FROM skin_copies WHERE copy_id = $1"), KN_DB_ARGS(I64S(copy))) < 0) return -1;
     /* a style set on the copy (item_styles, 0393) does not outlive it */
@@ -374,6 +422,17 @@ int copy_give(Dbx *x, int64_t acc, int64_t skin, const CopyPaint *paint, const c
                      " VALUES ($1, $2, $3, $4, $5, $6, $7)"),
         KN_DB_ARGS(I64S(acc), I64S(skin), color, shader, wear, serial, copy_meta_name(paint)));
     if (id < 0) return -1;
+    /* the counts the copy carried (copy_take, an escrow's stats column) are the new copy's */
+    static const char *const stats[COPY_STAT_COUNT] = COPY_STATS;
+    for (int i = 0; i < COPY_STAT_COUNT; i++) {
+        if (paint->stats[i] <= 0) continue;
+        if (dbx_exec(x, SQL(.pg = "INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count)"
+                                  " VALUES ($1::int, $2::int, $3::bigint, $4, $5::bigint)",
+                            .sqlite = "INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES ($1, $2, $3, $4, $5)",
+                            .mysql = "INSERT INTO skin_stats (account_id, skin_id, copy_id, stat, count) VALUES ($1, $2, $3, $4, $5)"),
+                     KN_DB_ARGS(I64S(acc), I64S(skin), I64S(id), stats[i], I64S(paint->stats[i]))) < 0)
+            return -1;
+    }
     if (copy_id) *copy_id = id;
     return 0;
 }
