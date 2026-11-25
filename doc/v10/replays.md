@@ -46,7 +46,8 @@ Office choice is named as such.
   (:229747-229763).
 - Identities are hidden at load (`hideIdentities`, :201752-201782): every roster name becomes
   `Player_<sid>`, account fields (level, clan, account id, badges) are cleared, chat lines take the
-  `Player_<sid>` of their sender.
+  `Player_<sid>` of their sender's account, or `Player` when no roster had it (server lines, guests).
+  Chat text is never rewritten (deob-10.0.7.js:201759-201781).
 
 ### 1.3 The viewer UI
 
@@ -116,8 +117,9 @@ Little-endian. `bytes` are the framed packets exactly as the TCP protocol carrie
 length big-endian, payload). meta: `{v, created (epoch ms), map, mode, typ, server, duration,
 calls: [{token, suspect}], suspects: [uid]}`. `demo_suspect_segments()` is Krunker's segment rule on
 SPAWN (present and alive), KILL of the suspect (dead) and LEAVE (gone), with the 10 s merge.
-`demo_anonymize()` is `hideIdentities`: every SPAWN name, chat sender and PLAYER_INFO becomes
-`Player_<uid>` with no level, clan or badges.
+`demo_anonymize()` is `hideIdentities`: SPAWN names become `Player_<uid>`. The sender of CHAT, SCRIPT_CHAT,
+CHAT_V7 and CHAT_NAMES becomes `Player_<uid>` of its account, or `Player` (d3ccda92). PLAYER_INFO loses level,
+clan and badges.
 
 ### 2.3 Storage and API (kn_brain, `services/brain/v10_mods.c`)
 
@@ -173,12 +175,15 @@ spectator cards, KPD Vision), and the live case's verdict keys / panel are off. 
   game server for the replay, frees the pointer with Escape and clicks RESOLVE and YES on the bar. The
   test checks that the vote landed (`kpd_demo_votes`, the case counts, the Demos list), that the bar
   shows 1Y 0N, and that the speed, pause and reload-on-exit controls work.
+- `client/tests/kpd_replay_map_e2e.py BUILD` (CTest `brain_kpd_replay_map_e2e`): a Sandstorm demo rewritten to
+  name a map no client ships; the replay fetches it from a stub brain (`/api/map-data`) and plays it, and on a 404
+  waits out v10's 20 s and plays on (80d7c04e, 23b3337d).
 - `tools/replay/rt0_identity.sh BASE_BIN NEW_BIN`: the rtMode 0 check of AGENTS.md. It takes
   pinned-camera captures on Sandstorm and Kanji, with the UI and world-only, at a base build and at
   the new one. It runs each build `RUNS` times (default 6) to mask the pixels that differ between
   runs of the same build (Kanji's billboard video, menu animations). It fails on any other differing
   pixel.
 
-Known limits: a custom or published map the client lacks cannot be fetched during a replay (there is
-no server to answer MAP_REQUEST); server-line chat text is not anonymised; the window lengths
-(120 s before a call, 30 s after) are Box Office's.
+Known limits: a map the brain can't serve plays on after the 20 s wait, as in v10 (80d7c04e fetches
+missing maps first); the server-line text keeps its names, as in v10; the window lengths (120 s before a
+call, 30 s after) are Box Office's.

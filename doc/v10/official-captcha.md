@@ -180,8 +180,9 @@ these runs.
   makes the challenge unavailable when the Edge WebView2 Runtime is missing; the frames are `CapturePreview` PNGs
   and the input window messages, so the widget on Windows is not yet verified on a real runtime. The macOS backend
   is verified against the stub page, not the live challenge; its keyboard path in the game is the gap above.
-- Windows packages must ship `WebView2Loader.dll` next to `client.exe` for the challenge to run there (not yet in
-  tools/release/package-client.sh); without it the challenge is unavailable, as without the runtime.
+- Windows packages ship `runtime/WebView2Loader.dll` (the lock's pinned copy) when `client.exe` has the WebView2
+  backend (tools/release/package-client.sh, f316b6a1). CI and local builds do not stage the SDK (`make webview2`
+  downloads it), so they have no backend; without the DLL the challenge is unavailable, as without the runtime.
 - Every Linux client package bundles WebKitGTK (tools/release/bundle-webkit.sh: `lib/`, `libexec/`), so the captcha
   needs no system package there. The client's Linux build is the dynamic one (glibc 2.35, built on Ubuntu 22.04):
   there is no webkit2gtk-4.1 for the glibc 2.17 floor of the polyfilled build, which is the server's only. WebKit 2.52 compiles in the directory of its helper processes and has

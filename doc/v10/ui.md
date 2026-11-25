@@ -398,5 +398,7 @@ over `SETTINGS.list` and a scrape of `ui/windows/settings-advanced-*.html` the w
     Cleared / Best Time (deob-10.0.3.js:125736-126880). The brain's profile reply gained
     `player_badge`, `player_titles`, `player_twitchname` and `ranked_rank` (doc/v10/social.md, "Player
     profile").
-- **Known gaps left** (larger ports, not done here): the host form's
-  non-Custom host types' banners and map lists, the community-map Select block, `canRehost`.
+- **Host form, done since:** the non-Custom host types' banners, map lists and greyed tabs (28bce811), the
+  community-map card, Raw Game Data and Rehost (38176ffd). `canRehost` is v10's `isDev || isAdmin`
+  (deob-10.0.7.js:115245) on a krunker.io game this client hosts (`host_flow_ui.c:359-368` `can_rehost`); Box
+  Office's brain has no rehost (doc/v10/parity-audit-2026-11-20-ui.md, "Servers / Host Game").

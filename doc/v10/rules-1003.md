@@ -22,7 +22,7 @@ Rules that `doc/v10/gameplay-1003-audit.md` left open. Reference: `~/jails/kru/s
 
 What this means:
 
-- **When a round win is counted.** Every round end that is not a forced end (`endIndex`) counts the round's winner, bestOf or not. In a non-bestOf match every round counts, so `teamRoundWins` is set after the first round.
+- **When a round win is counted.** Every round end counts the round's winner, bestOf or not. A forced end (`endIndex`) reaches the else branch too and runs the counter; it just finds no winner (below). In a non-bestOf match every round counts, so `teamRoundWins` is set after the first round.
 - **What ends the match outside best-of.** The rounds run out: `roundCount` starts at `gamRounds - 1` and drops once per round end, so the last round ends the match. A `winCondition`, a forced end (`endIndex`), or a noDraws tie in round wins (overtime, 60 s) decide otherwise. There is no "match won" early exit outside bestOf.
 - **Who wins the match.** `getWinTeam()` over `teamRoundWins` (it prefers them over `teamScores` once they exist). The team scores carry on from round to round outside bestOf (nothing resets them), so they are not the match score.
 - **What the scoreboard shows.** The HUD round counters come from the `rds` packet (deob 221616: `teamRoundWins`). The end screen reads the same numbers: `getEndGameStats` (deob 215438-215453) takes `victory` and `rounds_won` from `teamRoundWins`, and `endData.tms = getTeamScores(true)` (deob 221824; `getTeamScores` at deob 220254) is `teamRoundWins` when present.
@@ -33,9 +33,9 @@ KrunkNative, now: the same `else` branch (`shared/src/modes/mode_round.c:373-382
 
 Not changed (documented differences):
 
-- Forced ends (`endGame(3)`, the ranked "failed to start" path at deob 222083-222103) also reach 10.0.3's else branch and count a round win. KrunkNative's ranked match is one round and the forced end does not go through `mode_end_game`, so it does not count one.
-- The forfeit path: 10.0.3 `prepareForfeit` (deob 221463-221472) sets `teamRoundWins` and then calls `endGame()`, which outside best-of adds one more to the forced team. KrunkNative's forfeit (`shared/src/forfeit.c:155`) calls `game_end_round` directly and counts nothing. Not ported here.
-- The end screen's team score list (`tms`) is sent as nil by KrunkNative (`server/bridge/v10_translate.c`, the `end` packet): unchanged.
+- Forced ends (`endGame(3)`: the ranked "failed to start" path at deob 222083-222103; in v10.0.7 also the needAll timeout, deob-10.0.7.js:195401-195419) reach the else branch and run the round-win counter. They come before the match starts, when `teamScores` is still empty (reset to `{}` at deob-10.0.7.js:176317; no damage while waiting, :193667), so `getWinTeam(true)` is 0 and nothing is counted. KrunkNative's forced end does not go through `mode_end_game` and counts none: the same result.
+- The forfeit path: 10.0.3 `prepareForfeit` (deob 221463-221472) sets `teamRoundWins` and then calls `endGame()`. Ported in `shared/src/forfeit.c:163-176` (636511b94): the forced team's round wins and team score become 1, the other team's 0, no round is left, then `game_end_round`; the end screen and the ranked result read 1 - 0.
+- The end screen's team score list: `endData.tms` is `getTeamScores(true)` (deob-10.0.7.js:193975-193985), `[team, n, teamFlags[team] || null]` for each key of `teamRoundWins` when set, else of `teamScores`. KrunkNative's server sends the team scores, round wins, flags and score keys in EXT 0x81E0 `NET_EXT_KN_END_STATS` right before MODE_END, and the bridge builds `tms` from it (9d9992cc, 51897029) and the team-mode leaderboards and end tables from `shared/src/modes/mode_columns.c` (93b21645, 69cc71f9). `endData.ed` is flat as endGame builds it, the reward cell `+N KR` or "NONE" (1d5c0b84). Tests: `modes_test`, `v10_translate_test`, `v10_bridge_test`. Still open on main at 2c8b2460 (2026-11-25): the 16-row END cap (`NET_END_STATS_MAX`, `NET_MODE_END_MAX`), `endIndex` null and the Raid time.
 
 ## 2. Battle Pass points per public match
 

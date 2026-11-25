@@ -82,10 +82,15 @@ v10 fetches it:
   backoff. Friends list, presence, history, direct messages and read receipts work as in v10.
 * the Clans window's `vcln` / `["cln", 3]` go over the official game socket (account bridge);
   its settings tab reads `/clans/<id>/motd | loot-config | recruitment` over gapi.
+* sent to krunker.io with the account's Bearer (doc/v10/ui-backend-audit.md rows 8, 15, 29, 32, 40): clan
+  apply (the social hub's and Turf Wars' Apply), the Clans window's gapi writes (MOTD, loot config, banner
+  colour, logo removal, recruitment) and game-socket writes (create, join, leave, kick, roles, funds,
+  Discord, the ownership transfer, the logo upload), Turf Wars take-down, and the market's trades, list,
+  buy, unlist and quick sell.
 * not ported (they change the krunker.io account or spend its KR): follow / unfollow, likes,
-  comments, posts, Gift KR, Report, Trade, clan apply, every Clans window write, Turf Wars apply /
-  takedown, window 5's Remove Friend. Their buttons are hidden as for a v10 guest, the handlers do
-  nothing and `v10_gapi` does not send them. The Turf Wars popup's reads stay kn_brain's.
+  comments, posts, Gift KR, Report, window 5's Remove Friend. Their buttons are hidden as for a v10
+  guest, the handlers do nothing and `v10_gapi` does not send them. The Turf Wars popup's reads stay
+  kn_brain's.
 * tests: `server/tests/krunker_social_e2e.py`.
 
 ## Player profile (v10.0.3)

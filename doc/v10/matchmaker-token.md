@@ -251,7 +251,9 @@ so uidiff still compares v10's tab):
 Seeks send `dataQuery` `dsma` / `dsmo` arrays in v10's order, except when the seek names a game: always
 both lists, the switched-on ones or the rotation (never empty), to krunker.io and to our brain. v10 sends
 none when nothing is picked, and its matchmaker's public pool is the same rotation; the brain has no
-pool of its own.
+pool of its own. The brain keeps up to 64 entries of each list (`MM_SEEK_PREFS_MAX`, 32 before 1d6d83b9 on
+2026-11-25): the 34-map rotation overflowed the old cap, so a default Quick Match or `/mm/hot-seek` never found a
+lobby on its last maps, Barnyard (45) and Candy Heist (46) (`v10_menu_e2e` phase 3).
 Lobbies announce `meta.mode` and `meta.mapIndex` (server_bin). The brain's quick join only takes
 lobbies matching both; requested games are never filtered. When lobbies have room but none matches,
 it answers 503 `NoMatchingServers`. The server browser's rows are filtered only once a switch was changed (every row before that).
@@ -404,7 +406,10 @@ Server list (windows[1] loadData): a failed game list keeps the window on LOADIN
   only proves a fresh round trip to our matchmaker. It is single use, short-lived, rate-limited,
   optionally bound to the address, and checked before a seat is reserved. It does not prove which
   client sent it.
-* Captcha (Turnstile `captchaToken`) and FRVR `accessToken` are not ported.
+* FRVR `accessToken` is partly ported: a krunker.io account's token, or a guest's anonymous FRVR session, rides on
+  krunker.io's seek as `accessToken` and on the game socket as `at=` (`client/src/net/krunker_net.c:1779`;
+  doc/v10/ui-backend-audit.md row 36). Turnstile `captchaToken` goes on a krunker.io seek after `CaptchaRequired`
+  (`krunker_net.c:1777`).
 * The official list could not be checked live while writing this: the dev proxy at
   127.0.0.1:8888 was down and no captured `/game-list` answer exists in the mirror. The field
   layout comes from how v10 reads it (section 1.3), and the e2e uses a stub of that shape.

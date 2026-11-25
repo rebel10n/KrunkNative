@@ -72,8 +72,8 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 | Crate Type (WEAPONBOX 4, SCRAPCRATE 5 options), key `crt` | IDX:16786-16829, E10:8758-8768 | missing | **done** |
 | AI Boss (`boss`), Can Contact Hit (`cnch`) | IDX:17040, 17226; E10:8459, 8480 | missing | **done** |
 | ENVIRONMENT_ZONE / Environment Fade Time (`ambFadeTime`, map key dropped when 0) | IDX:18990, 20052; E10:8720, 14071, 16568 | missing | **done** |
-| Asset map-slot folders (Lightmap .. Roughness, `mp`) | IDX:16449-16501, E10:6740-6770, 8261 | key passed through | **partial**: `mp` round-trips, no folders |
-| BOT_PATH_NODE block (GroupId / NodeId / Next / Reversible, Fix Node, Create Next Node / Group, chain lines) | IDX:15704-15776, E10:17833-17885, 15532-15584 | missing | **partial**: prefab, keys and botPaths round trip; no inspector block or lines |
+| Asset map-slot folders (Lightmap .. Roughness, `mp`) | IDX:16449-16501, E10:6740-6770, 8261 | key passed through | **done** (`editor_inspector.c:690` `build_map_slots`, 0a768d0f; `objects_e2e`) |
+| BOT_PATH_NODE block (GroupId / NodeId / Next / Reversible, Fix Node, Create Next Node / Group, chain lines) | IDX:15704-15776, E10:17833-17885, 15532-15584 | missing | **done** (`editor_inspector.c:457`, the node buttons and the chain lines, 0a768d0f; `objects_e2e`) |
 | ENTITY inspector buttons (Edit Entity / Edit Archetype) | IDX:15179-15193 | missing | **done** (v10.0.7) |
 | Tools > Deoptimizations > Turn On All Faces | IDX:20250-20252, E10:20159-20188 | missing | **done** (`editor_tools.c`, `tool:turnOnAllFaces`) |
 | objectList / prefab / gui / terrain / zone / ocean panels | unchanged | v7 | **done** |
@@ -95,9 +95,9 @@ parity, **partial**, **missing** (not ported), **KN** = intentional difference.
 
 | Feature | v10 | After |
 |---|---|---|
-| Archetype save / place entity / entity popup / archetype popup / stage editor (plate at y 5000, radius 600) / browser / ghost previews / "archetypes" undo kind / prefab dangling and strip | E10:18065-18658, 18241-18300, 15319-15364, 17611, 17990 | **done** (v10.0.7, `editor_entities.c`, `tools/editor/entities_e2e.py`); the game-side entity runtime is open (`doc/v10/map-format.md` §9) |
+| Archetype save / place entity / entity popup / archetype popup / stage editor (plate at y 5000, radius 600) / browser / ghost previews / "archetypes" undo kind / prefab dangling and strip | E10:18065-18658, 18241-18300, 15319-15364, 17611, 17990 | **done** (v10.0.7, `editor_entities.c`, `tools/editor/entities_e2e.py`); the game-side entity runtime is done too (`shared/src/ks_game/ks_entities.c`, `client/src/entities.c`; `doc/v10/map-format.md` §9) |
 | Multiplayer co-editing: `mpHost/mpJoin/...` (21 sent, 27 received) on `editor.krunker.io/ws`, invites `?room=`, chat `#mp-chat`, remote players and outlines, script locks | E10:8945-10250, 20263-20314 | **done** (v10.0.7: kn_brain's relay on the social socket, `editor_rooms.c`; `tools/editor/mp_e2e.py`, `brain_editor_rooms`) |
-| KrunkScript Shared tab (third tab after Server; template with `onEntityInit` / `simulateEntity`; 48 shared autocomplete entries), 16 new client/server entries (227 in all), client/server templates, `ksT` sends `{client, shared}` after validateMap | E10:10253, 11795-12624, 14901-14930, 15045-15075 | **partial**: the tab, template, hints, Validate (`KS_SIDE_SHARED`: GAME.UTILS and the entity hooks only, `ks_check.c`), the export round trip and Test play's check are **done** (`tools/editor/kss_v10.json`, `gen_editor_data.py`, `script_e2e.py`); the entity runtime that runs shared scripts is **missing**; the 18 v10-only GAME members the checker now accepts are no-ops until their subsystems land (`ks_api.h`) |
+| KrunkScript Shared tab (third tab after Server; template with `onEntityInit` / `simulateEntity`; 48 shared autocomplete entries), 16 new client/server entries (227 in all), client/server templates, `ksT` sends `{client, shared}` after validateMap | E10:10253, 11795-12624, 14901-14930, 15045-15075 | **partial**: the tab, template, hints, Validate (`KS_SIDE_SHARED`: GAME.UTILS and the entity hooks only, `ks_check.c`), the export round trip and Test play's check are **done** (`tools/editor/kss_v10.json`, `gen_editor_data.py`, `script_e2e.py`); the entity runtime that runs shared scripts is **done** (`shared/src/ks_game/ks_entities.c`, 8c5fbc25); the 18 v10-only GAME members the checker now accepts are no-ops until their subsystems land (`ks_api.h`) |
 | `scripting.html` / `css/scripting.css` | identical to the recovered v7-era page (P10 scripting.html) | **done** |
 | Dev bridge `?devbridge=` RPC | E10:10356-11300 | **KN**: `editor_bus_link.c` + `tools/editor-mcp` already cover it |
 | Publish Asset per-map UV channels ("Advanced" box, ten 0..7 rows, uploadA `uvc` = {slot: channel} for channels 1..7, else null) | E10:20417-20456, 20479-20490 | **done** (`editor_net.c` `uv_channel_rows`; kn_brain takes no asset uploads, so the value is only sent) |
@@ -143,10 +143,10 @@ v10's hub is still v7's social.js with targeted changes (S10 routes, settings an
 | Krunk TV, Who to Follow side boxes | removed from the page | still written | **done** (`side_boxes`: the ad box only, S10:2389) |
 | App badges: Android only | S10:1514-1518; no `#steamDB` | iOS + Android (+ Steam in scenarios) | **done** (KN: opens the Download window) |
 | `#hackText` BANNED | page markup | from markup | **done** |
-| Krunker News side box | S10:4342 (`news`) | static | **missing** (brain route GET /social/news exists now) |
-| Market ambient loop dropped (ambient_8 Black Market kept) | S10:6953 | neither | **missing** (S) |
-| Page title per route | S10:7095 | none | **missing** (optional) |
-| Deep links autoReport / autoGift / autoTrade / openPubMo | S10:2810-2831, 2178 | none | **missing** (S) |
+| Krunker News side box | S10:4342 (`news`), hub-10.0.7.js:4350-4361 | static | **missing**: v10 fills `#leftABox` from a `news` socket message ("No news today." when empty). Porting it needs that hub bundle's lines 4351-4354 (not on disk) and a brain `news` push (2026-11-25) |
+| Market ambient loop dropped (ambient_8 Black Market kept) | S10:6953, hub-10.0.7.js:6954-6964 | neither | **done**: ambient_8 at 0.3, rate 0.8, looped on the Black Market page and stopped on any other; `app_mode_frame` runs `audio_update` so page sounds start (28a3f475) |
+| Page title per route | S10:7095 | none | **done** (`social_ui.c:4614-4628`, `app_set_page_title`, "Krunker Hub" by default; doc/v10/parity-audit-2026-11-20-social.md) |
+| Deep links autoReport / autoGift / autoTrade / openPubMo | S10:2810-2831, 2178 | none | **done** (`social_ui.c:1760-1774`, `?openPubMo` at :4656; doc/v10/parity-audit-2026-11-20-social.md) |
 
 ### 2.2 Login
 
@@ -161,30 +161,30 @@ v10's hub is still v7's social.js with targeted changes (S10 routes, settings an
 |---|---|---|---|
 | Header, follow counts, Since, clan | S10:2748-2779 | done | **done** |
 | Followers / Following popups (`gfs`/`gfg` → `fwsr`/`fwr`), Follow (`instaFollo`), `deleteFollower` | S10:5346-5399 | request sent, reply ignored | **done** |
-| Ranked rank icon `.playerProfileRank` | S10:2772 | missing | **missing** (brain profile has no rank) |
-| Chat Ban button | S10:2791-2800, 4692-4714 | missing | **missing** (brain) |
-| Stat tabs General / Killstreaks / Other / Class / Raids / Match History | CFG:9472, S10:2905-2940, 1090-1500 | v7 four + KN Season | **missing** (Raids data and match history by name need the brain) |
-| Badges tab (68 badges) | S10:30-457 | "No Badges" | **missing** (M) |
-| Flag / report / verify / give badge popups | S10:2205-2214, 2779-2790 | buttons only | **missing** (brain serves `rpt`, `flg`, `ver`) |
-| Reports tab (`grp` → `rps`) | S10:4167-4200 | hidden | **missing** |
-| Creations actions (favourite, feature, delete, edit, publish mod) | S10:6608-6842 | partly no-ops | **missing** (brain serves `fvM`, `ftC`, `delC`, `edMp`, `uploadMo`) |
+| Ranked rank icon `.playerProfileRank` | S10:2772 | missing | **done** (`social_ui.c:1849`, the profile's `rankedRank`; doc/v10/parity-audit-2026-11-20-social.md) |
+| Chat Ban button | S10:2791-2800, 4692-4714 | missing | **done** (`social_ui.c:1895` `#chatBanBtn`; doc/v10/parity-audit-2026-11-20-social.md) |
+| Stat tabs General / Killstreaks / Other / Class / Raids / Match History | CFG:9472, S10:2905-2940, 1090-1500 | v7 four + KN Season | **done** (`social_ui.c:1684` `k_stat_tabs`, Match History from `match_history.h`; doc/v10/parity-audit-2026-11-20-social.md) |
+| Badges tab (68 badges) | S10:30-457 | "No Badges" | **done** (`social_ui.c:1648`, `badge_get` over `player_badge`; doc/v10/parity-audit-2026-11-20-social.md) |
+| Flag / report / verify / give badge popups | S10:2205-2214, 2779-2790 | buttons only | **done** (`social_ui.c:7923-8006`: `ver`, `flg`, `sbdg`, `crt`; doc/v10/parity-audit-2026-11-20-social.md) |
+| Reports tab (`grp` → `rps`) | S10:4167-4200 | hidden | **done** (`social_ui.c:1905`, `profile_reports`; doc/v10/parity-audit-2026-11-20-social.md) |
+| Creations actions (favourite, feature, delete, edit, publish mod) | S10:6608-6842 | partly no-ops | **done** (`social_ui.c`: `fvM` :8211, `ftC` :8234, `delC` :8263, `edMp` :8281, `uploadMod` :9073) |
 
 ### 2.4 Leaderboards, market, maps, feed
 
 | Feature | v10 | Before | After |
 |---|---|---|---|
-| Ranked leaderboard `player_ranked_matches` ("N matches") | CFG:9497, 9535; page button | missing | **partial**: page button + formatter; the brain has no such query yet |
-| Nukes / Inventory / Zombies boards | CFG:9497 | formatter only | **missing** in the brain (`leaderboards.c` k_queries) |
+| Ranked leaderboard `player_ranked_matches` ("N matches") | CFG:9497, 9535; page button | missing | **done** (brain `leaderboards.c:416`) |
+| Nukes / Inventory / Zombies boards | CFG:9497 | formatter only | **done** for the boards v10.0.7 lists (`leaderQueries`, deob-10.0.7.js:19800): Nukes `player_nukes` (brain `leaderboards.c:402`), Inventory Value `player_skinvalue` (:442); v10.0.7's list has no Zombies board |
 | Market, inventory, sales, quick sell, Black Market, trading, gifting | S10:3179-3816, 5152-5797 | economy port (57b5e4c) | **done** |
-| Item metadata (nametag, wear, serial) | S10:2566-2580, 3324, 5452-5495; CFG:7039 | none | **missing** (L: item instances) |
-| Trade history currency line, paging | S10:2560, 2630, 3267, 3836 | none | **missing** (S / S-M) |
-| Black Market `rank` / `ownSkins` requirements | CLS:3885-3910, S10:3225 | accAge / stats | **missing** |
-| Item tooltips (`createTip`) | S10:6843-6880 | none | **missing** |
-| Maps / mods / map page tabs; map leaderboard `glb` | S10:6040-6213, 3123-3162 | lists done, `glb` missing | **partial** |
+| Item metadata (nametag, wear, serial) | S10:2566-2580, 3324, 5452-5495; CFG:7039 | none | **done** (copies with wear and serial, migration 0398; name tags, 0402; doc/v10/paint-copy.md) |
+| Trade history currency line, paging | S10:2560, 2630, 3267, 3836 | none | **done** (`social_ui.c:3144` `.oCurrencyLine`, `loadMoreTradeHistory` :3271) |
+| Black Market `rank` / `ownSkins` requirements | CLS:3885-3910, S10:3225 | accAge / stats | **done** (v10.0.7 checkReq, deob-10.0.7.js:103566-103580: client `economy_client.c` `econ_black_market_req_met`, brain `db_economy.c` `run_blackm_buy`; 9a11bf7d) |
+| Item tooltips (`createTip`) | S10:6843-6880 | none | **done** (`social_ui.c:3135`, :3315; doc/v10/parity-audit-2026-11-20-social.md "Trade tooltips") |
+| Maps / mods / map page tabs; map leaderboard `glb` | S10:6040-6213, 3123-3162 | lists done, `glb` missing | **done** (`glb` at `social_ui.c:8679`) |
 | Feed tabs, posts, comments, likes | S10:4930-5099 | client done, brain ignores the tab | **partial** |
-| Giveaway posts | S10:4930, 5077-5099 | none | **missing** (escrow in the brain) |
+| Giveaway posts | S10:4930, 5077-5099 | none | **done** (`social_ui.c:2424`, typ 9 posts; `giveaway_posted` :7738, gapi POST /social/post) |
 | DMs, chat sidebar | S10:2224-2343 | done | **done** |
-| Live DM push `msg` | S10:6922 | none | **missing** |
+| Live DM push `msg` | S10:6922 | none | **done** (`social_ui.c` `io_msg`, :5084) |
 | Turf Wars, notifications, in-game socialModal | not in social.html (main client, `doc/v10/ui.md`) | — | out of scope |
 
 ## 3. Tests and references

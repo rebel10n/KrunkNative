@@ -87,6 +87,14 @@ time (`ui_bhop.c` insert_row), not in the captured `ui/windows/settings-*.html`,
 Controls tab against v10's capture (`settings-advanced-controls`) shows it as an extra row. Kept on
 purpose (2026-10-24).
 
+## The Servers window's backend tabs (krunk.io / krunker.io)
+
+v10's Servers window has no backend tabs. The native client lists two backends, so `servers_ui.c` `gen_list` puts a
+`bigMenTabs srvTabs` strip (krunk.io, krunker.io) above the map carousel and the groups. The strip is 48 px high with a
+28 px bottom margin: the centred window is 76 CSS px taller than v10's, 38 px each way, a whole 22 device px at
+1280x720, so the uidiff captures line up at a whole-pixel `ref_offset` (a 30 px margin gave 22.58 px; 619f3e5d,
+2026-11-25). The web build has no strip.
+
 ## The Medals stat tab (Account window)
 
 v10.0.3's Account window (windows[4], `showWindow(5)`) has five stat tabs, `statTabs`: General Stats,
@@ -140,6 +148,7 @@ windows") ported every gap it found except these, which are kept on purpose. Aud
 | Ranked shop | the row is looked up again after the confirm | the same, but a shop still loading uses the row the dialog opened for | `ranked_ui.c` |
 | Chat | the official server decides which lines carry `extra.actions` | Box Office puts [Join Queue] on the brain's queued-for-ranked line | the only ranked line Box Office's server sends; `server/src/net.c` |
 | Battle Pass > Challenges | daily challenges only | also a "Weekly Challenges" block | Box Office's weekly rows (23-26) would be shown nowhere else; `battlepass_ui.c` |
+| Battle Pass | the "Loading Battle Pass" / "No Battle Pass Found" div has no class (:219368) | the same div with class `bpStatusText` | `battlepass_ui_tick` redraws the window after an unanswered `bpdl` only while that div is on screen; `battlepass_ui.c` |
 | Challenges | official daily BPP values | 50, and 25 for the spray and assist rows (migration 0397) | no official capture of the dailies; the values are the offline v10 sandbox fixture's |
 | Profile > Sales | Chart.js measures its tick labels with `measureText`; its tooltip has a caret | the same line chart on the native canvas, labels measured by a GameFont estimate (0.9 x the font size per character), no caret | no text metrics on the native canvas; `v10_social.c` `sales_chart_paint` |
 | Profile staff actions | `/moderation/*` and `/players/:name/verify` over gapi | the same routes to kn_brain over HTTP with `?token=` | the social-socket tunnel does not carry them |

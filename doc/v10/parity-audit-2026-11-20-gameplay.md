@@ -70,13 +70,14 @@ The test tools click again the way a player would:
 - Nothing open in this scope. The KrunkScript API, the modes and the prefab / trigger lists were triaged version by
   version as each build landed (doc/v10/target.md 10.0.4-10.0.7, krunkscript-1003.md, entities-1003.md), and this
   audit found no row left open there.
-- These server e2e failures predate this audit. Each one fails the same way on a clean build of `origin/main`
-  (dee6d6ea) without these changes:
-  - `sprays_e2e`, parts 2 and 3: 8 checks, the decal is never logged.
-  - `nuke_e2e`.
-  - `v10_match_e2e`: 4 checks.
-  - `hitmarker_death_e2e`.
-  - `idle_kick_e2e`'s kick timing on a loaded machine.
+- These server e2e failures predated this audit (each one failed the same way on a clean build of `origin/main`
+  dee6d6ea) and are fixed:
+  - `sprays_e2e`, parts 2 and 3 (8 checks, the decal was never logged): 461f1ee5 (debug level 2, the frame fit
+    ignores occluded pixels), d2ebb117 (the card found with Search Item).
+  - `nuke_e2e`: a99cac34 (the protocol peers wait for their active SPAWN).
+  - `v10_match_e2e` (4 checks): fc77fe39 (the version banner is ruleset.c's version, not a hard-coded v10.0.4).
+  - `hitmarker_death_e2e`: 6bf48813 (debug level 2, so the sandbox's /kill line is logged).
+  - `idle_kick_e2e`'s kick timing on a loaded machine: 61b154c8 (god mode for the players that must stay alive).
 
   With these changes, the tests the hold first broke pass again:
   - by retrying ENT in `kn_proto` and the input script: `end_respawn`, `host_tp`, `object_manager`, `bots`,

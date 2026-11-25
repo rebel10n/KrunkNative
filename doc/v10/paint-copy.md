@@ -195,6 +195,9 @@ KrunkNative keeps every owned unit in `inventory(account_id, skin_id, count)`. T
   - `{id}` is a copy id (of the caller, of that item) or the stack's store index (an unpainted unit of the item becomes
     a new copy);
   - the paint must be a type-18 store paint (`v10_paint_of`), else 400 `ITEM_PAINT_INVALID` "That item is not a paint.";
+  - the item must have `paintTargets` (true or a list of mesh names, `SkinInfo.paintable` in store.c), else 400
+    `ITEM_PAINT_INVALID` "That item cannot be painted." (f1eb3de1). The official server's text is not in the bundle;
+    the socket's `ip` gets the same text as a `po` refusal;
   - an unknown item is 404 `NOT_FOUND`; another account's copy is 400 "You don't own that copy.";
   - the reply is `{copy_id, item_id, paint_item_id, m, count}` (`count`: the paints left).
   - The work is one transaction: `sh_item_paint` (`economy.c`) → `P_ITEM_PAINT` / `run_item_paint` (`db_economy.c`).
@@ -308,29 +311,36 @@ copy of that index (`accounts_skin_paints`, `server/src/accounts.c`), so a nativ
   a stack row with two. KrunkNative counts every owned unit of a material (copies included) and takes the unpainted ones
   first. The server side of the official craft is not in the bundle, so the choice of unit is ours.
 - The socket's trade rows (`sksell` / `skbuy` strings in economy.c) list stacks only; the copies are in `copies_s` and
-  `copies_r` for the v10 page. The native client's trade and quick-sell pickers do not show copies yet.
-- The listing rows show a painted copy's paint (`m`); the purchase reply's `m` is still the listing's own value, not the
-  paint.
+  `copies_r` for the v10 page. The native trade picker keeps each row's copy id and `m` (`trade_ui.c:37`, :188), and
+  the List / Quick Sell modal sells a painted copy by its id (`v10_market.c` `sel_sid`, :4705; 3e317c00).
+- The listing rows show a painted copy's paint (`m`). The purchase reply's `m` is the bought copy's paint
+  (`{paint}` or `{paintShader}`) and `sid` the buyer's copy id (`run_market_buy`, 254af10f).
 - The native paint picker (`client/src/ui/paint_picker.c`) is opened from the owned card's paint button in the Loadout
   chooser (`ui_loadout.c` `owned_card`, `paintOpen(ind, sid)`). It lists the owned paints (the owned list, sorted as
   deob:122041) with their counts and applies the picked one over the social socket: the `ip` frame (see Routes), then it
-  takes the paint's unit locally (`account_paint_applied`) and the brain's `ua` push replaces the list. Not ported: the
-  official picker's preview (its item viewer iframe, deob:122013-122180); the popup shows the paints as swatches. The v10
+  takes the paint's unit locally (`account_paint_applied`) and the brain's `ua` push replaces the list. The popup is
+  v10.0.7's item viewer (deob-10.0.7.js:108483-108814, the iframe src :108675) with the picked paint on the item and
+  every store paint listed, owned with its count or locked for preview (e5a46e78, `paint_picker_e2e`). The v10
   button itself sits in the store inventory grid (deob:147316 markup, gated on `paintTargets` and a skinId at
   deob:150226), not in the Loadout chooser; the native button is on the chooser's card, where the owned badge is. A
   krunker.io account gets no button (nothing is sent to krunker.io for a paint, `v10_gapi` refuses writes there).
   The clan banner (`clan_ui.c`, `POST /clans/{id}/banner-color`) is a separate clan route.
-- The official client does not get the copy a native player's slot names: the bridge's spawn records carry the indices
-  (`v10_translate.c` does not map the server's copies onto them). A native client gets the copy each slot names from the
-  server (Loadout copies, above); a
+- The official client gets each copy a native player wears: the C bridge sends it in the add record as `{i, m}` with
+  the paint, wear, seed, serial, name, style and counter (deob-10.0.7.js:176753; 9d9992cc, 30786db4). A native client
+  gets the copy each slot names from the server (Loadout copies, above); a
   plain index (or a gone copy) shows the owner's first painted copy of that store index, the plain-index rule
   (deob-10.0.3.js:252090-252095), and its first worn copy's wear. v10.0.7 gives a plain index no `m` at all
   (:217860-217950): KrunkNative keeps the plain-index rule for older saved slots and older clients.
-- A counter skin's count (`skin_counters_bases`) is still the first counted copy of the index, not the named copy's.
-- Not drawn: a shader paint (`paintShader`; the packet carries its number, `client/src/skin_fx.c` draws only colour
-  paints, `basic.frag` mixes the albedo as the official colorNode does). The official client does not yet get native
-  players' paint: the C bridge (`server/bridge/v10_translate.c`) accepts V2 and takes only the indices.
-- `paintTargets` (which items accept a paint) is not checked by the brain; the client offers only paintable items.
+- A counter skin counts from the copy its slot names (deob-10.0.7.js:173031; cfa57653). The count is stored per copy
+  since migration 0406 (`skin_stats.copy_id`, a5df8bc8); a plain index reads the first counted entry. The count moves with the copy (deob-10.0.7.js:191932;
+  4ed623ad): `copy_take` / `copy_give` carry its `skin_stats` rows through live trades, offers and market list /
+  unlist / buy (escrowed in `market_listings.stats` / `trade_copies.stats`, migration 0407), `m` carries the counts,
+  and a quick sale or a craft drops them with the copy; a stack's count stays with the seller's stack
+  (`brain_economy` copy_counts, `brain_live_trade`).
+- A shader paint (`paintShader`) is drawn: `client/src/skin_fx.c:1300-1324` (`client/tests/paint_shader_two_client_e2e.py`,
+  not in CTest). The official client gets native players' paint from the bridge's add record (above).
+- `paintTargets` is checked by the brain (f1eb3de1, Routes above; `brain_paint_e2e`, `brain_v10_api_market`,
+  `brain_economy_sqlite`).
 
 ## Not verified
 

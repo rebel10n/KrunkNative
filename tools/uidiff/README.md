@@ -598,16 +598,15 @@ bp-buttons (8.74 -> 0.00 %), `settings-general` / `settings-search` preset-butto
 `seq-lost-connection` box (3.62 -> 0.70 %), `popup-kid`, `rewards-signup`, `store-eterno`,
 `social-feed`, `menu-host-type` community-card. `kn-lost-connection-official`'s id-line and
 extensions-hint had a `ref_offset` of +1 that only made up for the old placement: now 0.000 % at 0.
-The `kn-servers-official` offsets are 17 / -17 (16.79 px: the window is 58 CSS px taller, centred).
+The `kn-servers-official` offsets are +17 / -16 (header / groups and footer), `kn-servers-official-open` +16 / -16 with
+the footer at -17, since the strip margin went to 28 px (2026-11-25, 619f3e5d).
 36 KN-own baselines that encoded the old placement were refreshed (table above).
 
-**Still open**: `kn-servers-carousel` top-groups 4.23 % and region-groups 3.18 % (max 3). With the tab
-strip, KN's carousel window is 78 CSS px taller than v10's (48 px strip + 30 px margin, no group margin
-to collapse with), so, centred, its header sits 39 CSS px = 22.58 device px higher and the list 22.58
-px lower: the best whole-pixel offset (23) leaves 0.42 px. Comparing with the reference resampled at
--22.58 / -22.75 px gives 2.38 / 2.32 % (top-groups) and 1.65 / 1.29 % (region-groups), and the
-v10-markup render passes at offset 0 (0.11 / 0.18 %): what is left is the KN-only strip's height, not
-the engine.
+**Fixed (2026-11-25, 619f3e5d)**: `kn-servers-carousel` failed top-groups 4.23 % and region-groups 3.18 %
+(max 3): the 48 px tab strip and its 30 px margin made the centred window 78 CSS px taller than v10's,
+22.58 device px each way, and no whole-pixel offset fitted. The strip margin is 28 px now: the window is 76
+CSS px taller, 22.00 device px each way, and offset +-22 gives top-groups 0.105 % and region-groups
+0.183 %.
 
 ### Failing-region triage, round 3 (2026-11-23)
 
@@ -746,7 +745,8 @@ pixel. The two outer edges still 0.21 px off (top, Equip left) are placement, no
 - `kn-map-vote` mapVote (0.00 -> 2.94 %, max 2): its reference is KN-own (2026-11-19) and drew the
   Tip button's 4px / radius 4px border with KN's old inner edge. The reference's 296 pixels where the
   new render differs from the old one were moved by exactly that difference (its other pixels,
-  captured on the desktop, are kept); 0.00 again.
+  captured on the desktop, are kept); 0.00 again. On 2026-11-25 the `kn-map-vote` and `kn-mod-vote`
+  KN-own references were refreshed for v10's Donate link and markup (d9a06fe1).
 - Moved the other way, still passing: `kn-store-hats-v10` / `-melee-v10` picker 0.00 / 0.61 ->
   0.92 / 1.53 (KN-own references, same buttons), `kn-om-*` om-footer 2.12 -> 2.22,
   `customize-secondary` content 1.67 -> 1.85.
@@ -938,11 +938,9 @@ where Chrome's do (ink centroids within 0.1 px, the KR hexagon 0.23 px): nanosvg
 against Skia's.
 
 **Left open**
-- **`kn-servers-carousel`** top-groups 4.234 %, region-groups 3.179 % (max 3; 1.551 / 1.263 at
-  x1.67). Structural but by design: KN's krunk.io / krunker.io tab strip (`servers_ui.c`, the native
-  client's two backends) makes the centred window 78 CSS px taller than v10's, so the list is 22.58
-  device px lower than in the capture and the region's whole-pixel `ref_offset` leaves 0.42 px. The
-  v10-markup render passes at offset 0 (round 2). Not a threshold change and not a reference edit.
+- **`kn-servers-carousel`**: fixed on 2026-11-25 (619f3e5d). The tab strip's margin is 28 px, so the
+  centred window is 76 CSS px taller than v10's, 22.00 device px each way; offset +-22 gives top-groups
+  0.105 % and region-groups 0.183 % (were 4.234 / 3.179 %).
 - Skipped, unchanged: `strike/item-selection` back 2.232 % (was 2.319; the slanted frame), the
   `strike/customize-controls` icons (the capture's images did not load) and the KN-only rows / offline
   capture gaps whose region notes give the reason.

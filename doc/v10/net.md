@@ -214,9 +214,11 @@ the same popup, then joins the same game again with the password in its JOIN pac
 
 ## 6. Port notes
 
-- Implement: entity packets (with KrunkScript entities), `PLAYER_LOCKS`, the
-  `SYNC_PLAYER` controlled-entity tail, `joinedRank` plus the ranked queue flow (against
-  kn_brain, not FRVR), and optionally the event-bus friends/DM service in kn_brain.
+- Implement: entity packets (with KrunkScript entities), `PLAYER_LOCKS`, `joinedRank` plus the
+  ranked queue flow (against kn_brain, not FRVR), and optionally the event-bus friends/DM service in
+  kn_brain. The `SYNC_PLAYER` controlled-entity tail is done: `NET_EXT_ENTITY_CONTROLLED` (0x0106),
+  read by the official link (`client/src/net/krunker_link.c:639`) and written by the bridge
+  (`server/bridge/v10_translate.c:1297`).
 - `CHEAT_CHECK` / `ccr` is a server-pushed code execution channel (XOR-obfuscated JS run through
   `eval`). KN's own protocol does not carry it. The official link answers it as the live client does:
   `client/src/net/krunker_cheat.c` decrypts it and evaluates it in a sandboxed QuickJS
@@ -295,11 +297,13 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x8141 | `NET_EXT_KN_GUEST_EARNED` | (KN: v10's `ger`, no body: the guest's balance changed, GET `/guest/profile` again) | S to C |
 | 0x8142 | `NET_EXT_KN_RANKED_NOTICE` | (KN: the brain's "queued for ranked" line in the ranked green, the queued player apart from the text by name (no uid yet; numbered as an official line's name); `NetRankedNoticePacket`) | S to C |
 | 0x8150 | `NET_EXT_KN_END_ITEM` | (KN: one event kill pool item of the END's `otherData.items` {t: "skin", i, r}, `NetEndItemPacket` {skin, icon}, after the END; doc/v10/kill-pools.md) | S to C |
+| 0x81E0 | `NET_EXT_KN_END_STATS` | (KN: what endGame puts in `endData` that MODE_END lacks: every team's score, round wins and flag text, the teamScores key mask, `has_round_wins`, and each row's `dmg`, in MODE_END's order, at most 16 rows; `NetEndStatsPacket`, 372 bytes. Sent to every peer with minor >= 4 right before MODE_END; the bridge builds `endData.tms` (getTeamScores(true), deob-10.0.7.js:193975-193985) and the team-mode end tables from it; 51897029, 69cc71f9) | S to C |
 
 Each range belongs to the feature that implements it; body layouts are documented next to their
 structs. Which official S2C packets the link translates, and why the others are not, is doc/v10/s2c-coverage.md. `cc` / `ccr` (CHEAT_CHECK, server-sent JS eval) have no subtype: KN's protocol does not carry
-them (the official link answers `cc` itself, §6). The `SYNC_PLAYER` controlled-entity tail would not be
-an EXT either but a longer RECON; it is not implemented (the link does not read it, §9.4).
+them (the official link answers `cc` itself, §6). The `SYNC_PLAYER` controlled-entity tail travels as
+`NET_EXT_ENTITY_CONTROLLED` (0x0106) ahead of the RECON: the link reads it (`krunker_link.c:639`) and the bridge
+writes it back into `l` (`v10_translate.c:1297`; §9.4).
 
 ## 8. Protocol 1.4.3 and 1.4.4: the flag uid, the zone object id (NetModeFlag, NetDomZoneState)
 
@@ -487,7 +491,7 @@ line (`updateSet`, 248477-248482) and the funds check (229816); Box Office charg
 | `pr` / `pre` / `ex` | `(x, y, z, yaw, pitch, index, sid, isStored, customProj, owner)` / `(id, isOwn, x, y, z, impact)` / `(x, y, z, radius, smCnt, lgCnt)` | 259112, 259098, 259130 | OK |
 | `bmb` SHOW_BOMBARDMENT | flat `[x, y, z, sid, customProj {pjSp, ...}]*`; physObj reads `customProj.pjSp != null ? pjSp : 1` | 259104-259109, 225777-225786 | **fixed** in the same session (on_bombardment reads the object's `pjSp`; a bare number still counts) |
 | `bh` UPDATE_HEAD_SIZE | `[sid, mlt, reset]`: `if (mlt > 1 \|\| reset) headMlt = reset ? 1 : mlt` | 259406, 194975 | **fixed**: KN applied any mlt and ignored reset |
-| `pk` / `upk` / `asnd` / `rsnd` / `camb` / `ana` | `[index, count]` / `[sid, perks]` / `[sid, sound, {loop, vol, rate, dist, roll}]` / `[sid, sound \| null, force]` / `[soundscape, custom, fadeSeconds]` / `[sid \| uid, clip, raw, isObj]` | 258928, 258919, 220423, 220439, 258016, 258573 | OK |
+| `pk` / `upk` / `asnd` / `rsnd` / `camb` / `ana` | `[index, count]` / `[sid, perks]` / `[sid, sound, {loop, vol, rate, dist, roll}]` / `[sid, sound \| null, force]` / `[soundscape, custom, fadeSeconds]` / `[sid \| uid, clip, raw, isObj]` | 258928, 258919, 220423, 220439, 258016, 258573 | OK. `camb`: the custom asset and the fade between loops are ported (`client/src/sound_ambient.c`, 549b8063; `audio_fade_test`); an environment zone switches the soundscape (632bed76), also in a KrunkScript game with 3D disabled (cfd61f6b) |
 | `n` `bbm` `is` `scr` `shk` | `[0 siren \| 1 nuke]`, `[state]`, `[sound, image]`, `[index]`, `[amount]` | 258051, 258062, 216746, 262463, 231492 | OK |
 | `mv` / `sp` / `mpos` | `(vo {socketId: [option, weight]}, mts)` / `(id, sprayIndex, x, y, z, rotY, rotX, rotZ (degrees), dye)` / `(key, {x, y, z})` | 257882, 219706, 262993 | OK |
 | `prc` / `fe` / `skin` / `skinF` / `vc` | `(old, new)` / `(msg?)` / `(index, silent)` / `(socketId, index)` / `(dataURL, alias, sid, channel, volume, isFinal, accountId)` | 258203, 241996, 255281, 255020, 243838 | OK |

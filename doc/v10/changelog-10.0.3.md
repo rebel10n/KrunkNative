@@ -150,10 +150,11 @@ not have the code), **Internal** (ignored), **Decision** (a feature KN lacks, le
    .customSkins, ids from 10000000, deob:20133, :256798-256830) are defined through the official link
    (`krunker_link.c` -> `krunker_net.c` -> `viewer_skin_define`) with their `_id`: customSound plays user asset
    skins/<_id>/sound.mp3 for the shot (deob:196407), customSwapSound / customInspectSound skins/<_id>/sound_swap.mp3 /
-   sound_inspect.mp3 (getSound, deob:225205; `user_asset_path.c` accepts them, `audio.c` names them). Not ported: a
-   flipAnim melee's melee_equip on inspect, and custom skin models / textures (customModel / customTextures: the plain
-   weapon is drawn). Other players' custom shot sounds on the official link need the server's "s" name to fit the sound
-   packet (NET_SOUND_NAME_SIZE).
+   sound_inspect.mp3 (getSound, deob:225205; `user_asset_path.c` accepts them, `audio.c` names them). Done since: a
+   flipAnim melee's melee_equip on inspect (0.03, rate 1.7; `sound_events.c:419-424`, b3776b6c), and custom skin models
+   / textures (customModel / customTextures; `player_mesh.c:839`, 791b7ae2). Other players' custom shot sounds on the
+   official link: the sound packets' name field is 64 bytes since protocol 1.4.7 (`NET_SOUND_NAME_SIZE`,
+   `shared/include/shared.h:3483`; 15cc847b), so the server's "s" name fits.
 2. Clan join K/D gate: the source of K/D and the brain enforcement.
 3. Done: the KrunkScript AI parts, `ai.solid` and the `playAnim` hold (doc/v10/krunkscript-1003.md). Left: the client side
    of `scripts.shared` (local entity simulation needs entity replication first, section 5 there).

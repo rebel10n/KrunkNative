@@ -70,7 +70,7 @@ and MariaDB 11.8.
 | Krunker Cup wristband claim (`WHY_WRISTBAND`) | A physical event item. |
 | Kid / age-consent and the migrate / username / password challenge states (`/auth/kid/*`, `/auth/*-challenge`) | Krunker's backend issues these; Box Office's sign-in never enters those states. A real age-consent flow would be a legal and product decision. |
 | Studio skins (`/studios/:id/skins*`) | Fixed (2026-11-23): import a Skin Manager skin with a thumbnail (the Studios window's Your Skins and Assign Skin, v10_studios.c), list, publish / unpublish (db_studios.c, studio_skins of migration 0395; studios_test.py). |
-| Item instances (`/items/:id/instances`, Mints / serial / wear) | No item on Box Office is minted per copy; the route answers `[]`. |
+| Item instances (`/items/:id/instances`, Mints / serial / wear) | Fixed (2026-11-23): a spin mints copies with a wear and a serial (migration 0398), name tags on copies (0402); `h_item_instances` (services/brain/v10_market.c:1297, d7bffb29) lists the owned and listed copies by serial or by wear (market_copies_e2e). |
 
 ## Status 2026-11-20 (end of the session)
 
@@ -467,9 +467,9 @@ tag's own colour.
   - the `limT` name in `#41c300`;
   - Vaulted, for an item from another season, or a limited, noSpin item that is not in the Item Shop;
   - Limited, for a limited or blocked item.
-- **Still open: v10_market.c.** Its item view draws the same badge without the `limT` branch (its line 3160). Its
-  category filter keeps its own copy of the tag names (line 576), which is complete. That file belongs to another
-  agent, so it is not changed here.
+- **v10_market.c: fixed in round 9** ("Market item-detail tag badge" below). Its item view draws the badge with the
+  `limT` branch (client/src/ui/v10_market.c:3331-3343, e2474665). Its category filter keeps its own copy of the tag
+  names, which is complete.
 
 ### Game-result posts (typ 8)
 
@@ -601,7 +601,7 @@ Each of these was compared line by line against hub-10.0.7.js, and every gap fou
 **Still open.**
 - **Match History has no data.** No server sends `matchHistory`, so the tab shows "No match history
   available." Recording it needs work in ranked.c, and ranked_ui.c belongs to another agent.
-- **v10_market.c's `limT` badge** (another agent's file).
+- **v10_market.c's `limT` badge**: done in round 9 ("Market item-detail tag badge" below, e2474665).
 - **The profile's `sm`.** It reads "In game", not v10's "playing <map>".
 - **The gift popup's prefill.** v10 prefills "I like your <map> mod/map" from a creation's Gift. Not ported.
 - **createTip's vertical position** on trade items is not checked against v10.
@@ -702,7 +702,8 @@ online dot (:2777).
     "I like your mod" / "I like your map".
   - KrunkNative's handlers take the options as arguments: `openPlayerProfile(name, autoGift, assetName)`.
 - **The vote panels' tip link** (creation_vote.c) passes autoGift 2 with the map's name (:226239), and
-  autoGift 1 with the mod's name (:225878). Its wording is still Box Office's.
+  autoGift 1 with the mod's name (:225878). Its label and markup are v10's Donate link (:226239, :225878), and the
+  mod panel's name reads "<name> Mod" (:225875) since d9a06fe1 (`creation_vote_test`).
 - The profile's own Gift KR button opens the view with an empty message (:111931-111933).
 
 ### Trade tooltips

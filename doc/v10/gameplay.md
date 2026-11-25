@@ -84,7 +84,7 @@ obfuscated). Numeric diff: only differences are the Stalker block below plus a c
 | `jump()` sets `didStickToWall = true`, counts a skin stat `jumps` | v10:172012-172015 | players.js:1692 |
 | player-player interact range: `getD3D(..y+5.5.., ..y+5.5..) <= 13.2` (v7 used playerHeight/2 and 2.4*scale, same values) | v10:170175 | player.js:1993 |
 | `poseData.bodyY` lowers the posed model and the local player's eye (emotes/poses); not the server's hit boxes (`updateHeight` reads it only with a renderer) | v10:170861, deob-10.0.3.js:193560-193566 | none (ported: doc/v10/player-pose.md) |
-| `markPosition` (ranked/comp key bind: ping a world position for the team) | v10:170189-170610, bind v10:221125 | none |
+| `markPosition` (ranked/comp key bind: ping a world position for the team) | v10:170189-170610, bind v10:221125 | `NET_EXT_MARK_POSITION` "mpos" (0x0900): client `hud_social.c`, server `net.c` `net_handle_mark_position`, received in `game_events.c:1669` (bc83e322; `krunker_link_test`) |
 
 Mode fields that are new in v10 movement code: `mode.canSlide(player)` overrides `noSliding` (v10:171971),
 used by Stalker (`canSlide: p => p.isStalker`).
@@ -378,6 +378,6 @@ re-checked against 10.0.3 in `gameplay-1003-audit.md` and `rules-1003.md`: every
 | Raid / Zombies keys: skipStats, noProfileStats, specMaxD, runPeakPlayers, the raid challenges, aik, rnd | `shared/src/modes/modes.c`, `mode_rules.c` (`mode_end_raid`, `mode_update_raid`), `game_inc_stat`, `server/src/accounts.c`, `progression.c` (`lt_off`); rules-1003.md section 4 | modes_test (`test_raid_v10`), season_test |
 | Defuse's bomb: the bomb pickup (17), plant (2 s of M1 on a BOMB_SITE), "Bomb Planted" +200, the 40 s countdown and its beeps, the blast ("n" 1, the other team dies), defuse (4 s), def.onKill's drop / return home, the prompts (type 3), the attackers' bomb marker, the site meshes, the planter's beep; bots take, plant, guard and defuse. KN differences: the bomb never swaps out a type-3 weapon (v10 leaves the Boulder in its pickup and plants every tick), one bomb at a time | `shared/src/defuse.c` (`defuse.h`; deob-10.0.3.js:192122-192171, 217725-217806, 119839-119856), `interact.c` (prompts, `game_player_drop_weapon_id`), `bot_objective.c`, client `ui_interact.c`, `hud_objectives.c`, `mode_world.c`, `map_post.c`, `sound_events.c` | defuse_test, krunker_link_test (`test_defuse`) |
 
-`poseData.bodyY` and `freezeOthers` are ported with the player poses (doc/v10/player-pose.md). Not ported yet: `markPosition`, and the match-flow
+`poseData.bodyY` and `freezeOthers` are ported with the player poses (doc/v10/player-pose.md). `markPosition` is ported (`NET_EXT_MARK_POSITION`, `client/src/net/game_events.c:1669`). Not ported yet: the match-flow
 items of section 8 other than the ranked timers (their own work: doc/v10/ranked-impl.md). The Stalker's
 render side, HUD, taunts and sounds are ported: doc/v10/stalker.md.

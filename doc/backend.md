@@ -816,7 +816,9 @@ seek-game details:
   `InvalidClientIP`. Without one (older clients) the seek is served unless required.
 * `dataQuery` `dsmo` / `dsma` (v10's saved `seek_modes` / `seek_maps`): quick join only takes
   lobbies with `meta.mode` / `meta.mapIndex` in the lists; lobbies with room that match neither
-  answer 503 `NoMatchingServers`. A requested `game` is never filtered.
+  answer 503 `NoMatchingServers`. A requested `game` is never filtered. Each list holds up to 64 entries
+  (`MM_SEEK_PREFS_MAX`, 32 before 1d6d83b9, 2026-11-25, which dropped the rotation's last maps, Barnyard 45
+  and Candy Heist 46).
 
 The `/api/maps`, `/api/mods`, `/api/assets`, `/api/search`, `/api/streams`,
 `/api/prices` hub routes belong to svc-accounts / maps (section 7).
@@ -2393,8 +2395,10 @@ their own banner instead of Browse Community Games (`topHedr`) and grey out tabs
 Settings and Server, Zombies and Raid Game Settings, Advanced and Server). Their forced config is the
 server's (`game_config_setup`, `shared/src/game_config.c`). Rent Dedicated Server (type 2) has no entry point
 in 10.0.5 and is not ported. Social (share on hub), Server Upgrades and Host Presets are shown as v10 shows
-them (`client/src/ui/ui_host_config.c`; none for Comp / Zombies / Raid). Raw game data and Rehost are not
-in the window: the server cannot take the first, and the second needs a krunker.io account feature. The
+them (`client/src/ui/ui_host_config.c`; none for Comp / Zombies / Raid). Raw Game Data is in the
+window (`rawMapData`, Custom with no community map; `client/src/ui/host_flow_ui.c`). Rehost shows only where v10's
+`canRehost` holds (deob-10.0.7.js:115245, `isDev || isAdmin`) on a krunker.io game this client hosts
+(`host_flow_ui.c:359-368` `can_rehost`, 38176ffd): Box Office's brain has no rehost. The
 menu's Host Game button is shown; the chooser is v10's.
 
 ### 8.12 Build version and outdated servers
@@ -2422,7 +2426,9 @@ every role). kn_brain polls `servers.releases_url` (default
 latest server build is the `server-latest` / `server-v*` release (not drafts) with the newest
 `commit_time` in the body line `<!-- kn-build {"describe","commit","commit_time","build_time",
 "protocol"} -->` (`.github/workflows/release.yml`). Overrides: `servers.latest_version`
-(describe or commit; no poll then) and `servers.download_url` (the page shown to players).
+(describe or commit; no poll then) and `servers.download_url` (the page shown to players). A SIGTERM
+aborts a poll still in flight (a libcurl XFERINFO cancel flag set by `releases_shutdown`, about 1 s) instead of
+waiting out curl's 10 s timeout (98d7d0a9; `brain_shutdown`, `services/brain/tests/shutdown_test.py`).
 
 **Outdated** (`release_server_outdated`): a server is outdated when
 1. its protocol major.minor is lower than this coordinator's own, or

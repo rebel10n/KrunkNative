@@ -840,9 +840,10 @@ limits exist) [KN]: drop client `"sd"` messages beyond **20 per second per playe
 * `STORAGE.transact` always logs `Transactions disabled for now` (`API:2287-2289`).
 * KN backend [KN] (WP6, `server/src/ks_storage.c`, rules shared with kn_brain in `shared/src/ks_storage_data.c`):
   the server forwards storage ops to kn_brain (`doc/backend.md` 7.6 ops `storage` / `storage_load` /
-  `map_reward`, table `ks_storage`; the client never talks to the DB). Online, storage needs a lobby hosting a
-  published map (`config.customMap`: v7's customMap + defaultSetts); other lobbies get `"Storage only supported
-  on published maps"`. A standalone server_bin (no brain) answers v7's no-database `"Error"`. Offline sandbox: one
+  `map_reward`, table `ks_storage`; the client never talks to the DB). Online, storage needs Force Default Settings
+  (`defaultSetts`, which KR Rewards forces; deob-10.0.7.js:204284), else `"Storage only supported on published
+  maps"`, then a published map (`config.customMap`), else `"Missing map data"`, in v10's order (49a26111,
+  `brain_ks_storage_e2e`). A standalone server_bin (no brain) answers v7's no-database `"Error"`. Offline sandbox: one
   JSON document per map, `ks-storage-<fnv1a32 of the map name>` in the client's storage
   (`$XDG_CONFIG_HOME/krunknative/<key>.json`, web localStorage), same validation and semantics; the sandbox player
   counts as an account named `"local"` (accountID `"0"`). Script keys are stored with v7's `V_` prefix (the 20-char
@@ -1560,7 +1561,7 @@ names `stick_axis_left`, `stick_axis_right` (`REF/src/libs/gamepadInput.js:24-30
 |---|---|
 | Map GUI text elements | `#cusDIV<i>` click -> `onDIVClicked` (`GOV:761-795`) |
 | Host option "KR rewards" | enables `PAYMENTS.giveKR` |
-| Published map (`defaultSetts`) | required for `STORAGE` in production |
+| Force Default Settings (`defaultSetts`, or KR Rewards), then a published map | required for `STORAGE` in production ("Missing map data" without the map) |
 | `config.deltaMlt` (map/host slow-motion) | multiplies `update` deltas, not `render` or `fixedDelta` |
 | Player input pipeline | `onPlayerUpdate` -> `disabledInputs` -> default behaviour unless `GAME.DEFAULT.disablePlayerBehaviour` (`PLJ:894-948`) |
 | Player movement | `defaultMovement/Velocity/Rotation`, `disableShooting/Melee` flags on the player |

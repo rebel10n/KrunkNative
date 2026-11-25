@@ -213,7 +213,9 @@ getter points to editor.krunker.io), so editor-only fields cannot be verified fr
 
 Status (v10-maps package): items 1-4 and the map-data part of 5 (archetype parse and validation,
 ENTITY instances, `scripts.shared` stored) are done, and the renderer constant of 7 (x PI) is in
-`Ruleset.light_unit_factor`; the entity manager and KS (6) are open (`outputEncoding`: no effect in v10.0.3, doc/v10/render.md).
+`Ruleset.light_unit_factor`; the entity manager and KS (6) are done: the authority runs the entities and
+`scripts.shared` (`shared/src/ks_game/ks_entities.c`, 8c5fbc25), and an official lobby's entities appear and collide
+on the client (`client/src/entities.c`, 561ed5f2) (`outputEncoding`: no effect in v10.0.3, doc/v10/render.md).
 
 1. `PREFAB_SCRAPCRATE = 97` (generic prop like CRATE, scale 5) and `PREFAB_ENTITY = 98` (no object;
    collect instance), plus `PREFAB_BOT_PATH_NODE` as an alias of 41. Raise `PREFAB_COUNT`.
