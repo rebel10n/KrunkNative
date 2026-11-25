@@ -230,6 +230,7 @@ SIGNED_IN_SCRIPT = """0 menu
 7000 down ESC
 7020 up ESC
 7500 clickid menuBtnCustomGames
+7600 waitfor .mapListItem
 8500 frames {shots}/games 1
 11500 nodes @games .mapListItem
 11600 frames {shots}/games2 1
