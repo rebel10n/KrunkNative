@@ -96,10 +96,18 @@ typedef struct {
 } NetSessionWatch;
 
 int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer, NetSessionWatch *watch) {
-    char buffer[NET_BUFFER_SIZE];
+    // Read straight into the free part of read_buffer. The last read can leave a partial frame behind (at most
+    // NET_PACKET_HEADER_SIZE + NET_MAX_PAYLOAD - 1 bytes): a full NET_BUFFER_SIZE read on top of it did not fit, and
+    // the client dropped with "receive buffer overflow" whenever the server's burst passed 4 KiB mid-frame
+    // (challenge_mid_match_e2e's rejoin, once ADD_PLAYERS' titles added a packet per PLAYER_INFO).
+    const size_t room = sizeof(read_buffer->data) - read_buffer->length;
     int read;
 
-    if ((read = recv(socket, buffer, sizeof(buffer), 0)) <= 0) {
+    if (!room) {
+        client_net_set_drop(client, "protocol", 0, "receive buffer overflow");
+        return 0;
+    }
+    if ((read = recv(socket, (char *) read_buffer->data + read_buffer->length, (int) room, 0)) <= 0) {
 #ifdef WIN32
         if (read < 0 && NET_ERRNO == WSAEWOULDBLOCK) return 1;
 #else
@@ -112,11 +120,7 @@ int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer, Net
 
     watch->last_data = time(NULL);
 
-    // recv() never returns more than the buffer has room for, so a large read cannot overflow it.
-    if (!net_buffer_push(read_buffer, buffer, (size_t) read)) {
-        client_net_set_drop(client, "protocol", 0, "receive buffer overflow");
-        return 0;
-    }
+    read_buffer->length += (size_t) read;
 
     NetPacket packet;
     int result;
