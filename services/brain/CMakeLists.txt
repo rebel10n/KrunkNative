@@ -319,6 +319,13 @@ if (Python3_FOUND)
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_social_ratelimit PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 
+    # shutdown: SIGTERM while the release poll's thread is in a stalled request (releases.c's cancel flag,
+    # main.c on_signal); the brain exits in about 1 s instead of waiting out curl's 10 s timeout. No database.
+    add_test(NAME brain_shutdown
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/shutdown_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_shutdown PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 LABELS "knsvc;brain")
+
     # community maps: uploadM checks (validateMap, category, name), the Games window's category and
     # official / community filters, map_info mode tags, /api/map-data (creations.c)
     add_test(NAME brain_community_maps
