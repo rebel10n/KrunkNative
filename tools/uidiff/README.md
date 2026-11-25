@@ -896,3 +896,53 @@ scaled offset was fractional, so the shadow smeared instead of landing on one de
 offset now rounds to a whole device pixel. `strike/customize-controls` back is 2.077 -> 1.913 % (max 2,
 fuzz 8). `strike/item-selection` back / home are 2.319 / 2.156 % and stay skipped. No threshold changed.
 
+
+### Structural failures, round 6 (2026-11-25)
+
+Baseline: this branch at 322685f9 (main 04ee1d54 plus the wallet lock, the Inkscape `style="filter:"`
+and the Customize Controls scale commits), all 256 scenarios with a regions file as four headless shards
+on the devbox's llvmpipe (EGL device 0, Mesa 25.0.7): **842 passed / 43 failed / 62 skipped** of 947
+regions (a scenario-level skip, `pending` or unreachable, counts as one row). The 30 failing scenarios
+again at `UIDIFF_FUZZ_SCALE=1.67` (fuzz +4..8): 208 passed / 0 failed / 14 skipped, so every failure but
+`kn-servers-carousel` is the colour drift described at the top. After the fix below: **844 / 42 / 61**,
+no region from pass to fail and none worse by more than 0.03 points; the 42 again all pass at x1.67.
+
+The known structural leftovers all pass at normal fuzz now: `menu-host-type` window 0.539 %,
+`kn-ranked-sort` rs-arrow 0.000, `kn-tip-spin` cost 0.348, `ranked-shop-flying` flying-number 0.000,
+`seq-end-collect-button@500` collect 1.734, the death screen (`ingame-death*`, every `seq-death` frame),
+`spin-item*` buttons 2.74-4.57, and the Strike thumbnails (`strike/item-selection` items-row,
+default-square; `strike/class-selection` 0.27 / 0.55 / 2.72).
+
+**Fixed**
+- **An SVG `<img>` is laid out in its unsnapped box** (`strike/spin` home 2.107 -> 1.357 %, now passes;
+  `strike/item-selection` home 2.156 -> 1.389 %, no longer skipped; `strike/customize-controls`
+  reset-home 1.114 -> 0.867, back 1.913 -> 1.846; `strike/spin` cost-buttons 6.02 -> 5.84;
+  `seq-end-collect-button` double-xp 0.80 -> 0.70). FRVR's return icons are `btn-home.svg` /
+  `btn-arrow-left.svg` (16 x 17) at `height: 18px`, so the box is 16.94 x 18 and snaps to 16 x 18. Blink
+  sizes the SVG's viewport to the unsnapped concrete object size, resolves `preserveAspectRatio` there
+  (meet keeps the whole 36 device px of height) and draws that picture into the snapped rect (squeezing it
+  to 32 px wide); the capture's house spans rows 16..51. KN resolved meet against the snapped 16 x 18
+  rect: scale 2.0, a 34 px house centred one row lower (rows 17..50). `paint.c` records the unsnapped
+  object size on the DL_IMAGE (`fit_w` / `fit_h`), the GL backend hands it to the image resolver, and
+  `svg_image_rasterize_fitted` resolves the mapping in it and stretches the result onto the target.
+  Tests: `html_paint_test` `test_svg_fit_unsnapped`, `html_svg_test` (a filled rect and a Figma
+  hard-shadow document), both fail before.
+
+**Colour drift, passes at fuzz x1.67** (unchanged causes, see the sections above): the `hub-*` badges /
+editor-badge / nav-buttons (scaled PNGs), every `ingame-*` timer and ammo, `game-updating` credit,
+`popup-survey` popup, `settings-mobile-*` preset-select-buttons, `menu-mobile` header-right, and the
+`#mainLogo` regions (`main-menu`, `menu-mobile*`, `ingame-pause-esc`: the references disagree, left as
+they are). New on this list: `strike/spin` currency 2.126 % and `strike/store` currency-left / -right
+2.014 / 2.293 % (max 2; 0.57 / 0.55 / 0.60 at x1.67). The ticket, KR and `plus-sign.svg` icons sit
+where Chrome's do (ink centroids within 0.1 px, the KR hexagon 0.23 px): nanosvg's edge coverage
+against Skia's.
+
+**Left open**
+- **`kn-servers-carousel`** top-groups 4.234 %, region-groups 3.179 % (max 3; 1.551 / 1.263 at
+  x1.67). Structural but by design: KN's krunk.io / krunker.io tab strip (`servers_ui.c`, the native
+  client's two backends) makes the centred window 78 CSS px taller than v10's, so the list is 22.58
+  device px lower than in the capture and the region's whole-pixel `ref_offset` leaves 0.42 px. The
+  v10-markup render passes at offset 0 (round 2). Not a threshold change and not a reference edit.
+- Skipped, unchanged: `strike/item-selection` back 2.232 % (was 2.319; the slanted frame), the
+  `strike/customize-controls` icons (the capture's images did not load) and the KN-only rows / offline
+  capture gaps whose region notes give the reason.
