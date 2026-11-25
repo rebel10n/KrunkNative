@@ -25,5 +25,5 @@
       }
     }
   },
-  "note": "KN's #modVote (creation_vote.c via mods_ui.c): a loaded published mod's name, tip link and thumbs in the top bar (deob-10.0.7.js:225872-225880). Own markup and wording. Reference: KN's own render."
+  "note": "KN's #modVote (creation_vote.c via mods_ui.c): a loaded published mod's \"<name> Mod\", Donate link and thumbs in the top bar (deob-10.0.7.js:225872-225880). Markup and wording are v10's. Reference: KN's own render."
 }

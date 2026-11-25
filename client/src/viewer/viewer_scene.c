@@ -1674,6 +1674,8 @@ void vscene_camera_set(const vec3 position, const vec3 target) {
     camera_place(position, target);
 }
 
+static const int *g_draw_clip; // vscene_render_rect_clip's clip, NULL none
+
 static void scene_draw(const int x, const int y, const int w, const int h) {
     vs.camera.fov = camera_fov();
     vs.camera.zoom = 1.0f;
@@ -1682,7 +1684,14 @@ static void scene_draw(const int x, const int y, const int w, const int h) {
 
     glViewport(x, y, w, h);
     glEnable(GL_SCISSOR_TEST);
-    glScissor(x, y, w, h);
+    if (g_draw_clip) {
+        const int x0 = x > g_draw_clip[0] ? x : g_draw_clip[0], y0 = y > g_draw_clip[1] ? y : g_draw_clip[1];
+        const int x1 = x + w < g_draw_clip[0] + g_draw_clip[2] ? x + w : g_draw_clip[0] + g_draw_clip[2];
+        const int y1 = y + h < g_draw_clip[1] + g_draw_clip[3] ? y + h : g_draw_clip[1] + g_draw_clip[3];
+        glScissor(x0, y0, x1 > x0 ? x1 - x0 : 0, y1 > y0 ? y1 - y0 : 0);
+    } else {
+        glScissor(x, y, w, h);
+    }
     glClear(GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
@@ -1733,6 +1742,12 @@ void vscene_render_rect(const int x, const int y, const int w, const int h, cons
     glViewport(0, 0, fb_w, fb_h);
     glEnable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
+}
+
+void vscene_render_rect_clip(const int x, const int y, const int w, const int h, const int clip[4], const int fb_w, const int fb_h) {
+    g_draw_clip = clip;
+    vscene_render_rect(x, y, w, h, fb_w, fb_h);
+    g_draw_clip = NULL;
 }
 
 unsigned char *vscene_capture(const int w, const int h, const int gradient) {

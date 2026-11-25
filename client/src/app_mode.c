@@ -18,6 +18,7 @@
 #include <viewer_embed.h> // the hub's item view showcase
 #include <console.h>      // the developer console on every page
 #include <v10_menu.h>     // the Test Map's sandbox menu
+#include <audio.h>        // the page's own sounds
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -653,6 +654,10 @@ int app_mode_frame(Client *client, const float now, const float delta) {
     input_script_page_tick(client); // KRUNKNATIVE_INPUT_SCRIPT on a page (keys / mouse / shot)
     if (g_app.entered && g_app.page && g_app.page->tick) g_app.page->tick(client, now, delta);
     if (g_app.entered) ui_console_tick(client); // the developer console on every page (ui_console.c)
+    // A page's SOUND.play of a clip not decoded yet is queued for audio_update (audio.c play_request_handle), which
+    // the game frame runs from sound_events_tick; a page frame returns before that, so without this the hub's
+    // sounds (the Black Market's ambient_8, a button's store / tick_0) never started. Page sounds are 2D.
+    audio_update((vec3) {0}, 0.0f, 0.0f);
     if (!debug_capture_hide_ui()) {
         html_ui_render_page(client->ui);
         viewer_embed_frame(client, delta); // the hub's item view showcase iframe (no-op on the viewer page)

@@ -58,6 +58,8 @@ void vscene_render(int fb_w, int fb_h);
 // draw the scene into the framebuffer rectangle (px, bottom-left origin) without clearing its
 // colour: the item view's showcase over the page (viewer_embed.h)
 void vscene_render_rect(int x, int y, int w, int h, int fb_w, int fb_h);
+// ... drawing only inside clip (x, y, w, h, framebuffer px, bottom-left origin) as well; clip NULL: the whole rectangle
+void vscene_render_rect_clip(int x, int y, int w, int h, const int clip[4], int fb_w, int fb_h);
 // Draws one frame offscreen at w x h and returns RGBA rows top-first (malloc'd), optionally over
 // the screenshot gradient (createLinearGradient(0, 0, 0, width)); NULL on failure.
 unsigned char *vscene_capture(int w, int h, int gradient);

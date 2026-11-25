@@ -15,7 +15,7 @@
       ],
       "kind": "text",
       "max_pct": 2.0,
-      "note": "#modVote: the mod's name, the tip link and thumbs in the top bar (creation_vote.c render_mod)"
+      "note": "#modVote: \"<name> Mod\", v10's Donate link and thumbs in the top bar (creation_vote.c render_mod, deob-10.0.7.js:225872-225880)"
     }
   ]
 }

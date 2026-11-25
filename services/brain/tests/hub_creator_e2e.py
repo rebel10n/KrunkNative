@@ -12,7 +12,7 @@ kn_brain on sqlite + one client_bin at a time, logged in from seeded storage and
   2. a mod's Edit (updateMod -> plm): the Update Mod popup prefilled with the mod's name
   3. a developer's Chat Ban on a profile (/moderation/chat); the profile's badges (the header's selected badge, the
      Badges tab's cards with their art, createBadgeTip); confPremium's gift question and kn_brain's refusal of "prm"
-  4. Market > Trading > History pages (loadMoreTradeHistory)
+  4. Market > Trading > History pages (loadMoreTradeHistory); the Black Market's ambient_8 loop (hub-10.0.7.js:6960-6964)
   5. the chat sidebar (chtb): the friend's bubble, a message from them counts on it ("msg"), Friends lists them,
      Remove unfollows
   6. the menu's Upload Mod (window 19, v10's mods_pub, game.deob.js:220943-221050): v10's markup and texts, the
@@ -128,7 +128,7 @@ async def register(port, name):
 class Client:
     """One headless client_bin on the hub, as `name`."""
 
-    def __init__(self, port, name, token, query, tag, hub=True):
+    def __init__(self, port, name, token, query, tag, hub=True, env_extra=None, args=()):
         self.cmds = os.path.join(WORK, tag + ".cmds")
         self.log = os.path.join(WORK, tag + ".log")
         self.tag = tag
@@ -145,8 +145,10 @@ class Client:
                     "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % port,
                     "KRUNKNATIVE_REMOTE_IMAGE_CACHE": os.path.join(WORK, tag + "-images"),  # the pictures it downloads
                     "PATH": PICK_BIN + os.pathsep + os.environ.get("PATH", "")})
+        env.update(env_extra or {})
         self.out = open(self.log, "w")
-        self.proc = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT] + (["--hub", query] if hub else []), stdout=self.out, stderr=subprocess.STDOUT,
+        self.proc = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT] + list(args) + (["--hub", query] if hub else []), stdout=self.out,
+                                     stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL, env=env, cwd=ROOT, start_new_session=True)
 
     def text(self):
@@ -669,6 +671,34 @@ def market_cards(port, ids, tokens, names):
         c.close()
 
 
+def market_ambience(port, tokens, names):
+    """The Black Market's ambience (hub-10.0.7.js:6960-6964): updateWindow to the blackm page loops ambient_8 at 0.3,
+    rate 0.8; any other page stops it; the market itself plays no ambient_4 loop (v10 dropped it). The client's audio
+    runs on the null backend with KRUNKNATIVE_AUDIO_LOG, which prints every play and stop (client/src/audio.c)."""
+    c = Client(port, names[0], tokens[0], "p=market&q=blackm", "ambience",
+               env_extra={"KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_AUDIO_LOG": "1"}, args=["--debug=2"])
+    play = re.compile(r"\[audio\] t=[\d.]+ play2d ambient_8 vol=[\d.]+ rate=0\.80 loop")
+    stop = re.compile(r"\[audio\] t=[\d.]+ stop ambient_8")
+    try:
+        check(wait(lambda: play.search(c.text()) is not None, 60), "Black Market: ambient_8 loops at rate 0.8 (updateWindow q=blackm)")
+        m = play.search(c.text())
+        vol = re.search(r"vol=([\d.]+)", m.group(0)) if m else None
+        check(vol and 0.0 < float(vol.group(1)) <= 0.3, "at volume 0.3 (times the volume settings): %r" % (m and m.group(0)))
+        mark = len(c.text())
+        c.ui("updateWindow('market','market',null,null,'store')")
+        check(wait(lambda: stop.search(c.text()[mark:]) is not None, 15), "the market page stops ambient_8")
+        time.sleep(1)
+        check(re.search(r"play2d ambient_4\b", c.text()) is None, "no market loop (ambient_4) at all")
+        mark = len(c.text())
+        c.ui("updateWindow('market','blackm',null,null,'store')")
+        check(wait(lambda: play.search(c.text()[mark:]) is not None, 15), "back on the Black Market it loops again")
+        mark = len(c.text())
+        c.ui("updateWindow('feed')")
+        check(wait(lambda: stop.search(c.text()[mark:]) is not None, 15), "the feed stops it")
+    finally:
+        c.close()
+
+
 async def share_match(port, ids, tokens, names):
     """Share Match Results (deob-10.0.7.js:226776, 227048-227064): the game server's final commit carries v10's
     endData.ed (server/src/accounts.c acc_end_table); "smr" then posts the sharer's latest match as a MatchResult (typ 8):
@@ -1056,6 +1086,7 @@ def main():
         staff_profile(port, ids, tokens, names)
         trade_history(port, ids, tokens, names)
         market_cards(port, ids, tokens, names)
+        market_ambience(port, tokens, names)
         mod_window(port, ids, tokens, names, stamp)
 
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?), (?, ?)", ids[0], ids[1], ids[1], ids[0])

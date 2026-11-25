@@ -1085,13 +1085,24 @@ void viewer_embed_fini(void) {
 // the iframe that shows viewer.html?...showcase=<i>: #itemViewPop's (the store's item view) or the Skin Manager's
 // preview (#knSmPreview, showcase=<the skin's JSON>); its store index (VIEWER_SHOWCASE_SKIN_INDEX for a JSON
 // skin, -1 = none) and its query
+// The value of `key=` in a query ("" when absent), compared up to the next '&'.
+static int same_param(const char *a, const char *b, const char *key) {
+    const char *pa = strstr(a, key), *pb = strstr(b, key);
+    if (!pa || !pb) return !pa && !pb;
+    const size_t na = strcspn(pa, "&"), nb = strcspn(pb, "&");
+    return na == nb && !strncmp(pa, pb, na);
+}
+
 static HtmlElem embed_frame(int *index, char *query_out, const size_t query_n) {
     *index = -1;
     query_out[0] = '\0';
     const HtmlElem pop = html_dom_by_id("itemViewPop");
     char display[16] = "";
     if (pop) html_dom_get_style(pop, "display", display, sizeof(display));
-    const HtmlElem frame = pop && display[0] && strcmp(display, "none") ? html_dom_query(pop, "iframe") : html_dom_by_id("knSmPreview");
+    HtmlElem frame = pop && display[0] && strcmp(display, "none") ? html_dom_query(pop, "iframe") : 0;
+    // the paint picker's preview (paint_picker.c, deob-10.0.7.js:108496): a popup over the Skin Manager and the loadout
+    if (!frame) frame = html_dom_query(0, "iframe.paint-iframe");
+    if (!frame) frame = html_dom_by_id("knSmPreview");
     static char src[sizeof g_embed.query + 64];
     if (!frame || html_dom_get_attr(frame, "src", src, sizeof(src)) < 0 || !strstr(src, "viewer.html")) return 0;
     const char *query = strchr(src, '?');
@@ -1118,11 +1129,14 @@ void viewer_embed_frame(Client *client, const float delta) {
         return;
     }
     vec3 kept_position = {0}, kept_target = {0};
-    int keep_camera = 0;
+    int keep_camera = 0, keep_paint_view = 0;
     if (g_embed.active && (g_embed.index != index || strcmp(g_embed.query, query) != 0)) {
         // the Skin Manager's preview again (a placement changed or a tool picked): the camera stays while a tool is on
         keep_camera = g_embed.index == index && index == VIEWER_SHOWCASE_SKIN_INDEX && (strstr(query, "attachEdit=") || strstr(query, "charmEdit="));
-        if (keep_camera) vscene_camera_get(&kept_position, &kept_target);
+        // the paint picker's next colour: v10 posts it to the loaded iframe (updatePaint, deob-10.0.7.js:108596-108606), so
+        // the view keeps turning where it was; a new paintShader is a new src there (:108675) and starts over
+        keep_paint_view = g_embed.index == index && html_dom_has_class(frame, "paint-iframe") && same_param(g_embed.query, query, "paintShader=");
+        if (keep_camera || keep_paint_view) vscene_camera_get(&kept_position, &kept_target);
         viewer_embed_fini();
     }
     if (!g_embed.active) {
@@ -1144,7 +1158,7 @@ void viewer_embed_frame(Client *client, const float delta) {
         }
         vscene_update_lights();
         vscene_build_showcase(index);
-        if (keep_camera && vscene_place_active()) vscene_camera_set(kept_position, kept_target);
+        if ((keep_camera && vscene_place_active()) || keep_paint_view) vscene_camera_set(kept_position, kept_target);
         KN_LOG_VERBOSE2("[viewer] item view showcase %d\n", index);
     }
     g_embed.rect = rect;
@@ -1158,7 +1172,21 @@ void viewer_embed_frame(Client *client, const float delta) {
     const int x = (int) lroundf(rect.x * scale), w = (int) lroundf(rect.w * scale), h = (int) lroundf(rect.h * scale);
     const int y = fb_h - (int) lroundf(rect.y * scale) - h;
     vscene_tick(fminf(delta, 0.1f) * 1000.0f);
-    vscene_render_rect(x, y, w, h, fb_w, fb_h);
+    // The paint picker's controls lie over the lower part of its iframe (paint-overlay, deob-10.0.7.js:108496-108499),
+    // under them in v10. The viewer scene is drawn after the page, so it stops at the controls' top edge.
+    int clip[4];
+    HtmlRect controls;
+    const HtmlElem over = html_dom_has_class(frame, "paint-iframe") ? html_dom_query(html_dom_parent(frame), ".paint-controls") : 0;
+    if (over && html_dom_get_rect(over, &controls) && controls.y > rect.y && controls.y < rect.y + rect.h) {
+        const int bottom = fb_h - (int) lroundf(controls.y * scale);
+        clip[0] = x;
+        clip[1] = bottom;
+        clip[2] = w;
+        clip[3] = y + h - bottom;
+        vscene_render_rect_clip(x, y, w, h, clip, fb_w, fb_h);
+    } else {
+        vscene_render_rect(x, y, w, h, fb_w, fb_h);
+    }
 #endif
 }
 
