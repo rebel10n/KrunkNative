@@ -225,7 +225,7 @@ async def scenario(port):
         check(c1 and c1["DAT"] == {"ky": "k", "val": 25, "mp": 0} and c1["REW"] == {"kr": 10} and c1["PV"] == 0 and c1["PT"] == 0
               and c1["N"] == "Get 25 kills on Burg", "challenge 1 object: %s" % c1)
         daily_rew = {c["CI"]: c["REW"] for c in rows if c["T"] == "daily"}
-        check(all(r.get("bpp", 0) > 0 for r in daily_rew.values()), "the dailies carry REW.bpp (0397): %s" % daily_rew)
+        check(all(r.get("bpp") == 50 for r in daily_rew.values()), "every daily gives 50 BPP, as krunker.io (0397, 0409): %s" % daily_rew)
         daily = [c for c in rows if c["T"] == "daily"]
         check(all(0 < c.get("TR", 0) <= 86400000 for c in daily), "daily TR within a day")
         r2 = await s.call("chgL", "chg")

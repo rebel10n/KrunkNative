@@ -174,17 +174,15 @@ Against `~/jails/kru/src/Krunker_v10.0.7/deob/game.deob.js` (deob-10.0.7.js):
   challenge stayed unmarked until the match end). kn_brain still decides and pays at the commit
   (`db_progress.c`), whose `chgC` (the list form) gives the "Completed!" cards; the client adds a challenge's
   skins once (the mid-match ones are marked, `account_ui.c`) and requests the list at the login, as v10's account
-  carries `activeChallenges`. Migration 0397 gives the daily rows
-  (15-22) a `REW.bpp` (50; the spray and assist rows 25): no official capture of the dailies is in the repo, so
-  the values follow the offline v10 sandbox's daily rows (`tools/uidiff/scenarios/rewards-bp-chal.json`). No
-  official daily value can be read (checked again 2026-11-23, round 12): the v10.0.7 bundle has no challenge
-  definitions (its `bpp: 0` at 180859, 195134 and 209970 are the starting values of running totals; daily rewards
-  come only from the server), the kru tree holds bundles and static assets only (v10.0.3-v10.0.7, no HAR, socket
-  dump or account JSON), and the repo's daily `bpp` values are all KrunkNative fixtures (the uidiff scenarios and
-  `season_fixture.json` use the brain's own CIs 15/16/20; the krunker.io stubs of `krunker_challenges_e2e.py` carry
-  no daily rows). No `KRUNKNATIVE_CHALLENGE_CAPTURE` file exists. For a krunker.io account KrunkNative already draws
-  the `REW.bpp` krunker.io sends (`battlepass_ui.c` `gen_daily_card` over the account's `activeChallenges`), so 0397
-  only sets Box Office's values, and stands.
+  carries `activeChallenges`. Migrations 0397 and 0409 set the daily rows'
+  (15-22) `REW` to krunker.io's values. On 2026-11-25 the Battle Pass Challenges tab of a signed-in krunker.io
+  account showed five dailies, each +50 BPP: "Get 15 Headshots" and "Get 3 Headshots on SkyTemple" (+0 KR, +0.25
+  junk), "Play 1 Burg Match" and "Play 1 SkyTemple Match" (+0 KR, +0.1 junk), "Get a 20 killstreak on Burg" (+70 KR,
+  +0 junk). So every daily gives 50 BPP (0409 moves the spray and assist rows from 0397's 25), row 15 ("Get 15
+  Headshots") and row 18 (5 headshots with one weapon) give 0 KR and 0.25 junk, and the rows with no official
+  counterpart in that read keep their KR. The map-scoped "Play 1 <map> Match" and killstreak dailies have no Box
+  Office row. For a krunker.io account KrunkNative draws the `REW` krunker.io sends (`battlepass_ui.c`
+  `gen_daily_card` over the account's `activeChallenges`), so 0397 and 0409 only set Box Office's values.
 - **Weekly.** v10.0.7's Battle Pass Challenges tab draws the dailies only; KrunkNative keeps its weekly section
   there, since Box Office's weekly rows (23-26) are drawn nowhere else.
 

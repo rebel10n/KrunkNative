@@ -113,9 +113,6 @@ and the handler ignores the `RPC_SUCCESS` results.
   the end of each match. Box Office asks at login and then every 60 s while the menu is open
   (`DS_REFRESH_MS`). Matching v10's timing would mean the item shows `0/5000` until a match ends on the
   web build; it is not changed here.
-- **The ticket's spin on krunker.io.** The claim is sent and the wheel opens, but the spin button's
-  `["spin", wheel, ticket, multi]` stays read-only on krunker.io (`store_ui.c` `spin_button_click`,
-  `kio_store_read_only`): the ticket sits in the account's inventory until that policy changes.
 - **An unanswered claim.** v10's `await` has no timeout (the item would read `CLAIMING...` until the
   answer); Box Office gives up after 15 s (above).
 

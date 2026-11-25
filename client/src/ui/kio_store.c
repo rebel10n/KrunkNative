@@ -21,8 +21,8 @@
 //
 // Writes (kio_store.h): BUY, the currency / badge cards and a virtual gift send shop/purchase (kio_store_buy, v10
 // _38968 / deob-10.0.4.js:116077); a store wheel's spin is spins/execute (kio_store_spin, :27413); the Redeem Keys
-// code is the game socket's "vo" (kio_store_redeem_prompt). Real-money gifts and bundles are the payment provider's
-// checkout, which KrunkNative does not run. A guest gets v10's loginOrRegister.
+// code is the game socket's "vo" (kio_store_redeem_prompt). Real-money products (KR packs, Premium, gifts, bundles)
+// go through v10's checkout frames (kio_checkout.c). A guest gets v10's loginOrRegister.
 #include <kio_store.h>
 #include <shop_counts.h> // v10.0.6 updateDisplayPurchaseCount: a bought limited card reads sold out at once
 #include "klog.h"
