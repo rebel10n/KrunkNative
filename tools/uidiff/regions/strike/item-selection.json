@@ -95,8 +95,7 @@
       "kind": "ui",
       "fuzz": 8,
       "max_pct": 2.0,
-      "note": "Ps home button: the same slanted clip-path gap",
-      "skip": true
+      "note": "Ps home button: btn-home.svg laid out in its unsnapped 16.94 x 18 box and drawn into the snapped 16 x 18 one, as Blink does (1.389 %; 2.156 % when it was fitted into the snapped box)"
     }
   ]
 }

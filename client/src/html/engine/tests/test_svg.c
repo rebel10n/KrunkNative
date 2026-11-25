@@ -167,6 +167,40 @@ static void test_mapping(void) {
     free(px);
     svg_image_destroy(s);
 
+    /* fitted: Blink lays a 16 x 17 image out in its unsnapped 16.94 x 18 box (meet: the whole height)
+     * and draws that into the 16 x 18 snapped rect. At 2 device px: 32 x 36, laid out in 33.875 x 36.
+     * Placed (meet in 32 x 36) leaves a row empty above and below; fitted covers rows 0 and 35. */
+    s = mk("<svg width=\"16\" height=\"17\" viewBox=\"0 0 16 17\"><rect width=\"16\" height=\"17\" fill=\"#fff\"/></svg>");
+    px = svg_image_rasterize_placed(s, 32, 36, 32, 36, 0, 0);
+    if (px) {
+        CHECK(px_at(px, 32, 16, 0)[3] == 0 && px_at(px, 32, 16, 35)[3] == 0 && px_at(px, 32, 16, 1)[3] == 255);
+        CHECK(px_at(px, 32, 0, 18)[3] == 255 && px_at(px, 32, 31, 18)[3] == 255);
+    } else CHECK(0);
+    free(px);
+    px = svg_image_rasterize_fitted(s, 32, 36, 32, 36, 0, 0, 33.875f, 36);
+    if (px) {
+        CHECK(px_at(px, 32, 16, 0)[3] > 250 && px_at(px, 32, 16, 35)[3] > 250);
+        CHECK(px_at(px, 32, 0, 18)[3] > 250 && px_at(px, 32, 31, 18)[3] > 250); /* stretched across the width */
+    } else CHECK(0);
+    free(px);
+    svg_image_destroy(s);
+    /* a filtered (Figma hard shadow) document goes through the layers with the same stretch */
+    s = mk("<svg width=\"16\" height=\"17\" viewBox=\"0 0 16 17\"><g filter=\"url(#f)\"><rect width=\"16\" height=\"16\" fill=\"#fff\"/></g>"
+           "<defs><filter id=\"f\" x=\"0\" y=\"0\" width=\"16\" height=\"17\" filterUnits=\"userSpaceOnUse\"><feFlood flood-opacity=\"0\" result=\"B\"/>"
+           "<feColorMatrix in=\"SourceAlpha\" type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0\" result=\"hardAlpha\"/>"
+           "<feOffset dy=\"1\"/><feComposite in2=\"hardAlpha\" operator=\"out\"/>"
+           "<feColorMatrix type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0\"/>"
+           "<feBlend mode=\"normal\" in2=\"B\" result=\"e\"/><feBlend mode=\"normal\" in=\"SourceGraphic\" in2=\"e\" result=\"shape\"/></filter></defs></svg>");
+    px = svg_image_rasterize_fitted(s, 32, 36, 32, 36, 0, 0, 33.875f, 36);
+    if (px) {
+        const unsigned char *top = px_at(px, 32, 16, 0), *shadow = px_at(px, 32, 16, 34);
+        CHECK(top[3] > 250 && top[0] > 250);                       /* the white rect from row 0 */
+        CHECK(shadow[3] > 250 && shadow[0] < 5);                    /* its 2 px black shadow at the bottom */
+        CHECK(px_at(px, 32, 31, 10)[3] > 250);                       /* stretched across the width */
+    } else CHECK(0);
+    free(px);
+    svg_image_destroy(s);
+
     CHECK(svg_image_rasterize(NULL, 4, 4) == NULL);
     s = mk("<svg viewBox=\"0 0 1 1\"/>");
     CHECK(svg_image_rasterize(s, 0, 4) == NULL && svg_image_rasterize(s, 5000, 4) == NULL);

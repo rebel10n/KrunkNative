@@ -954,7 +954,8 @@ typedef struct {
     NSVGimage *image;
     int w, h;
     float tx, ty, rs;     /* nsvgRasterize's offset and scale */
-    float sx, sy;         /* user space -> device px scale (rs, unless "none": nanosvg maps the viewBox) */
+    float sx, sy;         /* user space -> device px scale (rs, unless "none" or fitted: per axis) */
+    float wrap[6];        /* the fitted image's <g> around the content (identity when not fitted) */
     const char *attrs;
     size_t al;
     unsigned char *tmp;   /* straight RGBA of one nsvgRasterize pass */
@@ -1080,9 +1081,12 @@ static NSVGimage *svg_parse_ref(const SvgCtx *c, const SvgRef *r, const float *c
     static const char close[] = "</svg>";
     if (!gt || r->tail_len < sizeof close - 1 + (size_t) (gt + 1 - r->tail)) return NULL;
     const size_t head = (size_t) (gt + 1 - r->tail), body = r->tail_len - head - (sizeof close - 1);
+    float m[6];
+    memcpy(m, ctm, sizeof m);
+    nsvg__xformMultiply(m, (float *) c->wrap); /* the element's space, then the fitted image's stretch */
     char g[200];
-    const int gl = snprintf(g, sizeof g, "<g transform=\"matrix(%.9g %.9g %.9g %.9g %.9g %.9g)\">", (double) ctm[0], (double) ctm[1],
-                            (double) ctm[2], (double) ctm[3], (double) ctm[4], (double) ctm[5]);
+    const int gl = snprintf(g, sizeof g, "<g transform=\"matrix(%.9g %.9g %.9g %.9g %.9g %.9g)\">", (double) m[0], (double) m[1],
+                            (double) m[2], (double) m[3], (double) m[4], (double) m[5]);
     const size_t n = head + (size_t) gl + body + 4 + sizeof close - 1;
     char *t = malloc(n + 1);
     if (!t) return NULL;
@@ -1185,23 +1189,70 @@ unsigned char *svg_image_rasterize(const SvgImage *svg, const int w, const int h
 
 unsigned char *svg_image_rasterize_placed(const SvgImage *svg, const int w, const int h, const float vpw, const float vph,
                                           const float ox, const float oy) {
+    return svg_image_rasterize_fitted(svg, w, h, vpw, vph, ox, oy, vpw, vph);
+}
+
+/* The tail with its content wrapped in <g transform="matrix(m)">: from after the root tag's '>' to
+ * before the last "</svg". NULL when the root has no content to wrap. */
+static char *svg_wrap_tail(const char *tail, const size_t len, const float *m, size_t *out_len) {
+    const char *gt = memchr(tail, '>', len);
+    if (!gt || gt == tail || gt[-1] == '/') return NULL;
+    const char *close = NULL;
+    for (const char *p = tail + len - 5; p > gt; p--)
+        if (!memcmp(p, "</svg", 5)) {
+            close = p;
+            break;
+        }
+    if (!close) return NULL;
+    char g[200];
+    const int gl = snprintf(g, sizeof g, "<g transform=\"matrix(%.9g %.9g %.9g %.9g %.9g %.9g)\">", (double) m[0], (double) m[1],
+                            (double) m[2], (double) m[3], (double) m[4], (double) m[5]);
+    if (gl <= 0 || (size_t) gl >= sizeof g) return NULL;
+    const size_t head = (size_t) (gt + 1 - tail), body = (size_t) (close - gt - 1), rest = (size_t) (tail + len - close);
+    const size_t n = head + (size_t) gl + body + 4 + rest;
+    char *t = malloc(n + 1);
+    if (!t) return NULL;
+    memcpy(t, tail, head);
+    memcpy(t + head, g, (size_t) gl);
+    memcpy(t + head + (size_t) gl, gt + 1, body);
+    memcpy(t + head + (size_t) gl + body, "</g>", 4);
+    memcpy(t + head + (size_t) gl + body + 4, close, rest);
+    t[n] = 0;
+    *out_len = n;
+    return t;
+}
+
+unsigned char *svg_image_rasterize_fitted(const SvgImage *svg, const int w, const int h, const float vpw, const float vph,
+                                          const float ox, const float oy, float cw, float ch) {
     if (!svg || w < 1 || h < 1 || w > SVG_MAX_DIM || h > SVG_MAX_DIM || !(vpw > 0.0f) || !(vph > 0.0f)) return NULL;
+    if (!(cw > 0.0f) || !(ch > 0.0f)) {
+        cw = vpw;
+        ch = vph;
+    }
     /* The viewBox -> viewport mapping is done here, not by nanosvg: its
      * default is preserveAspectRatio="none" and it misreads the Y alignment
      * of xMidYMid-style values.  For uniform scaling the document is parsed
      * with a viewport of the viewBox size (identity mapping) and rasterised
-     * with scale + offset; for "none" nanosvg stretches it to w x h itself. */
+     * with scale + offset; for "none" nanosvg stretches it to w x h itself.
+     * Fitted (cw x ch differs from vpw x vph): Blink lays the SVG out in its
+     * concrete object size (the unsnapped box) and draws that picture into the
+     * pixel-snapped rect, so preserveAspectRatio is resolved against cw x ch
+     * and the result stretched by vpw / cw, vph / ch: a <g> around the content
+     * carries the stretch, nsvgRasterize's scale stays uniform. */
     const float vw = svg->vb[2], vh = svg->vb[3];
-    float scale = 1.0f, tx = ox, ty = oy;
+    float scale = 1.0f, tx = ox, ty = oy, kx = 1.0f, ky = 1.0f;
     char attrs[200];
     int al;
     if (svg->align_x < 0) {
         al = snprintf(attrs, sizeof attrs, " width=\"%.9g\" height=\"%.9g\"", (double) vpw, (double) vph); /* has a viewBox */
     } else {
-        const float sx = vpw / vw, sy = vph / vh;
+        const float sx = cw / vw, sy = ch / vh;
         scale = svg->slice ? fmaxf(sx, sy) : fminf(sx, sy);
-        tx += (vpw - vw * scale) * 0.5f * (float) svg->align_x;
-        ty += (vph - vh * scale) * 0.5f * (float) svg->align_y;
+        kx = vpw / cw;
+        ky = vph / ch;
+        if (fabsf(kx - 1.0f) < 1e-4f && fabsf(ky - 1.0f) < 1e-4f) kx = ky = 1.0f;
+        tx += (cw - vw * scale) * 0.5f * (float) svg->align_x * kx;
+        ty += (ch - vh * scale) * 0.5f * (float) svg->align_y * ky;
         al = snprintf(attrs, sizeof attrs, " width=\"%.9g\" height=\"%.9g\"", (double) vw, (double) vh);
     }
     if (al > 0 && !svg->has_viewbox) {
@@ -1210,7 +1261,14 @@ unsigned char *svg_image_rasterize_placed(const SvgImage *svg, const int w, cons
     }
     if (al <= 0 || (size_t) al >= sizeof attrs) return NULL;
 
-    NSVGimage *image = svg_parse_tail(svg, svg->tail, svg->tail_len, attrs, (size_t) al);
+    /* the stretch about the viewBox origin: (u - vb) * k = (k u + (1 - k) vb) - vb */
+    const float wrap[6] = {kx, 0.0f, 0.0f, ky, (1.0f - kx) * svg->vb[0], (1.0f - ky) * svg->vb[1]};
+    const int fitted = kx != 1.0f || ky != 1.0f;
+    size_t wrapped_len = 0;
+    char *wrapped = fitted ? svg_wrap_tail(svg->tail, svg->tail_len, wrap, &wrapped_len) : NULL;
+    NSVGimage *image = wrapped ? svg_parse_tail(svg, wrapped, wrapped_len, attrs, (size_t) al)
+                               : svg_parse_tail(svg, svg->tail, svg->tail_len, attrs, (size_t) al);
+    free(wrapped);
     if (!image) return NULL;
 
     unsigned char *px = malloc((size_t) w * (size_t) h * 4);
@@ -1220,7 +1278,9 @@ unsigned char *svg_image_rasterize_placed(const SvgImage *svg, const int w, cons
         const size_t n = (size_t) w * (size_t) h * 4;
         unsigned char *acc = calloc(1, n), *tmp = malloc(n);
         if (acc && tmp) {
-            SvgCtx ctx = {svg, rast, image, w, h, tx, ty, scale, scale, scale, attrs, (size_t) al, tmp};
+            SvgCtx ctx = {svg, rast, image, w, h, tx, ty, scale, scale * kx, scale * ky, {1, 0, 0, 1, 0, 0}, attrs, (size_t) al, tmp};
+            if (wrapped_len) memcpy(ctx.wrap, wrap, sizeof wrap);
+            else ctx.sx = ctx.sy = scale; /* nothing wrapped: no stretch */
             if (svg->align_x < 0) { /* "none": nanosvg maps the viewBox itself */
                 ctx.sx = vpw / vw;
                 ctx.sy = vph / vh;

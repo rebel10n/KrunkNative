@@ -129,9 +129,12 @@ unsigned image_texture(const ImageEntry *entry, int nearest);
  * Chrome draws the vector there: no resampling blur).  Created on first
  * request, kept in a small per-image LRU (positions quantised to 1/8 px);
  * falls back to `tex` (*tex_w = 0) when rasterising fails.  The GL context
- * must be current; the texture binding of the active unit is preserved. */
+ * must be current; the texture binding of the active unit is preserved.
+ * view_w x view_h (device px, 0 = dev_w x dev_h) is the viewport the SVG is laid
+ * out in, Blink's unsnapped concrete object size: the picture is then stretched
+ * onto dev_w x dev_h (svg_image_rasterize_fitted). */
 unsigned image_texture_sized(const ImageEntry *entry, int nearest, float dev_w, float dev_h, float frac_x, float frac_y,
-                             int *tex_w, int *tex_h);
+                             float view_w, float view_h, int *tex_w, int *tex_h);
 
 /* Resolve `url` against `base_url` into the root-relative key ("img/x.png").
  * Returns 1 and writes at most `cap` bytes (NUL-terminated) on success, 0 when

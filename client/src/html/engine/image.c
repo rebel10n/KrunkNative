@@ -41,6 +41,7 @@
 typedef struct ImageSvgTex {
     int w, h;              /* texels (device px) */
     int qw, qh, qx, qy;    /* drawn size and sub-pixel offset, 1/8 px units */
+    int qcw, qch;          /* the SVG viewport it was laid out in (fitted), 1/8 px units */
     unsigned tex;          /* 0 = free slot */
     unsigned last_use;
 } ImageSvgTex;
@@ -1098,7 +1099,7 @@ unsigned image_texture(const ImageEntry *entry, const int nearest) {
 }
 
 unsigned image_texture_sized(const ImageEntry *entry, const int nearest, float dev_w, float dev_h, float frac_x,
-                             float frac_y, int *tex_w, int *tex_h) {
+                             float frac_y, float view_w, float view_h, int *tex_w, int *tex_h) {
     *tex_w = *tex_h = 0;
     if (!entry || entry->failed || !entry->tex) return 0;
     if (!entry->vector) return image_texture(entry, nearest);
@@ -1109,12 +1110,15 @@ unsigned image_texture_sized(const ImageEntry *entry, const int nearest, float d
     const int qw = (int) lrintf(dev_w * 8.0f), qh = (int) lrintf(dev_h * 8.0f);
     const int qx = (int) lrintf(frac_x * 8.0f) & 7, qy = (int) lrintf(frac_y * 8.0f) & 7;
     const float vw = (float) qw / 8.0f, vh = (float) qh / 8.0f, ox = (float) qx / 8.0f, oy = (float) qy / 8.0f;
+    /* the viewport the SVG is laid out in (Blink's unsnapped concrete object size): qw x qh unless fitted */
+    const int qcw = view_w > 0.0f && view_w <= 4000.0f && view_h > 0.0f && view_h <= 4000.0f ? (int) lrintf(view_w * 8.0f) : qw;
+    const int qch = view_w > 0.0f && view_w <= 4000.0f && view_h > 0.0f && view_h <= 4000.0f ? (int) lrintf(view_h * 8.0f) : qh;
     const int w = (int) ceilf(ox + vw - 1e-4f), h = (int) ceilf(oy + vh - 1e-4f);
 
     ImageSvgTex *victim = &slot->sized[0];
     for (int i = 0; i < IMAGE_SVG_SIZES; i++) {
         ImageSvgTex *t = &slot->sized[i];
-        if (t->tex && t->qw == qw && t->qh == qh && t->qx == qx && t->qy == qy) {
+        if (t->tex && t->qw == qw && t->qh == qh && t->qx == qx && t->qy == qy && t->qcw == qcw && t->qch == qch) {
             t->last_use = ++slot->use_clock;
             *tex_w = t->w;
             *tex_h = t->h;
@@ -1123,7 +1127,7 @@ unsigned image_texture_sized(const ImageEntry *entry, const int nearest, float d
         if (!t->tex || (victim->tex && t->last_use < victim->last_use)) victim = t;
     }
 
-    unsigned char *px = svg_image_rasterize_placed(slot->svg, w, h, vw, vh, ox, oy);
+    unsigned char *px = svg_image_rasterize_fitted(slot->svg, w, h, vw, vh, ox, oy, (float) qcw / 8.0f, (float) qch / 8.0f);
     if (!px) return entry->tex;
     image_premultiply(px, (size_t) w * (size_t) h);
     const unsigned tex = image_upload(px, w, h, 1);
@@ -1136,6 +1140,8 @@ unsigned image_texture_sized(const ImageEntry *entry, const int nearest, float d
     victim->qh = qh;
     victim->qx = qx;
     victim->qy = qy;
+    victim->qcw = qcw;
+    victim->qch = qch;
     victim->tex = tex;
     victim->last_use = ++slot->use_clock;
     *tex_w = w;

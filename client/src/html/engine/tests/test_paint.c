@@ -51,6 +51,7 @@ static ImageEntry g_img_a = {1, 200, 80, 0, 0};   /* map thumb */
 static ImageEntry g_img_b = {2, 128, 128, 0, 0};  /* menu icon */
 static ImageEntry g_img_c = {3, 8, 8, 0, 0};      /* class icon */
 static ImageEntry g_img_fail = {0, 0, 0, 1, 0};
+static ImageEntry g_img_svg = {4, 16, 17, 0, 1};  /* Strike's btn-home.svg: 16 x 17 */
 
 static const char *g_last_image_base;
 
@@ -61,6 +62,7 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
     if (!strcmp(url, "a.png")) return &g_img_a;
     if (!strcmp(url, "b.png")) return &g_img_b;
     if (!strcmp(url, "c.png")) return &g_img_c;
+    if (!strcmp(url, "home.svg")) return &g_img_svg;
     return &g_img_fail;
 }
 
@@ -909,6 +911,39 @@ static void test_replaced(void)
         CHECK_F(it->u.image.uv[2], 1);
         CHECK_F(it->u.image.uv[1], 1);
         CHECK_F(it->u.image.uv[3], 0);
+    }
+}
+
+static void test_svg_fit_unsnapped(void)
+{
+    printf("SVG <img>: laid out in the unsnapped box, drawn into the snapped one (Strike's home icon)\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    /* .frvr-button__return-btns: height 18px, width auto = 18 * 16 / 17 at x 19.5 */
+    Box *img = mk(root, BOX_IMAGE, 19.5f, 7.5f, 18.0f * 16.0f / 17.0f, 18);
+    img->flags |= BOXF_BLOCK_LEVEL;
+    img->src = "home.svg";
+    Box *png = mk(root, BOX_IMAGE, 19.5f, 40.5f, 18.0f * 16.0f / 17.0f, 18);
+    png->flags |= BOXF_BLOCK_LEVEL;
+    png->src = "a.png";
+    Box *whole = mk(root, BOX_IMAGE, 40, 60, 16, 17);
+    whole->flags |= BOXF_BLOCK_LEVEL;
+    whole->src = "home.svg";
+    build(root);
+    const int ops[] = {DL_IMAGE, DL_IMAGE, DL_IMAGE, -1};
+    if (expect_ops("svg fit", &g_dl, ops)) {
+        const DlItem *it = &g_dl.items[0];
+        CHECK(it->u.image.vector != NULL);
+        /* the snapped rect, as every image */
+        CHECK_F(it->u.image.dst.x, 20);
+        CHECK_F(it->u.image.dst.w, 16);
+        CHECK_F(it->u.image.dst.h, 18);
+        /* Blink's container size: the unsnapped content box, where meet keeps the whole 16:17 height */
+        CHECK_F(it->u.image.fit_w, 18.0f * 16.0f / 17.0f);
+        CHECK_F(it->u.image.fit_h, 18);
+        /* a raster image has nothing to lay out; a box already on whole px needs no fit */
+        CHECK(g_dl.items[1].u.image.vector == NULL && g_dl.items[1].u.image.fit_w == 0 && g_dl.items[1].u.image.fit_h == 0);
+        CHECK(g_dl.items[2].u.image.fit_w == 0 && g_dl.items[2].u.image.fit_h == 0);
     }
 }
 
@@ -1819,6 +1854,7 @@ int main(void)
     test_clip_path();
     test_text_shadow();
     test_replaced();
+    test_svg_fit_unsnapped();
     test_widgets();
     test_caching();
     test_fixed_in_nested_context();

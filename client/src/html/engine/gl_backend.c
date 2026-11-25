@@ -958,7 +958,7 @@ static GLuint image_draw_texture(GlBackend *b, const DlItem *it) {
     const float w = roundf(d.w * k / su), h = roundf(d.h * k / sv);
     int tw = 0, th = 0;
     const GLuint tex = b->image_resolver(b->image_resolver_user, it->u.image.vector, it->u.image.nearest, w < 1 ? 1 : w,
-                                         h < 1 ? 1 : h, 0.0f, 0.0f, &tw, &th);
+                                         h < 1 ? 1 : h, 0.0f, 0.0f, 0.0f, 0.0f, &tw, &th);
     return tex ? tex : it->u.image.tex;
 }
 
@@ -976,9 +976,12 @@ static int draw_vector_image(GlBackend *b, const DlItem *it, const uint8_t rgba[
     const float tw = r[2] - r[0], th = r[3] - r[1];
     if (tw <= 0.0f || th <= 0.0f) return 0;   // mirrored transforms: stretched path
     const float ix = floorf(r[0]), iy = floorf(r[1]);
+    // the unsnapped object size at the same device scale: the SVG's own viewport (Blink)
+    const float vw = it->u.image.fit_w > 0.0f ? it->u.image.fit_w * tw / d.w : 0.0f;
+    const float vh = it->u.image.fit_h > 0.0f ? it->u.image.fit_h * th / d.h : 0.0f;
     int w = 0, h = 0;
     const GLuint tex = b->image_resolver(b->image_resolver_user, it->u.image.vector, it->u.image.nearest, tw, th, r[0] - ix,
-                                         r[1] - iy, &w, &h);
+                                         r[1] - iy, vw, vh, &w, &h);
     if (!tex || w <= 0 || h <= 0) return 0;
     // target pixels [ix, ix + w) x [iy, iy + h) back in local space
     const float sx = d.w / tw, sy = d.h / th;

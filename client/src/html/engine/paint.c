@@ -1557,6 +1557,15 @@ static void paint_replaced_content(Painter *p, const Box *b)
     float uv[4];
     object_fit_rect(s->object_fit, snap_rect(p, content), img.w, img.h, &dst, uv);   /* Blink: snapped content rect */
     if (rect_empty(dst)) return;
+    /* Blink lays an SVG image out in its concrete object size (the unsnapped box: preserveAspectRatio
+     * is resolved there) and draws that picture into the snapped rect, stretched by the snap */
+    DlRect fit = dst;
+    float fit_uv[4];
+    if (img.vector) {
+        float ux, uy;
+        pos_rel(p, b, &ux, &uy);
+        object_fit_rect(s->object_fit, content_rect_of(dl_rect(ux, uy, b->w, b->h), b), img.w, img.h, &fit, fit_uv);
+    }
     if (flip_y) { /* a GL render target: v = 1 is its top row */
         uv[1] = 1.0f - uv[1];
         uv[3] = 1.0f - uv[3];
@@ -1573,6 +1582,10 @@ static void paint_replaced_content(Painter *p, const Box *b)
     it.u.image.nearest = (uint8_t) nearest;
     it.u.image.premultiplied = img.premultiplied;
     it.u.image.vector = img.vector;
+    if (img.vector && !rect_empty(fit) && (fabsf(fit.w - dst.w) > 1e-3f || fabsf(fit.h - dst.h) > 1e-3f)) {
+        it.u.image.fit_w = fit.w;
+        it.u.image.fit_h = fit.h;
+    }
     it.u.image.lazy = img.lazy;
     emit(p, &it);
     if (clip) emit_simple(p, DL_POP_CLIP);
