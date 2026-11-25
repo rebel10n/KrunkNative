@@ -43,9 +43,11 @@ void glb_set_text_gamma(GlBackend *b, const uint8_t lut[8][256]);
 // texel-aligned on the target grid from that pixel (like Chrome drawing the
 // vector in place: crisp, no resampling); *tex_w = 0 means a plain texture
 // stretched over dst. The resolver may create textures (binding of the
-// active unit preserved); 0 keeps `tex`.
+// active unit preserved); 0 keeps `tex`. view_w x view_h (device px, 0 = the
+// target size) is the viewport the SVG is laid out in before it is stretched
+// onto the target (DL_IMAGE.fit_w / fit_h: Blink's unsnapped object size).
 typedef unsigned (*GlbImageResolver)(void *user, const void *vector, int nearest, float dev_w, float dev_h, float frac_x,
-                                     float frac_y, int *tex_w, int *tex_h);
+                                     float frac_y, float view_w, float view_h, int *tex_w, int *tex_h);
 void glb_set_image_resolver(GlBackend *b, GlbImageResolver fn, void *user);
 // Lazy rasters (DL_IMAGE.lazy, image.h): the texture of `lazy` for this draw, decoding it
 // first when the caller's per-frame budget allows; 0 skips the draw this frame (it is

@@ -14,6 +14,7 @@
 #if defined(KRUNKNATIVE_HTML_ENGINE) && !defined(__EMSCRIPTEN__)
 
 #include <html_dom.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -722,6 +723,18 @@ float html_dom_offset_height(const HtmlElem e)
     engine_flush_layout(g);
     Box *box = engine_elem_box(g, e);
     return box ? layout_offset_height(box) : 0.0f;
+}
+
+float html_dom_client_height(const HtmlElem e)
+{
+    Engine *g = engine_get();
+    if (!alive(engine_dom(g), e)) return 0.0f;
+    engine_flush_layout(g);
+    const Box *box = engine_elem_box(g, e);
+    if (!box) return 0.0f;
+    /* Element.clientHeight: the padding box minus a horizontal scrollbar, a whole number */
+    const float h = box->h - box->border[0] - box->border[2] - box->scrollbar_h;
+    return h > 0.0f ? roundf(h) : 0.0f;
 }
 
 void html_dom_viewport(float *w, float *h, float *dpr)

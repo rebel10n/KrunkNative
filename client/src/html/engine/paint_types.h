@@ -118,6 +118,8 @@ typedef struct {
             uint8_t premultiplied;  // 1 when the texture already holds premultiplied alpha
             const void *vector;     // SVG source (const ImageEntry *) or NULL: the backend's
                                     // image resolver swaps in a raster of the drawn device size
+            float fit_w, fit_h;     // vector: the unsnapped object size (local units) the SVG is
+                                    // laid out in before being drawn into dst; 0 = dst's size
             const void *lazy;       // lazy raster (const ImageEntry *, image.h) or NULL: `tex` is 0
                                     // and the backend's lazy resolver decodes / looks it up per draw
         } image;

@@ -46,4 +46,11 @@ unsigned char *svg_image_rasterize(const SvgImage *svg, int w, int h);
  * drawing the raster texel-aligned (no resampling blur). */
 unsigned char *svg_image_rasterize_placed(const SvgImage *svg, int out_w, int out_h, float vw, float vh, float ox, float oy);
 
+/* Same, with the SVG laid out in a cw x ch viewport (Blink's concrete object size: the
+ * unsnapped box, device px) and that picture stretched onto the vw x vh one (the
+ * pixel-snapped rect): preserveAspectRatio is resolved against cw x ch. cw / ch <= 0
+ * means vw x vh (svg_image_rasterize_placed). */
+unsigned char *svg_image_rasterize_fitted(const SvgImage *svg, int out_w, int out_h, float vw, float vh, float ox, float oy,
+                                          float cw, float ch);
+
 #endif /* KN_SVG_H */

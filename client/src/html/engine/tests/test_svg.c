@@ -167,6 +167,40 @@ static void test_mapping(void) {
     free(px);
     svg_image_destroy(s);
 
+    /* fitted: Blink lays a 16 x 17 image out in its unsnapped 16.94 x 18 box (meet: the whole height)
+     * and draws that into the 16 x 18 snapped rect. At 2 device px: 32 x 36, laid out in 33.875 x 36.
+     * Placed (meet in 32 x 36) leaves a row empty above and below; fitted covers rows 0 and 35. */
+    s = mk("<svg width=\"16\" height=\"17\" viewBox=\"0 0 16 17\"><rect width=\"16\" height=\"17\" fill=\"#fff\"/></svg>");
+    px = svg_image_rasterize_placed(s, 32, 36, 32, 36, 0, 0);
+    if (px) {
+        CHECK(px_at(px, 32, 16, 0)[3] == 0 && px_at(px, 32, 16, 35)[3] == 0 && px_at(px, 32, 16, 1)[3] == 255);
+        CHECK(px_at(px, 32, 0, 18)[3] == 255 && px_at(px, 32, 31, 18)[3] == 255);
+    } else CHECK(0);
+    free(px);
+    px = svg_image_rasterize_fitted(s, 32, 36, 32, 36, 0, 0, 33.875f, 36);
+    if (px) {
+        CHECK(px_at(px, 32, 16, 0)[3] > 250 && px_at(px, 32, 16, 35)[3] > 250);
+        CHECK(px_at(px, 32, 0, 18)[3] > 250 && px_at(px, 32, 31, 18)[3] > 250); /* stretched across the width */
+    } else CHECK(0);
+    free(px);
+    svg_image_destroy(s);
+    /* a filtered (Figma hard shadow) document goes through the layers with the same stretch */
+    s = mk("<svg width=\"16\" height=\"17\" viewBox=\"0 0 16 17\"><g filter=\"url(#f)\"><rect width=\"16\" height=\"16\" fill=\"#fff\"/></g>"
+           "<defs><filter id=\"f\" x=\"0\" y=\"0\" width=\"16\" height=\"17\" filterUnits=\"userSpaceOnUse\"><feFlood flood-opacity=\"0\" result=\"B\"/>"
+           "<feColorMatrix in=\"SourceAlpha\" type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0\" result=\"hardAlpha\"/>"
+           "<feOffset dy=\"1\"/><feComposite in2=\"hardAlpha\" operator=\"out\"/>"
+           "<feColorMatrix type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0\"/>"
+           "<feBlend mode=\"normal\" in2=\"B\" result=\"e\"/><feBlend mode=\"normal\" in=\"SourceGraphic\" in2=\"e\" result=\"shape\"/></filter></defs></svg>");
+    px = svg_image_rasterize_fitted(s, 32, 36, 32, 36, 0, 0, 33.875f, 36);
+    if (px) {
+        const unsigned char *top = px_at(px, 32, 16, 0), *shadow = px_at(px, 32, 16, 34);
+        CHECK(top[3] > 250 && top[0] > 250);                       /* the white rect from row 0 */
+        CHECK(shadow[3] > 250 && shadow[0] < 5);                    /* its 2 px black shadow at the bottom */
+        CHECK(px_at(px, 32, 31, 10)[3] > 250);                       /* stretched across the width */
+    } else CHECK(0);
+    free(px);
+    svg_image_destroy(s);
+
     CHECK(svg_image_rasterize(NULL, 4, 4) == NULL);
     s = mk("<svg viewBox=\"0 0 1 1\"/>");
     CHECK(svg_image_rasterize(s, 0, 4) == NULL && svg_image_rasterize(s, 5000, 4) == NULL);
@@ -389,6 +423,30 @@ static void test_fx_space(const char *root) {
         CHECK(AT(16, 16)[0] == 255 && AT(16, 16)[3] == 255); /* the source on top */
         CHECK(AT(26, 26)[0] < 30 && AT(26, 26)[3] > 200);    /* the black shadow 2 x 2 = 4 px down-right */
         CHECK(AT(6, 6)[3] == 0);                              /* nothing up-left */
+#undef AT
+        free(px);
+    }
+    svg_image_destroy(s);
+
+    /* the same shadow named in the style attribute (Inkscape's `style="...;filter:url(#f)"`, Strike's
+     * plus-sign.svg / minus-sign.svg), its flood an rgb() colour: Chrome draws it; it used to be ignored */
+    static const char styled[] =
+        "<svg width=\"40\" height=\"40\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\">"
+        "<defs><filter id=\"f\" x=\"-1\" y=\"-1\" width=\"3\" height=\"3\">"
+        "<feFlood flood-color=\"rgb(255,0,0)\" flood-opacity=\"1\" result=\"flood\"/>"
+        "<feComposite in=\"flood\" in2=\"SourceGraphic\" operator=\"in\" result=\"c\"/>"
+        "<feGaussianBlur in=\"c\" stdDeviation=\"0\" result=\"b\"/><feOffset dx=\"-2\" dy=\"2\" result=\"o\"/>"
+        "<feComposite in=\"SourceGraphic\" in2=\"o\" operator=\"over\"/></filter></defs>"
+        "<g transform=\"scale(2)\"><rect x=\"4\" y=\"4\" width=\"8\" height=\"8\" fill=\"#ffffff\""
+        " style=\"stroke:none; filter : url(#f)\"/></g></svg>";
+    s = svg_image_create((const unsigned char *) styled, sizeof styled - 1);
+    px = s ? svg_image_rasterize(s, 40, 40) : NULL;
+    CHECK(px != NULL);
+    if (px) {
+#define AT(x, y) (px + ((y) * 40 + (x)) * 4)
+        CHECK(AT(16, 16)[0] == 255 && AT(16, 16)[1] == 255 && AT(16, 16)[3] == 255); /* the source on top */
+        CHECK(AT(6, 26)[0] > 230 && AT(6, 26)[1] < 30 && AT(6, 26)[3] > 200);        /* the red shadow 4 px down-left */
+        CHECK(AT(26, 6)[3] == 0);                                                     /* nothing up-right */
 #undef AT
         free(px);
     }

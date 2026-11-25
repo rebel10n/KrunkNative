@@ -600,10 +600,10 @@ static unsigned glb_lazy_image_resolver(void *user, const void *lazy, int neares
 
 /* gl_backend: SVG images (DL_IMAGE.vector = their ImageEntry) at device size. */
 static unsigned glb_image_resolver(void *user, const void *vector, int nearest, float dev_w, float dev_h, float frac_x,
-                                   float frac_y, int *tex_w, int *tex_h)
+                                   float frac_y, float view_w, float view_h, int *tex_w, int *tex_h)
 {
     (void)user;
-    return image_texture_sized((const ImageEntry *)vector, nearest, dev_w, dev_h, frac_x, frac_y, tex_w, tex_h);
+    return image_texture_sized((const ImageEntry *)vector, nearest, dev_w, dev_h, frac_x, frac_y, view_w, view_h, tex_w, tex_h);
 }
 
 static int lh_image_size(void *user, const char *url, const char *base, float *w, float *h)

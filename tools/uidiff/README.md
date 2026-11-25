@@ -437,6 +437,7 @@ pixel follows an intended change; pixels that differed for any other reason keep
 | `kn-ranked-sort` | 2026-11-23 | The baseline (a956c0fc3, 2026-10-15) predates 2eef54563, which made the ranked leaderboard sort descending as v10 does: `sortColumn` starts at score / ascending and is toggled once on open (`deob-10.0.7.js:110388-110394`, 110414), so the header shows U+2193 (110432; v10.0.2 `game.js` 108074 / 108099 / 108115 is the same). Only the arrow and the row order changed. |
 | `kn-image-collection`, `kn-image-collection-new` | 2026-11-23 | image_collection.c now draws v10.0.7's own markup and wording (`deob-10.0.7.js:214718-214756`: Image Collection / Add Image, the Backgrounds ... Icons tabs, the Select / Delete tiles with their Custom / Default line, the built-in Midnight Snow, the New Image form) instead of Box Office's own (My Images, kn-alt.css's grid, a stacked form). The whole popup changed, by design; the menu behind it is the old reference's. The regions follow the new popups' boxes. |
 | `kn-editor-ai` | 2026-11-24 | b19dc9ab intentionally put the KN-only panel on the editor's GameFont; `layout_finish_scroll` now clamps against clientHeight, so its empty list no longer scrolls 16 px by its padding. Only the panel (x 1230..1611, y 38..928) was re-rendered. Chromium on the captured DOM at dpr 1 agrees with the native header / sign-in / empty / composer regions to 0.111 / 0.178 / 0.067 / 0.340 %; every pixel outside the panel is the old baseline. |
+| `v10-wallet/skins` (`kn-wallet-skins`) | 2026-11-24 | de0cc50c / 9cabc890 / 479514ea made the Wallet v10.0.7's inventory (one tile per copy, the inventory filter's collapsed "Inventory (12 items)" header, name order), and `ui/css/svelte.css` now carries v10.0.7's svelte-1wcm5z8 block (`deob-10.0.7.js:147437`) instead of v10.0.2's, which had no `.lock-toggle` rule: each tile's lock was a 40 x 33 UA button under the card (tile 161 px tall) instead of the hidden 28 x 28 circle at top 44 / right 8. Only the inventory area (x 176..1102, y 230..609) was taken from the new render; the header, the currency cards and everything outside the modal keep the old pixels (0 differing at fuzz 8 in the header rows). `wallet_item_e2e` checks the lock's box. |
 | `kn-servers-official-mixed` | 2026-11-23 | The empty `#kioStatus` line no longer collapses the gap under the tab strip to 22 px (see the 2026-11-23 triage); only the lobby list moved, 8 CSS px down. |
 | `kn-rent-regions`, `kn-rent-region`, `kn-rent-mine`, `kn-rent-server`, `kn-rent-owned` | 2026-11-23 | rent_servers_ui.c now draws v10.0.7's buyServ markup and wording (`deob-10.0.7.js:219853-219935`): no Box Office "Rent a Server" header, region cards without a thumbnail box, tab 3's Server Region / Time remaining / Rental Duration or Extend Time / Select or Change Game / terms / Server Cost, and the message line and buttons outside the panel. The whole window changed, by design; only the region rect (280,50 720x620) was taken from the new render, every pixel outside it keeps the old reference. |
 | `kpd-replay-bar`, `kpd-replay-vote`, `kpd-replay-case` | 2026-11-24 | Round 13 replaces Box Office's replay wording with v10.0.7's (`deob-10.0.7.js:229603-229844`): RESOLVE / HACKER? / SUSPECT and KPD Demo Review / Copy demo link. Only the changed text and its layout were taken from the new renders. |
@@ -895,3 +896,53 @@ scaled offset was fractional, so the shadow smeared instead of landing on one de
 offset now rounds to a whole device pixel. `strike/customize-controls` back is 2.077 -> 1.913 % (max 2,
 fuzz 8). `strike/item-selection` back / home are 2.319 / 2.156 % and stay skipped. No threshold changed.
 
+
+### Structural failures, round 6 (2026-11-25)
+
+Baseline: this branch at 322685f9 (main 04ee1d54 plus the wallet lock, the Inkscape `style="filter:"`
+and the Customize Controls scale commits), all 256 scenarios with a regions file as four headless shards
+on the devbox's llvmpipe (EGL device 0, Mesa 25.0.7): **842 passed / 43 failed / 62 skipped** of 947
+regions (a scenario-level skip, `pending` or unreachable, counts as one row). The 30 failing scenarios
+again at `UIDIFF_FUZZ_SCALE=1.67` (fuzz +4..8): 208 passed / 0 failed / 14 skipped, so every failure but
+`kn-servers-carousel` is the colour drift described at the top. After the fix below: **844 / 42 / 61**,
+no region from pass to fail and none worse by more than 0.03 points; the 42 again all pass at x1.67.
+
+The known structural leftovers all pass at normal fuzz now: `menu-host-type` window 0.539 %,
+`kn-ranked-sort` rs-arrow 0.000, `kn-tip-spin` cost 0.348, `ranked-shop-flying` flying-number 0.000,
+`seq-end-collect-button@500` collect 1.734, the death screen (`ingame-death*`, every `seq-death` frame),
+`spin-item*` buttons 2.74-4.57, and the Strike thumbnails (`strike/item-selection` items-row,
+default-square; `strike/class-selection` 0.27 / 0.55 / 2.72).
+
+**Fixed**
+- **An SVG `<img>` is laid out in its unsnapped box** (`strike/spin` home 2.107 -> 1.357 %, now passes;
+  `strike/item-selection` home 2.156 -> 1.389 %, no longer skipped; `strike/customize-controls`
+  reset-home 1.114 -> 0.867, back 1.913 -> 1.846; `strike/spin` cost-buttons 6.02 -> 5.84;
+  `seq-end-collect-button` double-xp 0.80 -> 0.70). FRVR's return icons are `btn-home.svg` /
+  `btn-arrow-left.svg` (16 x 17) at `height: 18px`, so the box is 16.94 x 18 and snaps to 16 x 18. Blink
+  sizes the SVG's viewport to the unsnapped concrete object size, resolves `preserveAspectRatio` there
+  (meet keeps the whole 36 device px of height) and draws that picture into the snapped rect (squeezing it
+  to 32 px wide); the capture's house spans rows 16..51. KN resolved meet against the snapped 16 x 18
+  rect: scale 2.0, a 34 px house centred one row lower (rows 17..50). `paint.c` records the unsnapped
+  object size on the DL_IMAGE (`fit_w` / `fit_h`), the GL backend hands it to the image resolver, and
+  `svg_image_rasterize_fitted` resolves the mapping in it and stretches the result onto the target.
+  Tests: `html_paint_test` `test_svg_fit_unsnapped`, `html_svg_test` (a filled rect and a Figma
+  hard-shadow document), both fail before.
+
+**Colour drift, passes at fuzz x1.67** (unchanged causes, see the sections above): the `hub-*` badges /
+editor-badge / nav-buttons (scaled PNGs), every `ingame-*` timer and ammo, `game-updating` credit,
+`popup-survey` popup, `settings-mobile-*` preset-select-buttons, `menu-mobile` header-right, and the
+`#mainLogo` regions (`main-menu`, `menu-mobile*`, `ingame-pause-esc`: the references disagree, left as
+they are). New on this list: `strike/spin` currency 2.126 % and `strike/store` currency-left / -right
+2.014 / 2.293 % (max 2; 0.57 / 0.55 / 0.60 at x1.67). The ticket, KR and `plus-sign.svg` icons sit
+where Chrome's do (ink centroids within 0.1 px, the KR hexagon 0.23 px): nanosvg's edge coverage
+against Skia's.
+
+**Left open**
+- **`kn-servers-carousel`** top-groups 4.234 %, region-groups 3.179 % (max 3; 1.551 / 1.263 at
+  x1.67). Structural but by design: KN's krunk.io / krunker.io tab strip (`servers_ui.c`, the native
+  client's two backends) makes the centred window 78 CSS px taller than v10's, so the list is 22.58
+  device px lower than in the capture and the region's whole-pixel `ref_offset` leaves 0.42 px. The
+  v10-markup render passes at offset 0 (round 2). Not a threshold change and not a reference edit.
+- Skipped, unchanged: `strike/item-selection` back 2.232 % (was 2.319; the slanted frame), the
+  `strike/customize-controls` icons (the capture's images did not load) and the KN-only rows / offline
+  capture gaps whose region notes give the reason.
