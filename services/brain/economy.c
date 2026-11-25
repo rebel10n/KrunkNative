@@ -427,7 +427,7 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
 #define LISTING_ROWS \
     "SELECT l.skin_id AS i, l.skin_id AS s, l.price AS f, l.id AS m, {epoch_ms:l.created_at} AS ss, {epoch_ms:l.created_at} AS ms," \
     " a.username AS p, 1 AS c, l.paint_color AS paint_color, l.paint_shader AS paint_shader, l.wear AS wear,"         \
-    " l.serial AS serial, l.name_tag AS nametag, l.seller_id AS seller_id"                                              \
+    " l.serial AS serial, l.name_tag AS nametag, l.seller_id AS seller_id, l.stats AS stats"                            \
     " FROM market_listings l JOIN accounts a ON a.id = l.seller_id "
 
 /* A refused query (the db will not take it) gets its reply anyway: the page's own reply with no data, so the
@@ -452,17 +452,26 @@ static void market_query(SocialSession *s, MarketCtx *c) {
     } else if (!strcmp(c->sub, "inventory")) {
         /* the stacks (their unpainted units; sid = the store index) and the painted copies (one unit each, sid =
          * the copy id, paint_color / paint_shader set: doc/v10/paint-copy.md). A stack row has no paint. */
-        rc = social_query(s, SQL(.any = "SELECT i.skin_id AS i, i.skin_id AS s, i.count - (SELECT count(*) FROM skin_copies c"
-                                   " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) AS c, i.skin_id AS sid,"
-                                   " NULL AS paint_color, NULL AS paint_shader, NULL AS wear, NULL AS serial, NULL AS nametag"
-                                   " FROM inventory i"
-                                   " WHERE i.account_id = $1 AND i.count > (SELECT count(*) FROM skin_copies c"
-                                   " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id)"
-                                   " UNION ALL SELECT k.skin_id AS i, k.skin_id AS s, 1 AS c, k.copy_id AS sid,"
-                                   " k.paint_color, k.paint_shader, k.wear, k.serial, k.name_tag AS nametag FROM skin_copies k"
-                                   " WHERE k.account_id = $1"
-                                   " ORDER BY i, sid"),
+        /* a copy's stats: its counter skin counts (skin_stats, 0406) as one JSON object, its m[stat] as v10 keeps them
+         * (deob-10.0.7.js:191932, the cards read m: :131335) */
+#define INVENTORY_SQL(AGG)                                                                                          \
+    "SELECT i.skin_id AS i, i.skin_id AS s, i.count - (SELECT count(*) FROM skin_copies c"                           \
+    " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id) AS c, i.skin_id AS sid,"                          \
+    " NULL AS paint_color, NULL AS paint_shader, NULL AS wear, NULL AS serial, NULL AS nametag, NULL AS stats"        \
+    " FROM inventory i"                                                                                             \
+    " WHERE i.account_id = $1 AND i.count > (SELECT count(*) FROM skin_copies c"                                     \
+    " WHERE c.account_id = i.account_id AND c.skin_id = i.skin_id)"                                                  \
+    " UNION ALL SELECT k.skin_id AS i, k.skin_id AS s, 1 AS c, k.copy_id AS sid,"                                    \
+    " k.paint_color, k.paint_shader, k.wear, k.serial, k.name_tag AS nametag,"                                       \
+    " (SELECT " AGG " FROM skin_stats t WHERE t.account_id = k.account_id AND t.skin_id = k.skin_id"                 \
+    " AND t.copy_id = k.copy_id AND t.count > 0) AS stats FROM skin_copies k"                                        \
+    " WHERE k.account_id = $1"                                                                                      \
+    " ORDER BY i, sid"
+        rc = social_query(s, SQL(.pg = INVENTORY_SQL("json_object_agg(t.stat, t.count)::text"),
+                                 .sqlite = INVENTORY_SQL("json_group_object(t.stat, t.count)"),
+                                 .mysql = INVENTORY_SQL("JSON_OBJECTAGG(t.stat, t.count)")),
                      KN_DB_ARGS(me), market_done, c);
+#undef INVENTORY_SQL
     } else if (!strcmp(c->sub, "sales")) {
         rc = social_query(s, SQL(.any = LISTING_ROWS "WHERE l.seller_id = $1 AND l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.id DESC"),
                           KN_DB_ARGS(me), market_done, c);

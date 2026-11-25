@@ -24,6 +24,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 
 try:
     import websockets
@@ -818,7 +820,9 @@ async def copy_counts(url, db):
     deob-10.0.7.js:191932; the item view draws the stats of a listing's m, :106682, :106774): a listing escrows it
     (market_listings.stats, 0407), an unlist gives it back, a sale gives it to the buyer; an offer escrows the sender's
     copy's count (trade_copies.stats), an accept gives both sides' copies' counts across, a cancel gives it back. A stack
-    unit's count stays with the seller's stack (a stack listing has no m)."""
+    unit's count stays with the seller's stack (a stack listing has no m). The browse rows show it as v10's cards read
+    it, in the copy's m (deob-10.0.7.js:131335): GET /market/listings and the market inventory; so do the trade
+    picker's rows and an offer's units, as v10's trade window carries the copy's m (:111239, :111450-111456)."""
     names = {k: "%s%s" % (k, STAMP) for k in ("cks", "ckb", "ckr")}
     ids = {k: await register(url, n) for k, n in names.items()}
     S, B, R = ids["cks"], ids["ckb"], ids["ckr"]
@@ -833,9 +837,17 @@ async def copy_counts(url, db):
         res = await s.call(("lir", "po"), "li", 4, c1, 7, 1000, op())
         lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
         check(lid and kills_of(db, 4) == [[S, 0, 9]], "a listed copy's 120 kills leave the seller with it: %r %r" % (res, kills_of(db, 4)))
+        row = browse_listing(url, 4, lid)
+        check((row.get("m") or {}).get("kills") == 120, "GET /market/listings: the listed copy's m has its 120 kills: %r" % (row,))
         await s.call(("ulir", "po"), "uli", 4, lid, 7, op())
         c2 = copy_of(db, S, 4)
         check(kills_of(db, 4) == [[S, 0, 9], [S, c2, 120]], "an unlist gives the copy back with its kills: %r" % kills_of(db, 4))
+        page = await s.call("0", "r", "market", "inventory", S, names["cks"], None, 0)
+        rows = [x for x in (page[3] if isinstance(page[3], list) else []) if x.get("i") == 4]
+        copy_row = next((x for x in rows if x.get("sid") == c2), {})
+        stack_row = next((x for x in rows if "sid" not in x), {})
+        check((copy_row.get("m") or {}).get("kills") == 120 and "stats" not in copy_row and not stack_row.get("m"),
+              "the market inventory: copy %d's m has its 120 kills, the stack's row no m: %r" % (c2, rows))
         res = await s.call(("lir", "po"), "li", 4, c2, 7, 1000, op())
         lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
         set_listing_old(db, lid)
@@ -847,6 +859,8 @@ async def copy_counts(url, db):
         # a stack unit: its listing carries no count, the seller's stack keeps it
         res = await s.call(("lir", "po"), "li", 4, 4, 7, 1000, op())
         lid = res[1]["listingId"] if res[0] == "lir" and isinstance(res[1], dict) else 0
+        row = browse_listing(url, 4, lid)
+        check(row.get("marketid") == lid and not row.get("m"), "GET /market/listings: a stack unit's listing has no m: %r" % (row,))
         set_listing_old(db, lid)
         res = await b.call(("br", "po"), "pi", lid, 4, op())
         check(res[0] == "br" and kills_of(db, 4) == [[S, 0, 9], [B, bc, 120]] and not (res[1] or {}).get("m"),
@@ -855,9 +869,24 @@ async def copy_counts(url, db):
         # ---- an offer: the sender's copy escrowed, the receiver's copy read at accept
         sc = give_copy(db, S, 2, 30)
         rc = give_copy(db, R, 3, 5)
+        tok = http_token(url, names["cks"])
+        st, body = http_json(url, "GET", "/trades/inventory/%d" % R, tok)
+        d = (body or {}).get("data") if isinstance(body, dict) else None
+        mine = next((x for x in ((d or {}).get("my_inventory") or []) if x.get("sid") == sc), {})
+        theirs = next((x for x in ((d or {}).get("their_inventory") or []) if x.get("sid") == rc), {})
+        check((mine.get("m") or {}).get("kills") == 30 and (theirs.get("m") or {}).get("kills") == 5 and "stats" not in theirs,
+              "GET /trades/inventory: the picker's copies carry their kills in m (30, 5): %r %r (HTTP %s)" % (mine, theirs, st))
         res = await s.call(("trR", "po"), "ctr", R, [{"i": 2, "c": 1, "iids": [sc]}], [{"i": 3, "c": 1, "iids": [rc]}], "", op())
         trid = res[1]["trid"] if res[0] == "trR" and isinstance(res[1], dict) else 0
         check(trid and kills_of(db, 2) == [], "an offered copy's 30 kills leave the sender with it: %r %r" % (res, kills_of(db, 2)))
+        st, body = http_json(url, "GET", "/trades/history?offset=0&limit=30&include_open=1", tok)
+        d = (body or {}).get("data") if isinstance(body, dict) else None
+        t = next((x for x in ((d or {}).get("open") or []) if x.get("trid") == trid), {})
+        sold = next((u for u in t.get("sksell") or [] if u.get("sid") == sc), {})
+        bought = next((u for u in t.get("skbuy") or [] if u.get("sid") == rc), {})
+        check((sold.get("m") or {}).get("kills") == 30 and (bought.get("m") or {}).get("kills") == 5,
+              "GET /trades/history: the open offer's units carry the copies' kills in m (30 escrowed, 5 the receiver's): %r"
+              " (HTTP %s)" % (t, st))
         res = await r.call(("trR", "po"), "trA", trid, op())
         check(res[0] == "trR" and kills_of(db, 2) == [[R, copy_of(db, R, 2), 30]] and kills_of(db, 3) == [[S, copy_of(db, S, 3), 5]],
               "an accept moves both copies' kills across: %r %r %r" % (res, kills_of(db, 2), kills_of(db, 3)))
@@ -871,6 +900,38 @@ async def copy_counts(url, db):
     finally:
         for c in (s, b, r):
             await c.__aexit__()
+
+
+def http_json(url, method, path, token=None, body=None):
+    """(status, JSON body) of a request to the brain's HTTP side (the port of the socket url)."""
+    base = url.replace("ws://", "http://").split("/social/")[0]
+    data = json.dumps(body).encode() if body is not None else None
+    headers = {"Content-Type": "application/json"} if data is not None else {}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        return e.code, None
+
+
+def http_token(url, name):
+    """A Bearer token for `name` (POST /auth/login)."""
+    st, body = http_json(url, "POST", "/auth/login", None, {"username": name, "password": "econ_pass1"})
+    body = body if isinstance(body, dict) else {}
+    data = body.get("data") if isinstance(body.get("data"), dict) else {}
+    return body.get("token") or data.get("token")
+
+
+def browse_listing(url, item, lid):
+    """Listing `lid`'s row of GET /market/listings?item_id=`item` (v10_market.c listing_row), {} when it is not there."""
+    base = url.replace("ws://", "http://").split("/social/")[0]
+    with urllib.request.urlopen("%s/market/listings?item_id=%d&limit=100" % (base, item), timeout=10) as r:
+        body = json.loads(r.read())
+    rows = ((body.get("data") or {}) if isinstance(body, dict) else {}).get("listings")
+    return next((x for x in (rows if isinstance(rows, list) else []) if isinstance(x, dict) and x.get("marketid") == lid), {})
 
 
 def set_listing_old(db, lid):
