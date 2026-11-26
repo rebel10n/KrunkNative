@@ -82,7 +82,7 @@ v10 fetches it:
   backoff. Friends list, presence, history, direct messages and read receipts work as in v10.
 * the Clans window's `vcln` / `["cln", 3]` go over the official game socket (account bridge);
   its settings tab reads `/clans/<id>/motd | loot-config | recruitment` over gapi.
-* sent to krunker.io with the account's Bearer (doc/v10/ui-backend-audit.md rows 8, 15, 29, 32, 40): clan
+* sent to krunker.io with the account's Bearer (doc/v10/ui-backend-audit.md rows 8, 15, 29, 32, 40, 50): clan
   apply (the social hub's and Turf Wars' Apply), the Clans window's gapi writes (MOTD, loot config, banner
   colour, logo removal, recruitment) and game-socket writes (create, join, leave, kick, roles, funds,
   Discord, the ownership transfer, the logo upload), Turf Wars take-down, and the market's trades, list,
@@ -96,8 +96,10 @@ v10 fetches it:
   (`/moderation/flag`), New post (`/social/post`), likes (`/social/post/<id>/vote`) and comments
   (`/social/post/<id>/comment`) (deob-10.0.7.js:27219-27225, 27263-27311, 27384-27405). Window 5's
   Remove Friend and the Inbox's Follow Back are FOLLOW_PLAYER `["fo", name, 0 | 1]` on the game socket
-  (deob-10.0.7.js:227034-227047). The profile's Trade button opens nothing in either mode (KrunkNative
-  has no port of v10.0.7's trade popup, svelte-1lqen9w). The Turf Wars popup's reads stay kn_brain's.
+  (deob-10.0.7.js:227034-227047). The profile's Trade (both players level 10 or more, deob-10.0.7.js:112305) pushes
+  v10.0.7's trade popup (svelte-kfskmv with two svelte-1lqen9w sides) over the profile (`v10_market_open_trade`, since
+  2026-11-26): GET `/trades/inventory/<player_id>`, then after its confirm POST `/trades/create {target_player_id,
+  my_offer, their_offer, message}` (deob-10.0.7.js:111489-111566, 111922-111929). The Turf Wars popup's reads stay kn_brain's.
 * the separate hub page (`social_ui.c`, krunker.io's social.html) talks to krunker.io's own social socket, as
   the hub bundle does (since 2026-11-26; hub-10.0.7.js:7020-7110, `client/include/krunker_social.h`):
   `at` = FRVR's fresh token (`krunker_account_frvr_token`), `pat` = `GET <SOCIAL_URI>/ws/ping`'s `token`
@@ -168,6 +170,38 @@ themselves) after v10's confirm, `POST /moderation/flag` (BANNED follows); Verif
 with the session token, not through the social socket's gapi tunnel. The Reports tab (developers and moderators)
 draws v10.0.7's rows: "from NAME", the age ("3d ago" ... "just now"), the reason, the text.
 
+## Trade popup (v10.0.7)
+
+The profile's Trade button (`v10s('trade')`, shown to a signed-in player of level 10 or more on the profile of another
+player of level 10 or more: deob-10.0.7.js:112305, 112536-112538) pushes v10.0.7's trade popup on the view stack with
+`{targetPlayerId: player_id, targetPlayerName: player_name, onClose: popView, onSuccess: popView}` (deob-10.0.7.js:111922-111929).
+The popup is the Create Trade window the Market's Trading tab already draws (`client/src/ui/v10_market.c`
+`create_trade_html`, `ct_side`, `ct_item`): `trade-overlay svelte-kfskmv` with its loading line "Fetching Inventories...",
+two `trade-side svelte-1lqen9w` sides ("Your Inventory", "<name>'s Inventory", the search, "Trade List n/5" or n/20 for
+premium, "Est. Value"), Toggle Missing Items, the 500-character message and Submit Offer (deob-10.0.7.js:111066-111336).
+From a profile it is its own view (`v10_market_open_trade`, `g_ct_alone`): the exchange stays closed, the confirm view
+("Confirm trade offer", deob-10.0.7.js:111496-111504) is pushed over it, and a sent offer pops it, so the profile is on top
+again. A copy's tile has v10.0.7's `#serial` and `wear.toFixed(2)` corners and its `data-wear`, `data-wear-float`,
+`data-seed`, `data-serial` attributes (deob-10.0.7.js:111151-111220); right click is `openSales(i, tile)`. An empty offer
+reads "Submit Offer - 10 KR" (the fee's `|| 10`, deob-10.0.7.js:111362-111369).
+
+| backend | inventories | the offer |
+| --- | --- | --- |
+| krunker.io account | gapi GET `/trades/inventory/<player_id>` -> `{my_inventory, their_inventory}` (`kio_trade_inventories`) | gapi POST `/trades/create` (`kio_create_trade`, `kio_trade_create_body`) |
+| Box Office account | social socket `["ri", name, id]` -> `["trD", name, id, [mine, theirs]]` (services/brain/economy.c `sh_trade_inv`) | `["ctr", receiverId, give, take, message, ...]` -> `["trR", ...]` (`sh_trade_create`) |
+
+Box Office keeps its own path because kn_brain's economy already runs the market's offers over the social socket
+(escrow, fees, the "trade" notes to the other player); the popup is the same window for both.
+
+The live trade of Trade mode (doc/v10/trade.md) is separate: its packets (`strd`, `trd`, `utrd`, `utrdc`, `atrd`, `dtrd`,
+`ctrd`, `tct` out; `trd`, `utrd`, `utrdc`, `atrd`, `tch` in) run on the game socket through
+`client/src/net/krunker_link_trade.c` on an official lobby and through server_bin on Box Office.
+
+Tests: `server/tests/krunker_social_e2e.py` (`make kio-social-e2e`; krunker.io stubs: the popup over the profile, the
+inventory GET and the create POST with the Bearer), `services/brain/tests/v10_social_e2e.py` (kn_brain: the offer lands in `trades`),
+`client/tests/krunker_link_test.c` `test_trade` (every live-trade frame both ways), `server/tests/kio_market_e2e.py`
+(the Market's own Create Trade).
+
 ## Giveaways (0112_social_v10)
 
 `POST /social/post {type: 9, text, funds}`: level 20, at least 10 KR, the author pays funds +
@@ -182,8 +216,7 @@ back to the author. News: `accounts.news` (HTML strings).
   the clan view its shield placeholder, and the DM emoji panel never has candidates (`:` is inserted).
 * Profile: match history shows v10's empty state, and so do raid stats on Box Office
   accounts (no raids recorded; titles come only from the Black Market); the sales chart is a bar strip instead of v10's
-  canvas line chart (a bar per day of the window, zero-filled, the day's "DD Mon YY" label on hover); Trade dispatches
-  `openTrade` (the economy's flow). The 39 badges v10.0.3 added after v7.1.4's 29 have their icons in
+  canvas line chart (a bar per day of the window, zero-filled, the day's "DD Mon YY" label on hover). The 39 badges v10.0.3 added after v7.1.4's 29 have their icons in
   the page tree (`ui/img/badges`, v10: the asset host's `textures/badges`). Game and mod cards open the
   hub's map / mod pages instead of v10's Svelte ones (`svelte-1kkpw01` / `svelte-1v2j2f2`, not
   ported). Box Office games and assets

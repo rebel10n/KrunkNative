@@ -844,6 +844,10 @@ kio-clan-e2e: build ## The Clans window and Turf Wars Recruitment on an official
 kio-market-e2e: build ## The Market, lottery and Studios on an official krunker.io game (v10_market.c, v10_misc_popups.c, v10_studios.c): Browse, Stats, History, Listing Details, the item page's sales and a Black Market buy, a lottery entry and the studio list from krunker.io's gapi (signed in; krunker.io stubs, headless)
 	timeout 400 $(PYTHON) -I server/tests/kio_market_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-social-e2e
+kio-social-e2e: build ## The Social hub, profiles and clans as the active account backend's (v10_social.c): Box Office's kn_brain, then krunker.io's gapi and event bus with the Bearer, the profile's writes (Follow, Gift KR, Report, the Trade popup's GET /trades/inventory and POST /trades/create) as v10.0.7 sends them (krunker.io stubs, scratch kn_brain, headless)
+	timeout 400 $(PYTHON) -I server/tests/krunker_social_e2e.py $(DEBUG_DIR)
+
 .PHONY: ranked-krunker-e2e
 ranked-krunker-e2e: build ## Ranked on a krunker.io account (krunker_ranked.h): v10's paths with Bearer, the queue socket (QUEUED, MATCHED, COOLDOWN), KrunkNative's brain untouched, krunker.io wins when both are signed in (fake krunker.io, scratch kn_brain, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/ranked_krunker_e2e.py $(DEBUG_DIR)
@@ -1329,7 +1333,7 @@ E2E_DEBUG_TARGETS := strike-app-test viewer-diff frame-yield-test offline-dead-t
 	console-settings-test crash-capture-test raw-mouse-test chat-globe-test bhop-setting-test \
 	fps-uncapped-test strike-vsync-test window-icon-test test-net krunker-official-e2e \
 	krunker-account-e2e krunker-challenges-e2e account-unify-e2e kio-spin-battlepass-e2e \
-	kio-battlepass-e2e kio-hub-social-e2e kio-store-e2e kio-turf-e2e kio-clan-e2e kio-market-e2e ranked-krunker-e2e target-select-e2e \
+	kio-battlepass-e2e kio-hub-social-e2e kio-store-e2e kio-turf-e2e kio-clan-e2e kio-market-e2e kio-social-e2e ranked-krunker-e2e target-select-e2e \
 	bots-chat-e2e command-auth-e2e live-signin-e2e votekick-e2e playerlist-ui-e2e row-centre-e2e \
 	billboard-e2e idle-kick-e2e join-spawn-e2e nuke-e2e ruleset-e2e v10-settings-e2e settings-wiring-e2e \
 	pickup-chat-e2e junk-wallet-e2e v10-rewards-e2e reconnect-test mm-token-e2e server-tabs-e2e \

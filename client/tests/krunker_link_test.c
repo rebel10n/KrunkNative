@@ -9,6 +9,7 @@
 #include <krunker_maps.h>
 #include <auth_join.h>
 #include <net_ext.h>
+#include <live_trade.h> // test_trade: the NET_EXT_TRADE_* bodies
 #include <bot_debug.h>
 #include <ruleset.h>
 #include <zombies.h>
@@ -1681,6 +1682,185 @@ static int find_ext(const uint16_t subtype, const int nth, uint16_t *len) {
         if (ext_body(k, subtype, len) && n++ == nth) return k;
     }
     return -1;
+}
+
+// the JSON of the nth chunked trade EXT (NET_EXT_TRADE_OPEN / _RESULT, one part here) and its header's uid
+static cJSON *trade_chunk_json(const uint16_t subtype, const int nth, int *uid) {
+    uint16_t len = 0;
+    const int k = find_ext(subtype, nth, &len);
+    const uint8_t *b = k >= 0 ? ext_body(k, subtype, &len) : NULL;
+    if (!b || len < sizeof(NetTradeChunkHeader)) return NULL;
+    NetTradeChunkHeader h;
+    memcpy(&h, b, sizeof(h));
+    if (h.part != 0 || h.parts != 1) return NULL;
+    *uid = h.uid;
+    return cJSON_ParseWithLength((const char *) b + sizeof(h), len - sizeof(h));
+}
+
+static int trade_send(KrunkerLink *link, const uint16_t subtype, const void *body, const uint16_t length) {
+    uint8_t ext[NET_EXT_HEADER_SIZE + 256];
+    const uint16_t n = net_ext_pack(ext, sizeof(ext), subtype, body, length);
+    return n ? krunker_link_send_ours(link, NET_PACKET_EXT, ext, n) : -1;
+}
+
+// Trade mode's live trade on an official lobby (krunker_link_trade.c): v10.0.7's S2C handlers (TRADE_RESPONSE iiïìiïî,
+// UPDATE_TRADE_RESPONSE iiìíïîì, UPDATE_TRADE_CURRENCY_RESPONSE iìíìiìï, TRADE_A_RESPONSE iïiiiîi at deob-10.0.7.js:223355-223404,
+// ADD_TRADE_CHAT iììîîïi at :228000; the table at :229331) and the window's sends (TRADE_UPDATE :221923-221994, TRADE_CANCEL
+// :222026, TRADE_ACCEPT :222034, TRADE_DECLINE :222040, TRADE_CURRENCY_UPDATE :222068-222078, INIT_TRADE :223621,
+// SEND_TRADE_REQUEST :224014, TRADE_CHAT :228335)
+static void test_trade(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 3);
+    KrunkerValue add[2 * 53];
+    for (int i = 0; i < 2 * 53; i++) add[i] = KRUNKER_V_NIL;
+    add[0] = KRUNKER_V_STR("sockA"); add[1] = KRUNKER_V_NUM(9); add[8] = KRUNKER_V_NUM(100);
+    add[53] = KRUNKER_V_STR("sockB"); add[54] = KRUNKER_V_NUM(7); add[61] = KRUNKER_V_NUM(100);
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
+    clear();
+
+    // a request: "ch" [team, name, sid, 3] (addChat type 3) and "trd" [msg, sid, 0] both read "NAME wants to trade"
+    feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_STR("Bob"), KRUNKER_V_NUM(7), KRUNKER_V_NUM(3)}, 4);
+    feed(&link, "trd", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_STR("sockB"), KRUNKER_V_NUM(LIVE_TRADE_RES_REQUEST)}, 3);
+    {
+        NetTradeResponsePacket a, b;
+        memset(&a, 0, sizeof(a));
+        memset(&b, 0, sizeof(b));
+        uint16_t la = 0, lb = 0;
+        const int ka = find_ext(NET_EXT_TRADE_RESPONSE, 0, &la), kb = find_ext(NET_EXT_TRADE_RESPONSE, 1, &lb);
+        const uint8_t *pa = ka >= 0 ? ext_body(ka, NET_EXT_TRADE_RESPONSE, &la) : NULL, *pb = kb >= 0 ? ext_body(kb, NET_EXT_TRADE_RESPONSE, &lb) : NULL;
+        if (pa) memcpy(&a, pa, la < sizeof(a) ? la : sizeof(a));
+        if (pb) memcpy(&b, pb, lb < sizeof(b) ? lb : sizeof(b));
+        CHECK(pa && a.type == LIVE_TRADE_RES_REQUEST && a.uid == 7 && !a.msg[0], "ch kind 3: TRADE_RESPONSE request from sid 7");
+        CHECK(pb && b.type == LIVE_TRADE_RES_REQUEST && b.uid == 7, "trd type 0: the request, the socket id as sid 7");
+        CHECK(!official_chat(0, &(NetOfficialChatHeader) {0}, &(const char *) {""}, &(const char *) {""}), "ch kind 3: no chat line");
+    }
+    clear();
+
+    // "trd" [msg, sid, 1, invs]: the window opens with [mine, theirs]; no message, so no response line
+    {
+        KrunkerValue mine_kv[4] = {KRUNKER_V_STR("i"), KRUNKER_V_NUM(3), KRUNKER_V_STR("c"), KRUNKER_V_NUM(1)};
+        KrunkerValue theirs_kv[6] = {KRUNKER_V_STR("i"), KRUNKER_V_NUM(4), KRUNKER_V_STR("c"), KRUNKER_V_NUM(1),
+                                     KRUNKER_V_STR("id"), KRUNKER_V_NUM(345)};
+        KrunkerValue mine[1] = {KRUNKER_V_MAP(mine_kv, 2)}, theirs[1] = {KRUNKER_V_MAP(theirs_kv, 3)};
+        KrunkerValue invs[2] = {KRUNKER_V_ARRAY(mine, 1), KRUNKER_V_ARRAY(theirs, 1)};
+        feed(&link, "trd", (KrunkerValue[]) {KRUNKER_V_STR(""), KRUNKER_V_STR("sockB"), KRUNKER_V_NUM(LIVE_TRADE_RES_OPEN), KRUNKER_V_ARRAY(invs, 2)}, 4);
+        int uid = -1;
+        cJSON *j = trade_chunk_json(NET_EXT_TRADE_OPEN, 0, &uid);
+        const cJSON *m0 = cJSON_GetArrayItem(cJSON_GetArrayItem(j, 0), 0), *t0 = cJSON_GetArrayItem(cJSON_GetArrayItem(j, 1), 0);
+        CHECK(j && uid == 7 && cJSON_GetArraySize(j) == 2 && cJSON_GetNumberValue(cJSON_GetObjectItem(m0, "i")) == 3 &&
+              cJSON_GetNumberValue(cJSON_GetObjectItem(t0, "id")) == 345, "trd type 1: TRADE_OPEN with the trader and [mine, theirs]");
+        uint16_t len = 0;
+        CHECK(find_ext(NET_EXT_TRADE_RESPONSE, 0, &len) < 0, "trd type 1 without a message: no TRADE_RESPONSE");
+        cJSON_Delete(j);
+    }
+    clear();
+
+    // "trd" types 2 (canceled, with its line), 4 (process: the countdown n in the sid's place), 5 (reset)
+    feed(&link, "trd", (KrunkerValue[]) {KRUNKER_V_STR("Trade Canceled"), KRUNKER_V_STR("sockB"), KRUNKER_V_NUM(LIVE_TRADE_RES_CANCELED)}, 3);
+    feed(&link, "trd", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(2), KRUNKER_V_NUM(LIVE_TRADE_RES_PROCESS)}, 3);
+    feed(&link, "trd", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_STR("sockB"), KRUNKER_V_NUM(LIVE_TRADE_RES_RESET)}, 3);
+    {
+        NetTradeResponsePacket r[3];
+        int ok = 1;
+        for (int i = 0; i < 3; i++) {
+            uint16_t len = 0;
+            const int k = find_ext(NET_EXT_TRADE_RESPONSE, i, &len);
+            const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_TRADE_RESPONSE, &len) : NULL;
+            memset(&r[i], 0, sizeof(r[i]));
+            if (b) memcpy(&r[i], b, len < sizeof(r[i]) ? len : sizeof(r[i]));
+            else ok = 0;
+        }
+        CHECK(ok && r[0].type == LIVE_TRADE_RES_CANCELED && r[0].uid == 7 && !strcmp(r[0].msg, "Trade Canceled"), "trd type 2: canceled, its line");
+        CHECK(ok && r[1].type == LIVE_TRADE_RES_PROCESS && r[1].uid == 2, "trd type 4: process, Loading 2");
+        CHECK(ok && r[2].type == LIVE_TRADE_RES_RESET && r[2].uid == 7, "trd type 5: reset");
+    }
+    clear();
+
+    // "utrd" [ownerId, add, skin, copyId] / "utrdc" [playerId, action, currency, amount]
+    feed(&link, "utrd", (KrunkerValue[]) {KRUNKER_V_STR("sockB"), KRUNKER_V_BOOL(1), KRUNKER_V_NUM(12), KRUNKER_V_NUM(345)}, 4);
+    feed(&link, "utrd", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_BOOL(0), KRUNKER_V_NUM(3), KRUNKER_V_NUM(0)}, 4);
+    feed(&link, "utrdc", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_NUM(LIVE_TRADE_CUR_ADD), KRUNKER_V_NUM(LIVE_TRADE_CURRENCY_KR), KRUNKER_V_NUM(50)}, 4);
+    {
+        NetTradeItemPacket a, b;
+        NetTradeCurrencyStatePacket c;
+        uint16_t la = 0, lb = 0, lc = 0;
+        const int ka = find_ext(NET_EXT_TRADE_ITEM, 0, &la), kb = find_ext(NET_EXT_TRADE_ITEM, 1, &lb), kc = find_ext(NET_EXT_TRADE_CURRENCY_STATE, 0, &lc);
+        const uint8_t *pa = ka >= 0 ? ext_body(ka, NET_EXT_TRADE_ITEM, &la) : NULL, *pb = kb >= 0 ? ext_body(kb, NET_EXT_TRADE_ITEM, &lb) : NULL;
+        const uint8_t *pc = kc >= 0 ? ext_body(kc, NET_EXT_TRADE_CURRENCY_STATE, &lc) : NULL;
+        if (pa && la == sizeof(a)) memcpy(&a, pa, sizeof(a)); else pa = NULL;
+        if (pb && lb == sizeof(b)) memcpy(&b, pb, sizeof(b)); else pb = NULL;
+        if (pc && lc == sizeof(c)) memcpy(&c, pc, sizeof(c)); else pc = NULL;
+        CHECK(pa && a.owner_uid == 7 && a.add && a.skin == 12 && a.copy == 345, "utrd: sid 7 added copy 345 of skin 12");
+        CHECK(pb && b.owner_uid == 9 && !b.add && b.skin == 3 && b.copy == 0, "utrd: our own unit of skin 3 removed");
+        CHECK(pc && c.owner_uid == 9 && c.action == LIVE_TRADE_CUR_ADD && c.currency == LIVE_TRADE_CURRENCY_KR && c.amount == 50, "utrdc: 50 KR on our side");
+    }
+    clear();
+
+    // "atrd" [error, funds, removed, added, meta] and "tch" [name, msg, type, color]
+    {
+        KrunkerValue removed[1] = {KRUNKER_V_STR("3")}, added[1] = {KRUNKER_V_STR("4:99")};
+        KrunkerValue paint_kv[2] = {KRUNKER_V_STR("paint"), KRUNKER_V_STR("#ff0000")};
+        KrunkerValue meta_kv[2] = {KRUNKER_V_STR("99"), KRUNKER_V_MAP(paint_kv, 1)};
+        feed(&link, "atrd", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(4000), KRUNKER_V_ARRAY(removed, 1), KRUNKER_V_ARRAY(added, 1),
+                                              KRUNKER_V_MAP(meta_kv, 1)}, 5);
+        feed(&link, "tch", (KrunkerValue[]) {KRUNKER_V_STR("Bob"), KRUNKER_V_STR("deal?"), KRUNKER_V_NUM(0), KRUNKER_V_STR("#fff")}, 4);
+        int uid = -1;
+        cJSON *j = trade_chunk_json(NET_EXT_TRADE_RESULT, 0, &uid);
+        CHECK(j && uid == 0 && cJSON_IsNull(cJSON_GetArrayItem(j, 0)) && cJSON_GetNumberValue(cJSON_GetArrayItem(j, 1)) == 4000 &&
+              !strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(cJSON_GetArrayItem(j, 3), 0)) ? cJSON_GetStringValue(cJSON_GetArrayItem(cJSON_GetArrayItem(j, 3), 0)) : "", "4:99") &&
+              !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetArrayItem(j, 4), "99"), "paint")) ? cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetArrayItem(j, 4), "99"), "paint")) : "", "#ff0000"),
+              "atrd: TRADE_RESULT [null, 4000, [\"3\"], [\"4:99\"], {99: {paint}}]");
+        cJSON_Delete(j);
+        NetTradeChatLinePacket t;
+        uint16_t len = 0;
+        const int k = find_ext(NET_EXT_TRADE_CHAT_LINE, 0, &len);
+        const uint8_t *b = k >= 0 ? ext_body(k, NET_EXT_TRADE_CHAT_LINE, &len) : NULL;
+        if (b && len == sizeof(t)) memcpy(&t, b, sizeof(t)); else b = NULL;
+        CHECK(b && !strcmp(t.name, "Bob") && !strcmp(t.msg, "deal?") && t.type == 0 && !strcmp(t.color, "#fff"), "tch: TRADE_CHAT_LINE Bob: deal?");
+    }
+    CHECK(link.unknown_in == 0, "every trade packet was handled (%u unknown)", link.unknown_in);
+    clear();
+
+    // outbound: the window's sends, as v10.0.7 writes them
+    {
+        const NetTradeRequestPacket req = {7}, nobody = {99};
+        const NetTradeInitPacket init = {7, 1};
+        const NetTradeUpdatePacket up = {12, LIVE_TRADE_ITEM_ADD, 345};
+        const NetTradeCurrencyPacket cur = {LIVE_TRADE_CURRENCY_KR, LIVE_TRADE_CUR_REQUEST, 50};
+        CHECK(trade_send(&link, NET_EXT_TRADE_REQUEST, &req, sizeof(req)) == 1 && g_out_count == 1 && !strcmp(g_out[0].name, "strd") &&
+              g_out[0].argc == 1 && !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 0)) ? krunker_str(krunker_frame_arg(&g_out[0], 0)) : "", "sockB"),
+              "TRADE_REQUEST sid 7 -> [\"strd\", \"sockB\"] (the socket id)");
+        clear();
+        CHECK(trade_send(&link, NET_EXT_TRADE_REQUEST, &nobody, sizeof(nobody)) == 0 && g_out_count == 0, "TRADE_REQUEST of an unknown sid: nothing sent");
+        clear();
+        trade_send(&link, NET_EXT_TRADE_INIT, &init, sizeof(init));
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "trd") && fnum(&g_out[0], 0) == 7 && fnum(&g_out[0], 1) == 1, "TRADE_INIT -> [\"trd\", 7, 1]");
+        clear();
+        trade_send(&link, NET_EXT_TRADE_UPDATE, &up, sizeof(up));
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "utrd") && fnum(&g_out[0], 0) == 12 && fnum(&g_out[0], 1) == LIVE_TRADE_ITEM_ADD &&
+              fnum(&g_out[0], 2) == 345, "TRADE_UPDATE -> [\"utrd\", 12, 1, 345]");
+        clear();
+        trade_send(&link, NET_EXT_TRADE_CURRENCY, &cur, sizeof(cur));
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "utrdc") && fnum(&g_out[0], 0) == LIVE_TRADE_CURRENCY_KR &&
+              fnum(&g_out[0], 1) == LIVE_TRADE_CUR_REQUEST && fnum(&g_out[0], 2) == 50, "TRADE_CURRENCY -> [\"utrdc\", 1, 3, 50]");
+        clear();
+        const struct { uint16_t subtype; const char *wire; } bare[] = {
+            {NET_EXT_TRADE_ACCEPT, "atrd"}, {NET_EXT_TRADE_DECLINE, "dtrd"}, {NET_EXT_TRADE_CANCEL, "ctrd"}};
+        for (size_t i = 0; i < sizeof(bare) / sizeof(bare[0]); i++) {
+            trade_send(&link, bare[i].subtype, NULL, 0);
+            CHECK(g_out_count == 1 && !strcmp(g_out[0].name, bare[i].wire) && g_out[0].argc == 0, "%s: no arguments", bare[i].wire);
+            clear();
+        }
+        trade_send(&link, NET_EXT_TRADE_CHAT, "deal", 5);
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "tct") && !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 0)) ? krunker_str(krunker_frame_arg(&g_out[0], 0)) : "", "deal"),
+              "TRADE_CHAT -> [\"tct\", \"deal\"]");
+        clear();
+        CHECK(trade_send(&link, NET_EXT_TRADE_CHAT, "", 1) == 0 && g_out_count == 0, "an empty TRADE_CHAT: nothing sent (tradeChatInput.value != '')");
+        clear();
+    }
 }
 
 static void test_rounds(void) {
@@ -4211,6 +4391,7 @@ int main(void) {
     test_actions();
     test_hitreg();
     test_social();
+    test_trade();
     test_voice();
 
     { // a live build (krunker_build_live.h): its packet names, AHKEY, strides, offsets and argument positions

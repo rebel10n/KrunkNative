@@ -3091,7 +3091,7 @@ static void sb_profile(StrBuf *sb, View *v) {
     sb_append(sb, " ");
     if (other) {
         if (a->level >= 10 && lvl >= 10)
-            sb_append(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" onclick=\"v10s('trade')\"><i class=\"material-icons svelte-1hghrmf\">swap_horiz</i> <span>Trade</span></button>");
+            sb_append(sb, "<button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileTrade\" onclick=\"v10s('trade')\"><i class=\"material-icons svelte-1hghrmf\">swap_horiz</i> <span>Trade</span></button>");
         sb_append(sb, " <button class=\"profile-detail-action svelte-1hghrmf\" type=\"button\" id=\"v10sProfileGift\" onclick=\"v10s('gift')\"><i class=\"material-icons svelte-1hghrmf\">card_giftcard</i> <span>Gift KR</span></button>");
     }
     sb_append(sb, " ");
@@ -4786,10 +4786,10 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     } else if (!strcmp(op, "frow") && v && v->type == V_FOLLOWS) {
         follow_row(v, arg_str(args, argc, 1));
     } else if (!strcmp(op, "trade") && v && v->type == V_PROFILE && v->data) {
-        // v10 pushes its trade popup (_36706); KrunkNative's trade flow is the economy's (store_ui / hub)
-        char name_arg[80];
-        snprintf(name_arg, sizeof(name_arg), "%s", jstr(v->data, "player_name"));
-        html_ui_dispatch("openTrade", ev, (HtmlArg[]) {{HTML_ARG_STR, 0, name_arg}}, 1);
+        // the trade popup pushed over the profile with {targetPlayerId, targetPlayerName} (deob-10.0.7.js:111922-111929)
+        char who[64];
+        snprintf(who, sizeof(who), "%s", jstr(v->data, "player_name"));
+        v10_market_open_trade((int) jnum(v->data, "player_id"), who);
     } else if (!strcmp(op, "gift") && v && v->type == V_PROFILE && v->data) {
         char who[64];
         snprintf(who, sizeof(who), "%s", jstr(v->data, "player_name"));

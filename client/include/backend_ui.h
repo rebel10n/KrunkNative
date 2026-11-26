@@ -170,6 +170,8 @@ struct cJSON;
 // seed} from the element's data-* attributes: the page's instance overlay, deob-10.0.7.js:223620-223650), or for the
 // item itself (instance NULL)
 void v10_market_open_item(int index, const struct cJSON *instance);
+// a player profile's Trade: v10.0.7's Create Trade popup (svelte-kfskmv) pushed over the profile (deob-10.0.7.js:111922-111929)
+void v10_market_open_trade(int player_id, const char *name);
 void v10_market_wallet_release(void);         // the Wallet closed: its market views go with it
 int  v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void v10_market_menu_setup(void);           // the v10 page's #menuBtnMarket item + the social listener

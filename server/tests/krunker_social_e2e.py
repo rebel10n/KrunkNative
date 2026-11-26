@@ -19,8 +19,9 @@ A real kn_brain (scratch sqlite database) with one account, krunker_account_e2e.
   2. an official game, signed in to krunker.io: the friends tab lists the event bus's friends (the
      socket carried the account's fresh token), a conversation loads its history, a profile and a
      clan view show the gapi stub's krunker.io data (Bearer token), with Follow / Gift KR / Report and
-     v10's Request to Join; Follow, a gift and a report reach the gapi stub as v10.0.7's POSTs, and
-     Remove Friend sends "fo" on the game socket
+     v10's Request to Join; Follow, a gift and a report reach the gapi stub as v10.0.7's POSTs, the
+     profile's Trade pushes v10.0.7's trade popup over the profile (GET /trades/inventory/<id>, the
+     confirm, POST /trades/create, then the profile again), and Remove Friend sends "fo" on the game socket
   3. leaving the game: the friends tab and a profile are Box Office's again, no krunker.io request
 Exit 0 when every check passed, 77 when it cannot run.
 """
@@ -45,6 +46,14 @@ import kn_proto  # noqa: E402
 import krunker_account_e2e as kae  # noqa: E402  (its stubs; its own WORK dir is removed below)
 
 shutil.rmtree(kae.WORK, ignore_errors=True)
+# the profile's Trade shows only when both players are level 10 or more (deob-10.0.7.js:112305, the button at :112536-112538):
+# the account is level 12 here (floor(0.03 * sqrt(160000))), FRIEND_A level 11
+kae.SCORE = 160000
+FRIEND_ID = 9001
+# the Trade popup's reads and write (trades.getInventory / createTrade, deob-10.0.7.js:27173-27198): kae.Stub answers them
+kae.GAPI_READS["/api/trades/inventory/%d" % FRIEND_ID] = {"my_inventory": [{"i": kae.INV_STACK, "st": 1, "sid": kae.INV_STACK_KID, "cnt": 3}],
+                                                         "their_inventory": [{"i": kae.INV_COPY, "st": 0, "sid": kae.THEIR_COPY_KID,
+                                                                              "m": {"serial": 77, "wear": 0.1234}}]}
 BUILD = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug")
 ROOT = os.getcwd()
 DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "sqlite")
@@ -65,7 +74,7 @@ FRIENDS = [
 ]
 HISTORY = [{"id": 54, "from": 9001, "text": "history line from alpha", "ts": NOW_MS - 120000},
            {"id": 55, "from": kae.ACCOUNT_ID, "text": "my reply on krunker.io", "ts": NOW_MS - 60000}]
-PROFILE = {"player_id": 9001, "player_name": FRIEND_A, "player_clan": CLAN, "player_region": 2, "player_datenew": "2021-10-04 13:04:26",
+PROFILE = {"player_id": FRIEND_ID, "player_name": FRIEND_A, "player_clan": CLAN, "player_region": 2, "player_datenew": "2021-10-04 13:04:26",
            "player_featured": 0, "player_hack": 0, "player_funds": 1234, "player_skinvalue": 621, "player_elo4": "13.78",
            "player_kills": 4242, "player_deaths": 1000, "player_wins": 48, "player_games_played": 89, "player_score": 150351,
            "player_timeplayed": 14293208, "player_following": 2, "player_followed": 1, "player_stats": {"s": 10782, "h": 4103},
@@ -316,6 +325,25 @@ def script():
           '37900 call v10s "reportsend"',
           "38900 text @kioreportdone .report-success",
           '39000 call v10s "back"',
+          # Trade: v10.0.7's popup pushed over the profile (deob-10.0.7.js:111922-111929), its inventories from
+          # GET /trades/inventory/<id>, one unit each side, Submit, the confirm view, POST /trades/create; onSuccess pops it
+          '39010 call v10s "trade"',
+          "39020 waitfor .trade-sides",
+          "39030 nodes @kiotradepop .view-wrapper .trade-overlay.svelte-kfskmv",
+          "39031 text @kiotradeinv .trade-sides",
+          "39032 nodes @kiotradeprofhidden .view-wrapper [id=v10sProfile]",
+          "39033 text @kiotradeserial .trade-item-serial",
+          "39034 text @kiotradewear .trade-item-wear",
+          "39040 call v10mk.cadd 0 %d 0" % kae.INV_STACK,
+          "39050 call v10mk.cadd 1 %d %d" % (kae.INV_COPY, kae.THEIR_COPY_KID),
+          "39055 text @kiotradesubmit [id=v10mkCtSubmit]",
+          '39056 call v10mk.cmsg "  hi from the profile"',
+          "39060 call v10mk.csubmit",
+          "39062 waitfor .confirm-purchase-header",
+          "39064 text @kiotradeconfirm .confirm-purchase-header",
+          "39066 call v10mk.mok",
+          "39070 waitfor !.trade-overlay",
+          "39080 text @kiotradeback [id=v10sProfile]",
           '39100 call v10s "back"',
           "39200 call clearPops",
           '39300 call deleteFollower "%s" 0' % FRIEND_B,  # window 5's Remove Friend
@@ -420,6 +448,29 @@ def checks(text, stub, front, marks):
     check("2. Report is reportPlayer: POST /players/<name>/report {reason, text}",
           (base + "/report", {"reason": 1, "text": "wallhacks in every round"}) in writes, writes)
     check("2. ... and nothing else was written to krunker.io's gapi", len(writes) == 3, writes)
+    check("2. the profile's Trade pushes v10.0.7's trade popup (svelte-kfskmv) on the view stack, over the hidden profile",
+          nodes(text, "kiotradepop") == 1 and nodes(text, "kiotradeprofhidden") == 1, (nodes(text, "kiotradepop"), nodes(text, "kiotradeprofhidden")))
+    inv = text_of(text, "kiotradeinv")
+    check("2. ... with both sides: Your Inventory and <name>'s Inventory, Trade List 0/5 (the account is not premium)",
+          "Your Inventory" in inv and "%s's Inventory" % FRIEND_A in inv and "Trade List 0/5" in inv, inv[:300])
+    check("2. ... their copy shows its #serial and wear.toFixed(2) (deob-10.0.7.js:111193-111211)",
+          text_of(text, "kiotradeserial") == "#77" and text_of(text, "kiotradewear") == "0.12",
+          (text_of(text, "kiotradeserial"), text_of(text, "kiotradewear")))
+    sub = text_of(text, "kiotradesubmit")
+    check("2. ... Submit Offer carries the rarity fees in KR", sub.startswith("Submit Offer - ") and sub.endswith(" KR"), sub)
+    check("2. ... Submit asks v10.0.7's confirm (Confirm trade offer)", "Confirm trade offer" in text_of(text, "kiotradeconfirm"),
+          text_of(text, "kiotradeconfirm"))
+    inv_reads = stub.find("GET", "/api/trades/inventory/%d" % FRIEND_ID)
+    check("2. ... the inventories are GET /trades/inventory/<player_id> with the Bearer",
+          len(inv_reads) == 1 and inv_reads[0][3].get("authorization") == "Bearer " + stub.access2, [(r[1], r[3].get("authorization", "")[:16]) for r in inv_reads])
+    creates = stub.find("POST", "/api/trades/create")
+    want = {"target_player_id": FRIEND_ID, "my_offer": [{"i": kae.INV_STACK, "c": 1}],
+            "their_offer": [{"i": kae.INV_COPY, "c": 1, "iids": [kae.THEIR_COPY_KID]}], "message": "  hi from the profile"}
+    check("2. ... the confirm POSTs /trades/create {target_player_id, my_offer, their_offer, message} (deob-10.0.7.js:111517)",
+          len(creates) == 1 and creates[0][4] == want and creates[0][3].get("authorization") == "Bearer " + stub.access2,
+          [(r[4], r[3].get("authorization", "")[:16]) for r in creates])
+    check("2. ... then the popup pops and the profile is on top again (onSuccess: popView)", FRIEND_A in text_of(text, "kiotradeback"),
+          text_of(text, "kiotradeback")[:120])
     posts = [g for g in front.gapi if g[0] == "POST"]
     check("2. the writes carried the account's Bearer token", posts and all(g[2] == "Bearer " + stub.access2 for g in posts),
           [(g[1], g[2][:16]) for g in posts])

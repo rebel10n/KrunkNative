@@ -247,6 +247,8 @@ def main():
         cid = q("INSERT INTO clans (clan_name, clan_playerid, clan_score, clan_discord) VALUES ('V10C', ?, 777777, 'abc') RETURNING clan_id", a)[0][0]
         q("INSERT INTO clan_members (account_id, clan_id, rank, score) VALUES (?, ?, 3, 5000)", a, cid)
         q("INSERT INTO follows (follower_id, followee_id) VALUES (?, ?), (?, ?)", a, b, b, a)
+        # the profile's Trade: alice offers her Moon Dragon (4) for carol's Digital Hunt (3)
+        q("INSERT INTO inventory (account_id, skin_id, count) VALUES (?, 4, 2), (?, 3, 1)", a, c)
         q("INSERT INTO chat_messages (sender_id, receiver_id, body) VALUES (?, ?, 'see you in game')", b, a)
         # carol's ranked match (the profile's Match History, P_PROFILE_MATCHES): Alpha 3 - 1, carol on Bravo with alice
         q("INSERT INTO mm_ranked_matches (match_id, queue_id, region, brain_id, status, result, finished_at, season, map_index, mode_index)"
@@ -336,6 +338,28 @@ def main():
         check(q("SELECT reason, details FROM reports WHERE reporter_id = ? AND target_id = ?", a, c)
               == [("Hacking", "carol is using an aimbot in the lobby")], "Report: filed as v10's reason Hacking (rptr true)")
         A.ui("v10s('back')")  # the report view's Done: the profile again
+        # Trade (deob-10.0.7.js:111922-111929): v10.0.7's Create Trade popup pushed over the profile, its inventories from
+        # the economy's ["ri", name, id] ("trD"), the offer sent as ["ctr", ...] after the confirm; onSuccess pops it
+        A.click("v10sProfileTrade")
+        check(A.has("v10mkCtSubmit", 20.0), "the profile's Trade opens the Create Trade popup with both inventories")
+        check(A.count(".view-wrapper .trade-overlay.svelte-kfskmv") == 1 and A.count(".exchangeModal") == 0,
+              "... on the view stack, with the exchange closed")
+        check("%s's Inventory" % names[2] in (A.textof(".trade-sides") or ""), "... the right side is carol's inventory")
+        check(A.click("v10mkCtI0_4") is None and A.has("v10mkCtO0_4", 6.0), "alice's Moon Dragon moves to her trade list")
+        check(A.click("v10mkCtI1_3") is None and A.has("v10mkCtO1_3", 6.0), "carol's Digital Hunt moves to her side")
+        A.click("v10mkCtSubmit")
+        check(A.has("v10mkModalOk", 10.0), "Submit asks for confirmation (the confirm view over the popup)")
+        A.click("v10mkModalOk")
+        trid, end = None, time.time() + 15.0
+        while time.time() < end and not trid:
+            r = q("SELECT id FROM trades WHERE sender_id = ? AND receiver_id = ? AND status = 'open'", a, c)
+            trid = r[0][0] if r else None
+            time.sleep(0.3)
+        check(trid, "the offer reached kn_brain (an open trade alice -> carol)")
+        end = time.time() + 10.0
+        while time.time() < end and A.count(".trade-overlay") != 0:
+            time.sleep(0.3)
+        check(A.count(".trade-overlay") == 0 and A.has("v10sProfileReport", 6.0), "the popup popped: carol's profile is on top again")
         A.click("v10sPtab7")  # Reports (moderators): gapi GET /players/<name>/reports
         check(A.has("v10sReport0"), "the Reports tab lists the report")
         rp = A.textof("v10sReport0") or ""

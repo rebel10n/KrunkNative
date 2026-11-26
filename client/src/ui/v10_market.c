@@ -2742,6 +2742,8 @@ static int ct_offered(const int side, const int skin_index, const int sid) {
         if (M.ct_sel[side][k].i == skin_index && M.ct_sel[side][k].sid == sid) return M.ct_sel[side][k].c;
     return 0;
 }
+// premium: 0; else both sides' rarity fees, 10 when they add up to none (an empty offer reads "Submit Offer - 10 KR",
+// deob-10.0.7.js:111362-111369)
 static int ct_fee(void) {
     const AccountInfo *a = acc();
     if (a && a->premium) return 0;
@@ -2751,7 +2753,7 @@ static int ct_fee(void) {
             const ViewerSkin *s = skin(M.ct_sel[side][k].i);
             if (s) fee += econ_rarity_trade_fee(s->rarity) * M.ct_sel[side][k].c;
         }
-    return fee;
+    return fee ? fee : 10;
 }
 
 // One trade-inv-item (v10.0.3 deob:124685 markup, the rows at 124716-124830): a stack row (count units, sid 0)
@@ -2767,9 +2769,26 @@ static void ct_item(StrBuf *sb, const int side, const int index, const int count
     const int remaining = offer ? count : count - ct_offered(side, index, sid);
     if (sid > 0) snprintf(id, sizeof(id), "v10mkCt%c%d_%d_%d", offer ? 'O' : 'I', side, index, sid);
     else snprintf(id, sizeof(id), "v10mkCt%c%d_%d", offer ? 'O' : 'I', side, index);
-    sb_appendf(sb, "<div class=\"%s svelte-1lqen9w%s%s\" id=\"%s\" role=\"button\" tabindex=\"0\" style=\"border-color: %s;\" data-index=\"%d\" onclick=\"v10mk.%s(%d,%d,%d)\" onmouseenter=\"playTick(0.05)\">",
-               "trade-inv-item", locked ? " locked" : "", !offer && remaining <= 0 && !locked ? " depleted" : "", id,
-               rarity_color(s), index, offer ? "crem" : "cadd", side, index, sid);
+    // a copy's m: data-wear (the tier), data-wear-float, data-seed and data-serial for its tooltip and openSales, and its
+    // "#serial" / wear.toFixed(2) corners (deob-10.0.7.js:111151-111160, 111193-111211, 111214-111220)
+    const cJSON *wear = sid > 0 ? cJSON_GetObjectItemCaseSensitive(meta, "wear") : NULL;
+    const cJSON *serial = sid > 0 ? cJSON_GetObjectItemCaseSensitive(meta, "serial") : NULL;
+    sb_appendf(sb, "<div class=\"%s svelte-1lqen9w%s%s\" id=\"%s\" role=\"button\" tabindex=\"0\"",
+               "trade-inv-item", locked ? " locked" : "", !offer && remaining <= 0 && !locked ? " depleted" : "", id);
+    if (cJSON_IsNumber(wear)) {
+        sb_append(sb, " data-wear=\"");
+        sb_append_esc(sb, wear_tier_name(kio_market_wear_tier(wear->valuedouble)));
+        sb_appendf(sb, "\" data-wear-float=\"%.4f\"", wear->valuedouble);
+    }
+    if (sid > 0) {
+        const cJSON *seed = cJSON_GetObjectItemCaseSensitive(meta, "seed");
+        const int32_t sv = skin_copy_seed(sid, cJSON_IsNumber(seed), cJSON_IsNumber(seed) ? seed->valuedouble : 0.0);
+        if (sv) sb_appendf(sb, " data-seed=\"%d\"", (int) sv);
+    }
+    sb_appendf(sb, " style=\"border-color: %s;\" data-index=\"%d\"", rarity_color(s), index);
+    if (cJSON_IsNumber(serial)) sb_appendf(sb, " data-serial=\"%.15g\"", serial->valuedouble);
+    sb_appendf(sb, " onclick=\"v10mk.%s(%d,%d,%d)\" oncontextmenu=\"openSales(%d,this)\" onmouseenter=\"playTick(0.05)\">",
+               offer ? "crem" : "cadd", side, index, sid, index);
     if (s->type == 4) sb_appendf(sb, "<div class=\"trade-spray-img svelte-1lqen9w\" style=\"background-image: url('%s'); \"></div>", url);
     else {
         sb_appendf(sb, "<img class=\"trade-item-img svelte-1lqen9w%s\" draggable=\"false\" src=\"%s\" alt=\"", (s->flags & VS_RGB) ? " rgbHue" : "", url);
@@ -2783,6 +2802,10 @@ static void ct_item(StrBuf *sb, const int side, const int index, const int count
     paint_badge(sb, meta, 0, 14);
     sb_append(sb, "</div> ");
     if (sid <= 0) sb_appendf(sb, "<div class=\"trade-item-count svelte-1lqen9w\">x%d</div> ", remaining);
+    else {
+        if (cJSON_IsNumber(serial)) sb_appendf(sb, "<div class=\"trade-item-serial svelte-1lqen9w\">#%.15g</div> ", serial->valuedouble);
+        if (cJSON_IsNumber(wear)) sb_appendf(sb, "<div class=\"trade-item-wear svelte-1lqen9w\">%.2f</div> ", wear->valuedouble);
+    }
     if (locked) sb_append(sb, "<div class=\"trade-item-locked svelte-1lqen9w\"><span class=\"material-icons\" style=\"font-size: 30px; color: #fff;\">lock</span></div>");
     sb_append(sb, "</div>");
 }
@@ -3598,9 +3621,13 @@ static int g_view; // ours on the shared stack (VIEW_NONE: none)
 // the Wallet and Inventory's sell and item views (v10_wallet.c) are up with the exchange closed:
 // v10 pushes its Quick Sell and item view over the wallet, not over an exchange
 static int g_standalone;
+// A profile's Trade (v10_market_open_trade) pushed the Create Trade window as a view of its own, with the exchange
+// closed: deob-10.0.7.js:111922-111929 pushes the popup (svelte-kfskmv) on the view stack with onClose / onSuccess =
+// popView. Its confirmation (VIEW_TRADE_CONFIRM) is pushed over it, as v10's confirm is pushed over the popup (:111496).
+static int g_ct_alone, g_ct_view; // the window was opened that way; it is ours on the shared stack
 
 static int view_wanted(void) {
-    if (!M.open && !g_standalone) return VIEW_NONE;
+    if (!M.open && !g_standalone && !g_ct_alone) return VIEW_NONE;
     if (M.modal == MODAL_QS) return VIEW_QS;
     if (M.modal == MODAL_TRADE_CONFIRM) return VIEW_TRADE_CONFIRM;
     if (M.cdetail >= 0) return VIEW_ITEM;
@@ -3629,11 +3656,41 @@ static void view_closed(const int accepted, void *user) {
     render_modal();
 }
 
+static char *ct_view_markup(void) {
+    StrBuf sb = {0};
+    create_trade_html(&sb);
+    return sb_finish(&sb);
+}
+
+// the Create Trade view popped by someone else (clearPops, a view below it popped): the window is closed
+static void ct_view_closed(const int accepted, void *user) {
+    (void) accepted;
+    (void) user;
+    if (!g_ct_view) return; // popped by views_sync itself
+    g_ct_view = g_ct_alone = 0;
+    M.ct_open = M.ct_submitting = 0;
+    if (M.modal == MODAL_TRADE_CONFIRM) M.modal = MODAL_NONE;
+    ct_rows_free();
+}
+
 static void views_sync(void) {
-    const int want = (is_open() || g_standalone) ? view_wanted() : VIEW_NONE;
-    if (g_view != want && g_view != VIEW_NONE) {
+    const int want_ct = g_ct_alone && M.ct_open && !is_open();
+    const int want = (is_open() || g_standalone || g_ct_alone) ? view_wanted() : VIEW_NONE;
+    // ours sits over the Create Trade view: a change to either takes ours off first
+    if (g_view != VIEW_NONE && (g_view != want || want_ct != g_ct_view)) {
         g_view = VIEW_NONE;
         v10_view_pop(0);
+    }
+    if (g_ct_view && !want_ct) {
+        g_ct_view = 0;
+        v10_view_pop(0);
+    }
+    if (!want_ct) g_ct_alone = 0;
+    if (want_ct && !g_ct_view) {
+        g_ct_view = 1;
+        v10_view_push(ct_view_markup(), NULL, ct_view_closed, NULL);
+    } else if (want_ct && g_view == VIEW_NONE) {
+        v10_view_set(ct_view_markup());
     }
     if (want == VIEW_NONE) return;
     if (g_view == want) {
@@ -3805,7 +3862,7 @@ void v10_market_open(int tab, const int item) {
     html_dom_set_attr(pop, "class", "exchangeModal");
     html_dom_set_attr(pop, "style", "");
     html_dom_set_display(pop, "block");
-    g_standalone = 0;
+    g_standalone = g_ct_alone = 0;
     M.open = 1;
     M.mtab = MT_BROWSE;
     snprintf(M.bsort, sizeof(M.bsort), "latest");
@@ -3939,6 +3996,20 @@ static void open_create_trade(const int id, const char *name) {
         snprintf(M.ct_err, sizeof(M.ct_err), "%s", I18N("kn.mk.inventoriesFailed", "Couldn't load the inventories. Try again."));
     }
     render_modal();
+}
+
+// A player profile's Trade (deob-10.0.7.js:111922-111929): the Create Trade popup for {targetPlayerId, targetPlayerName},
+// pushed on the view stack over the profile; onClose and onSuccess pop it, so the profile is on top again. The exchange
+// stays closed. Box Office reads the inventories with ["ri", name, id] on the social socket and sends ["ctr", ...];
+// krunker.io reads GET trades/inventory/<id> and POSTs trades/create (kio_trade_inventories, kio_create_trade).
+static void on_social(void *user, const cJSON *frame);
+
+void v10_market_open_trade(const int player_id, const char *name) {
+    if (!logged_in() || player_id <= 0 || !name || !name[0]) return;
+    if (!M.listening) M.listening = backend_social_listen(on_social, NULL);
+    if (!is_open()) g_ct_alone = 1;
+    if (!kio_store_active() && !g_scenario) send_frame(econ_rules_request()); // tradeMaxOut / tradeMaxOutP for "Trade List 0/5"
+    open_create_trade(player_id, name);
 }
 
 // krunker.io is the active backend: an action not sent to krunker.io (every modal action has a krunker.io path
@@ -4902,7 +4973,7 @@ int v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (strncmp(name, "v10jy.", 6) == 0) return is_open() ? v10_junkyard_handle(name, ev, args, argc) : 1;
     if (strncmp(name, "v10mk.", 6) != 0) return -1;
-    if (!is_open() && !g_standalone) return 1;
+    if (!is_open() && !g_standalone && !g_ct_alone) return 1;
     return handle(name, ev, args, argc);
 }
 
@@ -4931,7 +5002,7 @@ static void reads_expired(void *user) {
         snprintf(M.ct_err, sizeof(M.ct_err), "%s", I18N("kn.mk.inventoriesFailed", "Couldn't load the inventories. Try again."));
         any = 1;
     }
-    if (any && is_open()) render_both();
+    if (any) render_both(); // render_content needs the exchange; render_modal also redraws a profile's Create Trade view
 }
 
 // The active account changed (a login, a logout, the session restored after the exchange opened): what the open
@@ -4975,7 +5046,9 @@ static void on_social(void *user, const cJSON *frame) {
         econ_rules_apply(a1);
         return;
     }
-    if (!is_open()) return;
+    // a profile's Create Trade (g_ct_alone) has no exchange: its inventories, its offer's answer and a refusal still come
+    const int ct_reply = !strcmp(label, "trD") || !strcmp(label, "trR") || !strcmp(label, "po");
+    if (!is_open() && !(g_ct_alone && ct_reply)) return;
     if (!strcmp(label, "fr")) {
         if ((int) cJSON_GetNumberValue(a1) != M.fil_token) return;
         browse_loaded(cJSON_IsArray(a2) ? a2 : NULL);
@@ -5147,7 +5220,7 @@ static void on_social(void *user, const cJSON *frame) {
         } else {
             tnote(0, act == ACT_ACCEPT ? "Failed to accept trade" : act == ACT_DECLINE ? "Failed to decline trade" : "Failed to cancel trade");
         }
-        trades_load();
+        if (is_open()) trades_load(); // a profile's offer (g_ct_alone) has no Trading tab to reload: onSuccess only pops (deob-10.0.7.js:111927)
         render_both();
     } else if (!strcmp(label, "pRes")) { // trCA: "Declined All"
         if (M.pending != ACT_DECLINE_ALL) return;
