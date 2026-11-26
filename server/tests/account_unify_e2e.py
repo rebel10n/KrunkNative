@@ -131,7 +131,9 @@ def window_probe(t, label, window):
             f"{t + 740} nodes @{label}signin [id=knAltSignIn]",
             f"{t + 750} text @{label}name .knAltActive .knAltName",
             f"{t + 760} text @{label}rows [id=playerListH]",
-            f"{t + 770} nodes @{label}punish .punishButton.kick",
+            # the punish popup's button carries the construction icon; our own row's Kick Spec (canGlobalKick, v10
+            # deob-10.0.7.js:221123) shares the "punishButton kick" class without an icon, so it is not counted
+            f"{t + 770} nodes @{label}punish .punishButton.kick .takeAction",
             f"{t + 780} nodes @{label}tp .punishButton.tp2",
             f"{t + 800} call closWind"]
 

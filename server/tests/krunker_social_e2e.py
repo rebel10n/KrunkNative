@@ -17,8 +17,8 @@ A real kn_brain (scratch sqlite database) with one account, krunker_account_e2e.
   1. Box Office: the friends tab is kn_brain's (no krunker.io friends), a profile is kn_brain's
   2. an official game, signed in to krunker.io: the friends tab lists the event bus's friends (the
      socket carried the account's fresh token), a conversation loads its history, a profile and a
-     clan view show the gapi stub's krunker.io data (Bearer token), without Follow / Gift / Report /
-     Request to Join, and a scripted Follow sends nothing
+     clan view show the gapi stub's krunker.io data (Bearer token), without Follow / Gift / Report, with
+     v10's Request to Join, and a scripted Follow sends nothing
   3. leaving the game: the friends tab and a profile are Box Office's again, no krunker.io request
 Exit 0 when every check passed, 77 when it cannot run.
 """
@@ -383,7 +383,8 @@ def checks(text, stub, front, marks):
     clan = text_of(text, "kioclan")
     members = text_of(text, "kiomembers")
     check("2. the clan view shows krunker.io's clan (gapi /clans/by-name/<tag>)", CLAN_OWNER in clan and CLAN_MEMBER in members, (clan[:120], members[:160]))
-    check("2. ... without Request to Join", nodes(text, "kiojoin") == 0, nodes(text, "kiojoin"))
+    # v10's hub shows Request to Join to an account outside the clan; on krunker.io it sends applyToClan (kio_clan_e2e B)
+    check("2. ... with v10's Request to Join (the account is in no clan)", nodes(text, "kiojoin") == 1, nodes(text, "kiojoin"))
     reads = [g for g in front.gapi if g[1] in ("/api/players/" + FRIEND_A, "/api/clans/by-name/" + CLAN)]
     check("2. the gapi reads carried the account's Bearer token", reads and all(g[2] == "Bearer " + stub.access2 for g in reads),
           [(g[1], g[2][:16]) for g in reads])

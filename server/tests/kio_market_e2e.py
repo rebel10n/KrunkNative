@@ -291,7 +291,7 @@ def script():
           # paint the K-35 B copy (local id 1000001, instance 5552) with the first owned paint, Red Paint (x2)
           "29500 call v10mk.paint %d 1000001" % kae.PAINT_ITEM,
           "29510 waitfor .paint-container",
-          "29600 grep @paint_x2 x2 .swatch-count",
+          "29600 grep @paint_x2 2 .swatch-count",  # v10 draws the bare count (deob-10.0.7.js:108718)
           "29610 call paintApply",
           "29620 waitfor !.paint-container",
           # as Styled below: the toast comes with the POST's reply, so look every 200 ms for a second
@@ -303,7 +303,7 @@ def script():
           # the paint was spent: the picker lists one Red Paint now
           "30800 call v10mk.paint %d 1000001" % kae.PAINT_ITEM,
           "30810 waitfor .paint-container",
-          "30900 grep @paint_x1 x1 .swatch-count",
+          "30900 grep @paint_x1 1 .swatch-count",
           "30910 call knViewPop 0",
           "30920 waitfor !.paint-container",
           # style the KrunkCup Jerseys copy (1000002, instance 5553): style 3
@@ -567,7 +567,7 @@ def checks(text, stub):
     check("Paint POSTs /items/<instance>/paint {item_id, paint_item_id} with the Bearer (deob-10.0.7.js:108623-108626)",
           one("/api/items/%d/paint" % kae.PAINT_COPY_KID) == {"item_id": kae.PAINT_ITEM, "paint_item_id": kae.PAINT},
           one("/api/items/%d/paint" % kae.PAINT_COPY_KID))
-    check("... toasts 'Painted K-35 B with Red Paint' and takes the paint off the account (x2, then x1: :108632-108648)",
+    check("... toasts 'Painted K-35 B with Red Paint' and takes the paint off the account (2, then 1: :108632-108648)",
           grep(text, "wpaint") > 0 and grep(text, "paint_x2") > 0 and grep(text, "paint_x1") > 0,
           (grep(text, "wpaint"), grep(text, "paint_x2"), grep(text, "paint_x1")))
     check("Style POSTs /items/<instance>/style {item_id, style} with the Bearer (deob-10.0.7.js:108823-108826) and toasts 'Styled'",
