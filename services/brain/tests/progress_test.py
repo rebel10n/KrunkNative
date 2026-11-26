@@ -257,7 +257,12 @@ async def scenario(port):
             check(chlr and chlr[5] >= 25 and chlr[2] >= 25, "chlR: KR reward and funds: %s" % chlr)
             # v10.0.7's UPDATE_CHALLENGE_REWARDS [skins, funds, junk, jnk, kr, titles, rp, rankedPoints]
             # (deob-10.0.7.js:180855-180902, 215154-215197): challenge 2's REW (set below) has jnk, rp and a title
-            check(chlr and len(chlr) == 9 and chlr[4] == 2.5 and chlr[3] == 2.5, "chlR: the junk won and the balance: %s" % chlr)
+            # plus the junk of any daily the same match completes: the "gp" on Burg completes 0410's "Play 1 Burg Match"
+            # (0.1) on the days it is in the account's rotation
+            extra = sum(float((c.get("REW") or {}).get("jnk", 0)) for c in (chgc[1] if chgc else []) if c["CI"] != 2)
+            want = round(2.5 + extra, 2)
+            check(chlr and len(chlr) == 9 and round(chlr[4], 2) == want and round(chlr[3], 2) == want,
+                  "chlR: the junk won and the balance (%s): %s" % (want, chlr))
             check(chlr and chlr[6] == [90], "chlR: title 90 granted: %s" % (chlr and chlr[6:]))
             check(chlr and chlr[7] == 40 and chlr[8] == 40, "chlR: 40 ranked points won, balance 40: %s" % (chlr and chlr[6:]))
             nb = s.take("nbdgr")
