@@ -9,6 +9,7 @@
 #include <krunker_maps.h>
 #include <auth_join.h>
 #include <net_ext.h>
+#include <bot_debug.h>
 #include <ruleset.h>
 #include <zombies.h>
 #include <social.h>
@@ -4059,6 +4060,41 @@ int main(void) {
         CHECK(!krunker_link_send_ours(&link, NET_PACKET_EXT, buf, kn) && g_out_count == 0, "no pnh for an action other than kick / ban");
         const uint16_t gn = net_ext_pack(buf, sizeof(buf), NET_EXT_ADMIN_ACTION, &gone, sizeof(gone));
         CHECK(!krunker_link_send_ours(&link, NET_PACKET_EXT, buf, gn) && g_out_count == 0, "no pnh for a player we do not know");
+    }
+    {
+        // the DEV row's Bot Debugging (deob-10.0.7.js:224128-224157): botsPopup() is BOT_CONFIG ["bcfg"], a left click
+        // ["bots", code], a right click ["bots", code, false]; BOTS_POPUP's config object comes back as flag bits
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(NetBotDebugPacket)];
+        uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_BOT_CONFIG, NULL, 0);
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && !strcmp(g_out[0].name, "bcfg") && g_out[0].argc == 0,
+              "botsPopup() -> bcfg []");
+        clear();
+        const NetBotDebugPacket left = {.code = 21, .disable = 0}, right = {.code = 5, .disable = 1};
+        n = net_ext_pack(buf, sizeof(buf), NET_EXT_BOT_DEBUG, &left, sizeof(left));
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && !strcmp(g_out[0].name, "bots") && g_out[0].argc == 1 &&
+                  fnum(&g_out[0], 0) == 21,
+              "debugBots(21) -> bots [21]");
+        clear();
+        n = net_ext_pack(buf, sizeof(buf), NET_EXT_BOT_DEBUG, &right, sizeof(right));
+        CHECK(krunker_link_send_ours(&link, NET_PACKET_EXT, buf, n) && g_out_count == 1 && g_out[0].argc == 2 && fnum(&g_out[0], 0) == 5 &&
+                  krunker_is(krunker_frame_arg(&g_out[0], 1), KRUNKER_BOOL) && !krunker_frame_arg(&g_out[0], 1)->u.boolean,
+              "debugBots(5, false) -> bots [5, false]");
+        clear();
+        KrunkerValue kv[][2] = {{KRUNKER_V_STR("followTarget"), KRUNKER_V_BOOL(1)}, {KRUNKER_V_STR("godMode"), KRUNKER_V_BOOL(1)},
+                                {KRUNKER_V_STR("roam"), KRUNKER_V_BOOL(0)},        {KRUNKER_V_STR("slideHop"), KRUNKER_V_NUM(1)}};
+        feed(&link, "bcfg", (KrunkerValue[]) {KRUNKER_V_MAP(&kv[0][0], 4)}, 1);
+        const NetPacket *e = find_in(NET_PACKET_EXT, 0);
+        uint16_t sub = 0, bl = 0;
+        const uint8_t *b = NULL;
+        NetBotConfigPacket cfg = {0};
+        if (e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && bl >= sizeof(cfg)) memcpy(&cfg, b, sizeof(cfg));
+        CHECK(sub == NET_EXT_BOT_CONFIG &&
+                  cfg.flags == ((1u << BOT_DEBUG_FLAG_FOLLOW_TARGET) | (1u << BOT_DEBUG_FLAG_GOD_MODE) | (1u << BOT_DEBUG_FLAG_SLIDE_HOP)),
+              "bcfg {followTarget, godMode, slideHop: 1, roam: false} -> BOT_CONFIG flags (got 0x%x)", cfg.flags);
+        clear();
+        feed(&link, "bcfg", (KrunkerValue[]) {KRUNKER_V_NIL}, 1);
+        CHECK(!find_in(NET_PACKET_EXT, 0), "bcfg [null] draws nothing");
+        clear();
     }
     feed(&link, "vk",(KrunkerValue[]) {KRUNKER_V_STR("Other"), KRUNKER_V_NUM(1), KRUNKER_V_NUM(4), KRUNKER_V_BOOL(1), KRUNKER_V_STR("Me")}, 5);
     {

@@ -50,6 +50,7 @@ void hud_ui_hit(Client*, int kill);
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h>
+#include <bots.h> // BOT_DEBUG_FLAG_*: the DEV Bot Debugging popup
 #include <kio_checkout.h> // kio_checkout_game_init
 #include <bhop_toast.h>
 #include <v10_notify.h> // S5: chat emoji (v10_emoji_append_chat)
@@ -1107,6 +1108,8 @@ static char *hud_plist_rows(void) {
             sb_append(&sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='punishPlayer(null, 2)'>Kick Spec</span>");
         if (dev && me) sb_appendf(&sb, "<span onmouseenter='playTick()' class='punishButton kill' onclick='punishPlayer(\"%d\", 3)'>Kill</span>", me->uid);
         if (dev) sb_append(&sb, "<span onmouseenter='playTick()' class='punishButton tpall' onclick='punishPlayer(null, 9)'>TPAll</span>");
+        // isDev: the Bot Debugging popup (deob-10.0.7.js:221123)
+        if (dev) sb_append(&sb, "<span onmouseenter='playTick()' class='punishButton kick' onclick='botsPopup();'><span class='takeAction material-icons'>smart_toy</span></span>");
         sb_append(&sb, "</td></tr>");
     }
     if (scenario) {
@@ -5525,6 +5528,52 @@ void client_hud_html_tick(Client *client, const float now_f) {
 
 // punishPlayer(id, action) as the list sends it: the server's chat command for the action (kick
 // "/kick", ban "/ban", kill, tp2 / tpme / bring, "/bring all" for 9); the server checks the rights
+// botsPopup(config) (deob-10.0.7.js:224139-224157): genericPopup(..., "confPop") with v10's rows, each toggle "enabled"
+// or "disabled" from the server's config; left click toggles, right click (debugBots(code, false)) turns it off
+void hud_ui_bots_popup(const uint32_t flags) {
+    static const struct {
+        int code, flag;
+        const char *label;
+    } rows[][4] = {
+        {{3, BOT_DEBUG_FLAG_FOLLOW_TARGET, "Follow"}, {4, BOT_DEBUG_FLAG_WATCH_TARGET, "Watch"}, {6, BOT_DEBUG_FLAG_MIMIC_TARGET, "Mimic"}, {9, BOT_DEBUG_FLAG_ATTACK_TARGET, "Attack"}},
+        {{7, BOT_DEBUG_FLAG_TARGET_TEAM, "Target Team"}, {8, BOT_DEBUG_FLAG_TARGET_BOTS, "Target Bots"}, {0, -1, NULL}, {0, -1, NULL}},
+        {{5, BOT_DEBUG_FLAG_SLIDE_HOP, "Bhop"}, {10, BOT_DEBUG_FLAG_FORCE_CROUCH, "Crouch"}, {17, BOT_DEBUG_FLAG_NOD_YES, "Nod Yes"}, {19, BOT_DEBUG_FLAG_ROAM, "Roam"}},
+        {{11, BOT_DEBUG_FLAG_CAN_RESPAWN, "Can Respawn"}, {12, BOT_DEBUG_FLAG_USE_SPAWN_DELAY, "Spawn Delay"}, {0, -1, NULL}, {0, -1, NULL}},
+        {{14, BOT_DEBUG_FLAG_JOIN_MESSAGE, "Join Message"}, {15, BOT_DEBUG_FLAG_LEAVE_MESSAGE, "Leave Message"}, {0, -1, NULL}, {0, -1, NULL}},
+        {{13, BOT_DEBUG_FLAG_REMOVE_ON_DEATH, "Leave on Death"}, {16, BOT_DEBUG_FLAG_VOICE_CHAT, "Voice on Death"}, {0, -1, NULL}, {0, -1, NULL}},
+        {{18, BOT_DEBUG_FLAG_GOD_MODE, "God Mode"}, {0, -1, NULL}, {0, -1, NULL}, {0, -1, NULL}},
+    };
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='color:#fff;font-size: 19px;position:relative;margin-bottom:15px;text-align: center;'>Bot Debugging</div>"
+                   "<div style='color: var(--green);font-size: 13px;position:relative;margin-bottom:15px;text-align: center;'>Left Click Toggle, Right Click Disable</div>");
+    sb_append(&sb, "<div class='takeActionTable'><span onmouseenter='playTick()' class='takeActionBtn kick' onclick='debugBots(0);clearPops();'>Clear All</span>"
+                   "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='debugBots(1);clearPops();'>Spawn 1</span>"
+                   "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='debugBots(21);clearPops();'>Spawn 7</span>"
+                   "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='debugBots(2);clearPops();'>Bring to</span></div>");
+    for (size_t r = 0; r < sizeof(rows) / sizeof(rows[0]); r++) {
+        sb_append(&sb, "<div class='takeActionTable'>");
+        for (int i = 0; i < 4 && rows[r][i].label; i++)
+            sb_appendf(&sb, "<span onmouseenter='playTick()' class='takeActionBtn %s' onclick='debugBots(%d);clearPops();' oncontextmenu='debugBots(%d, false);clearPops();'>%s</span>",
+                       flags & (1u << rows[r][i].flag) ? "enabled" : "disabled", rows[r][i].code, rows[r][i].code, rows[r][i].label);
+        sb_append(&sb, "</div>");
+    }
+    // v10.0.7's last row: Slimer sends 19 (Roam's code) and Juggernaut 20, both plain actions
+    sb_append(&sb, "<div class='takeActionTable'><span onmouseenter='playTick()' class='takeActionBtn kick' onclick='debugBots(19);clearPops();'>Slimer</span>"
+                   "<span onmouseenter='playTick()' class='takeActionBtn kick' onclick='debugBots(20);clearPops();'>Juggernaut</span></div>");
+    sb_append(&sb, "<div style='font-size: 12px;color: var(--yellow);text-align: center;'>Dont forget to clear bots</div>");
+    char *html = sb_finish(&sb);
+    ui_loadout_clear_pops();
+    dom_display("popupHolder", "block");
+    const HtmlElem pop = html_dom_by_id("genericPop");
+    if (pop) {
+        html_dom_set_attr(pop, "class", "confPop");
+        html_dom_set_attr(pop, "style", "");
+        html_dom_set_html(pop, html);
+        html_dom_set_display(pop, "block");
+    }
+    free(html);
+}
+
 static void plist_punish_send(const int uid, const int action) {
     if (action == 2) { // Kick Spec: ADMIN_ACTIONS 2 with a null id (the host or canGlobalKick, deob-10.0.7.js:268431)
         if (menu_ui()->client) hud_votekick_admin_action(menu_ui()->client, 0, 2);
@@ -5820,6 +5869,19 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         }
         free(html);
         if (chat_ban) plist_chat_ban_fetch(uid);
+        return 1;
+    }
+    if (!strcmp(name, "botsPopup") || !strcmp(name, "debugBots")) { // isDev only (deob-10.0.7.js:224128-224144)
+        int dev = 0, kick = 0, host = 0;
+        hud_plist_staff(menu_ui()->client, &dev, &kick, &host);
+        if (!dev || !menu_ui()->client) return 1;
+        if (name[0] == 'b') {
+            hud_votekick_bot_config(menu_ui()->client); // botsPopup() without a config asks BOT_CONFIG; BOTS_POPUP draws it
+        } else if (argc > 0) {
+            const int code = (int) (args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : args[0].num);
+            const int disable = argc > 1 && args[1].kind == HTML_ARG_BOOL && !args[1].num; // debugBots(code, false)
+            hud_votekick_bot_debug(menu_ui()->client, code, disable);
+        }
         return 1;
     }
     if (!strcmp(name, "punishPlayer")) {

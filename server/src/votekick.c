@@ -496,6 +496,23 @@ void votekick_handle_kpd_apply(ClientConnection *client, const uint8_t *body, co
     accounts_kpd_apply(client, req.discord, req.reason);
 }
 
+// The DEV row's Bot Debugging popup (v10.0.7 botsPopup / debugBots, deob-10.0.7.js:224128-224157): BOT_CONFIG is answered
+// with the bot manager's toggles (BOTS_POPUP), BOTS runs a code. The DEV right is checked in the chat command layer; a
+// refused BOT_CONFIG gets no answer (v10 opens nothing), a refused BOTS a Server line.
+void votekick_handle_bots(ClientConnection *client, const uint16_t subtype, const uint8_t *body, const uint16_t length) {
+    if (!client || !client->player) return;
+    if (subtype == NET_EXT_BOT_CONFIG) {
+        NetBotConfigPacket cfg = {0};
+        if (chat_command_bot_flags(net_chat_host(), client->id, &cfg.flags)) vk_send_ext(client, NET_EXT_BOT_CONFIG, &cfg, sizeof(cfg));
+        return;
+    }
+    if (length < sizeof(NetBotDebugPacket)) return;
+    NetBotDebugPacket req;
+    memcpy(&req, body, sizeof(req));
+    if (chat_command_bot_debug(net_chat_host(), client->id, req.code, req.disable != 0))
+        server_log("[bots] %s: debugBots(%d%s)", client->name, req.code, req.disable ? ", false" : "");
+}
+
 // NET_EXT_ADMIN_ACTION (v10 ADMIN_ACTIONS from the player list). The sender's right is checked here from the
 // connection (never from the client's button), then the target is looked up by uid in this game:
 //   - a DEV kicks or bans through the chat command layer, which checks the same right again;

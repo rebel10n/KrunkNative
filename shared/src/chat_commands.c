@@ -645,6 +645,96 @@ int chat_command_admin_action(ChatCommandHost *host, const int sender_id, const 
     return kick_or_ban_one(&c, target, ban, 0);
 }
 
+static void tp_move(Game *game, Player *player, vec3 feet);
+
+// a ChatCtx for one of the server's own packets from sender_id (the DEV gate's reply goes to it)
+static int packet_ctx(ChatCommandHost *host, const int sender_id, const char *command, ChatCtx *c) {
+    if (!host || !host->game || sender_id == CHAT_CMD_CONSOLE) return 0;
+    memset(c, 0, sizeof(*c));
+    c->host = host;
+    c->sender = sender_id;
+    c->command = command;
+    if (peer_by_id(host, sender_id, &c->self)) {
+        c->has_self = 1;
+        c->player = c->self.player;
+    }
+    return allowed(c, CHAT_PERM_DEV);
+}
+
+static int bot_debug_ready(ChatCommandHost *host) { return game_is_authority(host->game) && game_bots(host->game); }
+
+int chat_command_bot_flags(ChatCommandHost *host, const int sender_id, uint32_t *flags) {
+    ChatCtx c;
+    if (!flags || !packet_ctx(host, sender_id, "bcfg", &c) || !bot_debug_ready(host)) return 0;
+    const GameBots *bots = host->game->bots;
+    *flags = bot_debug_flags(&bots->config[bots->type]);
+    if (game_bots_mimic_holder(host->game) >= 0) *flags |= 1u << BOT_DEBUG_FLAG_MIMIC_TARGET;
+    return 1;
+}
+
+// one key=value on the defaults and the live bots, as bot_config does (silent: the popup closes on the click)
+static int bot_debug_set(Game *game, const char *key, const int on) {
+    char arg[48];
+    snprintf(arg, sizeof(arg), "%s=%s", key, on ? "true" : "false");
+    char *argv[1] = {arg};
+    BotAssignments a;
+    bot_parse_assignments(1, argv, &a);
+    if (a.error[0]) return 0;
+    game_bots_configure(game, &a);
+    return 1;
+}
+
+int chat_command_bot_debug(ChatCommandHost *host, const int sender_id, const int code, const int disable) {
+    ChatCtx c;
+    if (!packet_ctx(host, sender_id, "bots", &c)) return 0;
+    if (!bot_debug_ready(host)) {
+        reply(&c, "Bot manager is not installed for this lobby.");
+        return 0;
+    }
+    Game *game = host->game;
+    GameBots *bots = game->bots;
+    const int flag = bot_debug_flag(code);
+    if (flag == BOT_DEBUG_FLAG_MIMIC_TARGET) { // one controller at a time (bot_mimic): on takes it, off releases it
+        const int holder = game_bots_mimic_holder(game);
+        if (!disable && holder != sender_id) game_bots_mimic_take(game, sender_id);
+        else game_bots_mimic_release(game);
+        return 1;
+    }
+    if (flag >= 0) {
+        const uint32_t now = bot_debug_flags(&bots->config[bots->type]);
+        return bot_debug_set(game, bot_debug_key(flag), !disable && !(now & (1u << flag)));
+    }
+    if (disable) return 0; // the actions have no right-click
+    if (code == BOT_DEBUG_CLEAR) {
+        game_bots_remove_all(game);
+        return 1;
+    }
+    if (code == BOT_DEBUG_SPAWN_1 || code == BOT_DEBUG_SPAWN_7) {
+        BotAssignments a;
+        bot_parse_assignments(0, NULL, &a);
+        int spawned = 0;
+        for (int i = 0; i < (code == BOT_DEBUG_SPAWN_7 ? 7 : 1); i++) spawned += game_bots_add(game, &a, NULL, 0.0f) != NULL;
+        if (!spawned) reply(&c, "Bot limit reached (%d).", GAME_BOTS_MAX);
+        return spawned > 0;
+    }
+    if (code == BOT_DEBUG_BRING || code == BOT_DEBUG_JUGGERNAUT) {
+        if (code == BOT_DEBUG_BRING && (!c.player || !c.player->active)) {
+            reply(&c, "Spawn first.");
+            return 0;
+        }
+        int n = 0;
+        for (int i = 0; i < bots->count; i++) {
+            Player *p = bots->list[i].player;
+            if (!p || !p->active) continue;
+            if (code == BOT_DEBUG_BRING) tp_move(game, p, c.player->position);
+            else player_set_juggernaut(p, 1);
+            n++;
+        }
+        return n > 0;
+    }
+    return 0;
+}
+
 static int all_digits(const char *s) {
     if (!*s) return 0;
     for (; *s; s++) if (!isdigit((unsigned char) *s)) return 0;

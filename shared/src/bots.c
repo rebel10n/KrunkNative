@@ -2213,3 +2213,21 @@ void game_bots_tick(Game *game, const float delta) {
         if (bots->list[i].remove) game_bots_remove(game, &bots->list[i]);
     }
 }
+
+// ---- the DEV Bot Debugging popup (bot_debug.h): each toggle's BotConfig byte, in BOT_DEBUG_FLAG_* order
+
+static const size_t k_debug_offset[BOT_DEBUG_FLAG_COUNT] = {
+    offsetof(BotConfig, follow_target), offsetof(BotConfig, watch_target),    offsetof(BotConfig, mimic_target),
+    offsetof(BotConfig, attack_target), offsetof(BotConfig, target_team),     offsetof(BotConfig, target_bots),
+    offsetof(BotConfig, slide_hop),     offsetof(BotConfig, force_crouch),    offsetof(BotConfig, nod_yes),
+    offsetof(BotConfig, roam),          offsetof(BotConfig, can_respawn),     offsetof(BotConfig, use_spawn_delay),
+    offsetof(BotConfig, join_message),  offsetof(BotConfig, leave_message),   offsetof(BotConfig, remove_on_death),
+    offsetof(BotConfig, voice_chat),    offsetof(BotConfig, god_mode),
+};
+
+uint32_t bot_debug_flags(const BotConfig *cfg) {
+    uint32_t bits = 0;
+    for (int i = 0; cfg && i < BOT_DEBUG_FLAG_COUNT; i++)
+        if (((const unsigned char *) cfg)[k_debug_offset[i]]) bits |= 1u << i;
+    return bits;
+}

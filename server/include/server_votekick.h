@@ -43,6 +43,7 @@ void votekick_handle_kpd_list(ClientConnection *client, const uint8_t *body, uin
 void votekick_officer_joined(const ClientConnection *client);
 void votekick_handle_kpd_rate(ClientConnection *client, const uint8_t *body, uint16_t length);
 void votekick_handle_admin(ClientConnection *client, const uint8_t *body, uint16_t length); // NET_EXT_ADMIN_ACTION (DEV kick / ban)
+void votekick_handle_bots(ClientConnection *client, uint16_t subtype, const uint8_t *body, uint16_t length); // NET_EXT_BOT_CONFIG / _DEBUG (DEV)
 void votekick_handle_kpd_apply(ClientConnection *client, const uint8_t *body, uint16_t length); // NET_EXT_KPD_APPLY ("kpdA")
 void votekick_kpd_recorded(int suspect_id, int64_t call_id);
 

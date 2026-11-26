@@ -118,6 +118,13 @@ int chat_command_is_forfeit(const char *text);
 // NET_EXT_ADMIN_ACTION (the player list's Kick / Ban): /kick or /ban (ban 1) of the player with
 // Game uid target_uid, as sender_id. The DEV permission is checked again here. 1 = removed.
 int chat_command_admin_action(ChatCommandHost*, int sender_id, int target_uid, int ban);
+// The DEV row's Bot Debugging popup (NET_EXT_BOT_CONFIG / NET_EXT_BOT_DEBUG, v10.0.7 botsPopup / debugBots): a DEV's
+// only (checked here). chat_command_bot_flags fills the bot manager's toggles (BOT_DEBUG_FLAG_* bits), 0 = refused or
+// no bot manager. chat_command_bot_debug runs one code: a toggle flips its key on the defaults and every live bot
+// (disable: off), Clear All removes every bot, Spawn 1 / Spawn 7 add bots, Bring to moves the spawned bots to the
+// sender, Juggernaut makes them juggernauts; 1 = done. Mimic is bot_mimic's one-controller rule (the sender takes it).
+int chat_command_bot_flags(ChatCommandHost*, int sender_id, uint32_t *flags);
+int chat_command_bot_debug(ChatCommandHost*, int sender_id, int code, int disable);
 // io_prmA(index): the premiumKeys (and KrunkNative's N key, index 0): 0 noclip, 1 god,
 // 2 kill self, 3 smite, gated like /noclip (requirePremiumCheatPerm). The noclip toggle
 // reaches the client as NET_CHEAT_NOCLIP; denials as ["notify", ...].

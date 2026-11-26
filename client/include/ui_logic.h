@@ -415,6 +415,9 @@ void hud_votekick_watch_demo(const char *tok, const char *ct);   // watchDemo: n
 void hud_votekick_copy_demo_link(HtmlElem el, const char *tok, const char *ct); // copyDemoLink: <origin>/?demo=tok&sus=ct
 void hud_votekick_kpd_request(Client*, int tab);  // "kpd" tab 1 / 2 / 3: an officer's list for the K.P.D popup
 void hud_votekick_admin_action(Client*, int uid, int action); // NET_EXT_ADMIN_ACTION: 0 kick, 1 ban (DEV; the server checks)
+void hud_votekick_bot_config(Client*);                         // botsPopup(): NET_EXT_BOT_CONFIG (BOT_CONFIG, DEV; answered BOTS_POPUP)
+void hud_votekick_bot_debug(Client*, int code, int disable);   // debugBots(code[, false]): NET_EXT_BOT_DEBUG (BOTS)
+void hud_ui_bots_popup(uint32_t flags);                        // BOTS_POPUP: v10.0.7 botsPopup(config)'s popup from NET_EXT_BOT_CONFIG
 char *hud_kpd_list_html(int code, int status, const char *message, const char *json, size_t json_len); // policeRes 1 / 2 / 3 table, malloc'd
 int  hud_votekick_handle(Client*, const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // kickVote, confirmPolice, callPolice, copyUser, policeJoin
 void hud_votekick_set_override(const struct cJSON *rows); // --render-scenario state.playerList (hud_ui.c rows from these)

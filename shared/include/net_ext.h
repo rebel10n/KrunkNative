@@ -82,6 +82,8 @@ typedef enum {
     NET_EXT_KPD_APPLY = 0x0808,       // "kpdA" C -> S NetKpdApplyPacket: a K.P.D application (answer: NET_EXT_KPD_RESPONSE code 6)
     NET_EXT_VOTE_FORFEIT_STATE = 0x0809, // "vf" S -> C NetVoteForfeitStatePacket: the ranked forfeit vote (#voteToForfeit)
     NET_EXT_KPD_LIST = 0x080A,        // "kpd" C -> S NetKpdListPacket: the K.P.D window's Demos (tab 4) / Reviewers (tab 5) list
+    NET_EXT_BOT_CONFIG = 0x080B,      // "bcfg" C -> S no body (BOT_CONFIG); S -> C NetBotConfigPacket (BOTS_POPUP): the DEV bot popup
+    NET_EXT_BOT_DEBUG = 0x080C,       // "bots" C -> S NetBotDebugPacket (BOTS: debugBots(code[, false]))
 
     // 0x0900 in-game actions of v10 without a NetPacket id
     NET_EXT_MARK_POSITION = 0x0900, // "mpos" C -> S NetMarkPositionSendPacket / S -> C NetMarkPositionPacket (a ping)
@@ -715,6 +717,18 @@ typedef struct {
     int32_t uid;
     uint8_t action; // 0 kick, 1 ban, 2 kick spectators (uid ignored), 6 freeze that player, 8 transfer host (v10 punishPlayer)
 } NetAdminActionPacket;
+
+// The DEV row's Bot Debugging popup (v10.0.7 botsPopup / debugBots, deob-10.0.7.js:224128-224157). botsPopup() with no
+// config sends NET_EXT_BOT_CONFIG (no body); the server answers with the bot manager's toggles, one bit per
+// BOT_DEBUG_FLAG_* (shared/include/bots.h), and the client draws the popup from them. A button's left click sends
+// NET_EXT_BOT_DEBUG {code, 0} (toggle or act), its right click {code, 1} (debugBots(code, false): off). A DEV's only.
+typedef struct {
+    uint32_t flags;
+} NetBotConfigPacket;
+typedef struct {
+    uint8_t code;    // v10's debugBots code (bot_debug_flag: a toggle, else an action)
+    uint8_t disable; // 1: the right click's `false`
+} NetBotDebugPacket;
 
 // NET_EXT_KPD_RESPONSE (S -> C, v10 "kpd" [code, message, data]): code 0 answers a call
 // (status: NET_KPD_* with the message to show and the suspect's name), code 6 an application

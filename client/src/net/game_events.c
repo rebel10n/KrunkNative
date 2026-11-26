@@ -1516,6 +1516,10 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 memcpy(&data, body, sizeof(data));
                 g_kpd_case = data.sus >= 0; // sus -1: no case
                 hud_votekick_on_kpd_data(client, &data);
+            } else if (subtype == NET_EXT_BOT_CONFIG && body_length >= sizeof(NetBotConfigPacket)) { // BOTS_POPUP: the DEV bot popup
+                NetBotConfigPacket cfg;
+                memcpy(&cfg, body, sizeof(cfg));
+                hud_ui_bots_popup(cfg.flags);
             } else if (subtype == NET_EXT_KPD_RESET) { // "kpdf": the verdict is open again
                 hud_votekick_on_kpd_reset(client);
             } else if (subtype == NET_EXT_KPD_RESPONSE && body_length >= sizeof(NetKpdResponsePacket)) { // "kpd" policeRes

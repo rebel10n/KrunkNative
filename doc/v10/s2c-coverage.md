@@ -174,7 +174,7 @@ Client consumers are in `client/src/net/s2c_events.c`:
 | OPEN_METAMASK_AUTH | `vmm` | :252520 | MetaMask sign-in | irrelevant | web3 |
 | METAMASK_LINK_RESPONSE | `vmms` | :252541 | MetaMask linked | irrelevant | web3 |
 | METAMASK_UNLINK_RESPONSE | `rmm` | :252548 | MetaMask unlinked | irrelevant | web3 |
-| BOTS_POPUP | `bcfg` | window.botsPopup :254234 | developer bot debugging popup | irrelevant | developer only |
+| BOTS_POPUP | `bcfg` | window.botsPopup :254234 | developer bot debugging popup | **ported** | krunker_link.c on_bots_popup turns the config map into `NET_EXT_BOT_CONFIG` flags; KN servers send the same subtype to a DEV |
 | UPDATE_COUNTRY | `cntry` | :242964 | empty handler | irrelevant | nothing to do |
 | DATA_LOADED | `bpdl` | :255599 | battle pass data | by name | `account_scoped` (battlepass_ui.c) |
 | RECIEVE_DOUBLE_XP | `rrqdxp` | :262335 | XP doubled after an ad | irrelevant | ad reward |

@@ -1155,6 +1155,15 @@ void hud_votekick_admin_action(Client *client, const int uid, const int action) 
     send_ext(client, NET_EXT_ADMIN_ACTION, &req, sizeof(req));
 }
 
+// The DEV row's Bot Debugging popup (v10.0.7 botsPopup / debugBots, deob-10.0.7.js:224128-224157)
+void hud_votekick_bot_config(Client *client) { send_ext(client, NET_EXT_BOT_CONFIG, NULL, 0); }
+
+void hud_votekick_bot_debug(Client *client, const int code, const int disable) {
+    if (code < 0 || code > 255) return;
+    NetBotDebugPacket req = {.code = (uint8_t) code, .disable = (uint8_t) (disable != 0)};
+    send_ext(client, NET_EXT_BOT_DEBUG, &req, sizeof(req));
+}
+
 // ---------------------------------------------------------------- the K.P.D officer (kpdData)
 
 int hud_votekick_kpd_sus(const Client *client) {

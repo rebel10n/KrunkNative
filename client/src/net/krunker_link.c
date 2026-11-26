@@ -38,6 +38,7 @@
 #include <voice.h> // the v7 voice framing ("vc" <-> NET_PACKET_VOICE_V7)
 #include <zombies.h> // NET_PACKET_SHARING ("sic")
 #include <net_ext.h> // the player list's vote kick / K.P.D (NET_PACKET_EXT subtypes)
+#include <bot_debug.h> // bot_debug_key: BOTS_POPUP's config keys (on_bots_popup)
 #include <math.h>
 #include <pthread.h> // g_drops_lock (on_skin_reward, krunker_net_take_drop_instance)
 #include <stdarg.h>
@@ -942,6 +943,21 @@ static void emit_ext(KrunkerLink *l, const uint16_t subtype, const void *body, c
 
 // "vk" VOTE_KICK [alias, votes, needed, isNew, voter] (iïiiìíí, game.deob.js:219974): a running
 // vote (isNew: opened by `voter`), or a null alias: the vote ended
+// BOTS_POPUP ["bcfg", config] (botsPopup, deob-10.0.7.js:224139-224157): the config object's toggles as
+// NET_EXT_BOT_CONFIG bits (a key is on when truthy, as the popup's class test reads it). A null config would make v10
+// ask again; nothing is drawn for it here.
+static void on_bots_popup(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *cfg = arg(f, 0);
+    if (!krunker_is(cfg, KRUNKER_MAP)) return;
+    NetBotConfigPacket p = {0};
+    for (int i = 0; i < BOT_DEBUG_FLAG_COUNT; i++) {
+        const KrunkerValue *v = krunker_get(cfg, bot_debug_key(i));
+        const int on = v && (krunker_is(v, KRUNKER_STR) ? krunker_str(v) && krunker_str(v)[0] : krunker_num(v, 0) != 0);
+        if (on) p.flags |= 1u << i;
+    }
+    emit_ext(l, NET_EXT_BOT_CONFIG, &p, sizeof(p));
+}
+
 static void on_vote_kick(KrunkerLink *l, const KrunkerFrame *f) {
     NetVoteKickStatePacket s;
     memset(&s, 0, sizeof(s));
@@ -3187,6 +3203,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_VOTE_KICK: on_vote_kick(l, &f); break;
         case KRUNKER_S2C_KPD_RESPONSE: on_kpd_response(l, &f); break;
         case KRUNKER_S2C_KPD_RESET: emit_ext(l, NET_EXT_KPD_RESET, NULL, 0); break; // "kpdf" (iiíìîìi)
+        case KRUNKER_S2C_BOTS_POPUP: on_bots_popup(l, &f); break; // "bcfg": botsPopup(config)
         case KRUNKER_S2C_DISCONNECT: note(l, KRUNKER_LINK_EV_ERROR, "the server disconnected us (dc)"); break;
         case KRUNKER_S2C_ACCOUNT_RESPONSE: on_account(l, &f); break;
         case KRUNKER_S2C_UPDATE_ACCOUNT: on_update_account(l, &f); break;
@@ -3824,6 +3841,13 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             if (subtype == NET_EXT_KPD_RATE && body_length >= sizeof(NetKpdRatePacket)) { // the officer's verdict: ["rkpd", 0 | 1]
                 const KrunkerValue args[] = {KRUNKER_V_NUM(body[0] ? 1 : 0)};
                 return send_c2s(l, KRUNKER_C2S_RATE_KPD, args, 1);
+            }
+            // the DEV row's Bot Debugging (deob-10.0.7.js:224128-224144): botsPopup() sends BOT_CONFIG ["bcfg"],
+            // debugBots(code[, false]) BOTS ["bots", code] or ["bots", code, false]
+            if (subtype == NET_EXT_BOT_CONFIG) return send_c2s(l, KRUNKER_C2S_BOT_CONFIG, NULL, 0);
+            if (subtype == NET_EXT_BOT_DEBUG && body_length >= sizeof(NetBotDebugPacket)) {
+                const KrunkerValue args[] = {KRUNKER_V_NUM(body[0]), KRUNKER_V_BOOL(0)};
+                return send_c2s(l, KRUNKER_C2S_BOTS, args, body[1] ? 2 : 1);
             }
             if (subtype == NET_EXT_ADMIN_ACTION && body_length >= sizeof(NetAdminActionPacket)) {
                 // the player list's Kick (0) / Ban (1) / Transfer Host (8) on an official game: punishPlayer(id,

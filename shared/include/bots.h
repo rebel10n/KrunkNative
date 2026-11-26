@@ -21,6 +21,7 @@
 #include <shared.h>
 #include <bot_move.h>
 #include <bot_sense.h>
+#include <bot_debug.h>
 
 #define GAME_BOTS_MAX 32            // parseBotConfigAssignments: Math.min(32, count) per bot_add
 #define GAME_BOT_LIMIT 16           // config.botLimit: the server.cfg quota cap
@@ -340,6 +341,9 @@ void game_bots_send_infos(Game*, int uid);
 
 // Parsing (server/index.ts parseBotConfigAssignments / parseBotConfigValue) and formatting.
 void bot_parse_assignments(int argc, char **argv, BotAssignments *out);
+
+// The DEV Bot Debugging popup's bits of a config (BOT_DEBUG_FLAG_*, bot_debug.h).
+uint32_t bot_debug_flags(const BotConfig*);
 int  bot_parse_difficulty(const char *raw, float *out);  // preset name or number > 0
 // botDifficultyConfig(value): the difficulty preset's accuracy / range / attack flags.
 void bot_difficulty_assignments(float difficulty, BotAssignments *out);

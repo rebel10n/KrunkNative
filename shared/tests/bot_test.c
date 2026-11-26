@@ -345,6 +345,40 @@ static void test_commands(Game *game) {
     chat_command_handle(&g_host, 500, "/bot_add 1");
     CHECK(game_bots_count(game) == 4, "a DEV peer may (%d)", game_bots_count(game));
     run("/bot_kick 4");
+
+    // the DEV row's Bot Debugging (NET_EXT_BOT_CONFIG / NET_EXT_BOT_DEBUG, deob-10.0.7.js:224128-224157): a DEV's only
+    {
+        GameBots *gb = game->bots;
+        uint32_t flags = 0;
+        g_peer.dev = 0;
+        CHECK(!chat_command_bot_flags(&g_host, 500, &flags) && !chat_command_bot_debug(&g_host, 500, BOT_DEBUG_SPAWN_1, 0) &&
+                  game_bots_count(game) == 3,
+              "a guest gets no bot popup and spawns nothing (%d bots)", game_bots_count(game));
+        g_peer.dev = 1;
+        CHECK(chat_command_bot_flags(&g_host, 500, &flags) && flags == bot_debug_flags(&gb->config[gb->type]), "a DEV reads the toggles (0x%x)", flags);
+        const int god = gb->config[gb->type].god_mode;
+        CHECK(chat_command_bot_debug(&g_host, 500, 18, 0) && gb->config[gb->type].god_mode == !god, "God Mode's left click flips it");
+        CHECK(chat_command_bot_debug(&g_host, 500, 18, 0) && gb->config[gb->type].god_mode == god, "... and back");
+        chat_command_bot_debug(&g_host, 500, 18, 0);
+        CHECK(chat_command_bot_debug(&g_host, 500, 18, 1) && !gb->config[gb->type].god_mode, "the right click (debugBots(18, false)) turns it off");
+        if (god) chat_command_bot_debug(&g_host, 500, 18, 0);
+        const int roam = gb->config[gb->type].roam;
+        chat_command_bot_debug(&g_host, 500, 19, 0);
+        CHECK(gb->config[gb->type].roam == !roam && (gb->count == 0 || gb->list[0].config.roam == !roam), "Roam reaches the defaults and the live bots");
+        chat_command_bot_debug(&g_host, 500, 19, 0);
+        CHECK(chat_command_bot_debug(&g_host, 500, BOT_DEBUG_SPAWN_1, 0) && game_bots_count(game) == 4, "Spawn 1 (%d bots)", game_bots_count(game));
+        tick(game, 1.0f, 30.0f);
+        int alive = 0, jugg = 0;
+        chat_command_bot_debug(&g_host, 500, BOT_DEBUG_JUGGERNAUT, 0);
+        for (int i = 0; i < gb->count; i++)
+            if (gb->list[i].player && gb->list[i].player->active) alive++, jugg += gb->list[i].player->is_juggernaut;
+        CHECK(alive > 0 && jugg == alive, "Juggernaut makes every spawned bot one (%d of %d)", jugg, alive);
+        CHECK(!chat_command_bot_debug(&g_host, 500, BOT_DEBUG_CLEAR, 1) && game_bots_count(game) == 4, "an action has no right click");
+        CHECK(chat_command_bot_debug(&g_host, 500, BOT_DEBUG_CLEAR, 0) && game_bots_count(game) == 0, "Clear All (%d bots)", game_bots_count(game));
+        CHECK(!chat_command_bot_debug(&g_host, 500, 99, 0), "an unknown code does nothing");
+        run("/bot_add 3");
+        tick(game, 1.0f, 30.0f);
+    }
     g_host.perms = 0;
     g_host.peer_count = NULL;
     g_host.peer_at = NULL;

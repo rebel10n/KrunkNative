@@ -2533,6 +2533,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             else if (subtype == NET_EXT_KN_GUEST_ID) accounts_handle_guest_id(client, body, body_length);   // a guest's unclaimed rewards (accounts.c)
             else if (subtype == NET_EXT_VOTE_KICK) votekick_handle(client, body, body_length);           // "v2k" (votekick.c)
             else if (subtype == NET_EXT_ADMIN_ACTION) votekick_handle_admin(client, body, body_length); // ADMIN_ACTIONS (votekick.c)
+            else if (subtype == NET_EXT_BOT_CONFIG || subtype == NET_EXT_BOT_DEBUG) votekick_handle_bots(client, subtype, body, body_length); // botsPopup / debugBots
             else if (subtype == NET_EXT_KPD_CALL) votekick_handle_kpd(client, body, body_length);        // "kpd" (votekick.c)
             else if (subtype == NET_EXT_KPD_RATE) votekick_handle_kpd_rate(client, body, body_length);   // "rkpd" (votekick.c)
             else if (subtype == NET_EXT_KPD_APPLY) votekick_handle_kpd_apply(client, body, body_length); // "kpdA" (votekick.c)
