@@ -83,7 +83,15 @@ uniform float sky_ambient_scale;
 #endif
 uniform vec3 sky_color;          // the map's sky colour (mode 2, maps without a sky dome)
 uniform sampler2D rt_result;
+#if KN_RT
 uniform sampler2D rt_refl; // RT_EFFECT_REFLECTIONS (4): the traced reflection radiance of this pixel (rt_reflect.frag), same lookup
+#else
+// Variant 0 (KN_RT 0): rt_refl, rt_water_scene and rt_water_depth read `tex` instead of samplers of their own. Their
+// gates (rt_effects, rt_water_kind, rt_water_traced) are 0 outside the traced passes, so those reads never run, but
+// as samplers they stayed active: 17 in all, and WebGL2 on most GPUs allows 16 (MAX_TEXTURE_IMAGE_UNITS), so the
+// program failed to link and the web client stopped on a white screen (2026-11-26).
+#define rt_refl tex
+#endif
 // RT_EFFECT_GI (32): the denoised one-bounce radiance of this pixel (rt_gi.frag, rt.h): one cosine-weighted
 // sample's radiance L estimates the bounce irradiance G = PI * L. krunker_gi_irradiance composes it with the
 // ambient irradiance (Krunker's constant one, or the sky-dome one of bit 64): the ambient's luminance is the
@@ -802,8 +810,13 @@ vec3 krunker_rt_mat_specular(vec3 albedo, float metalness, float roughness, vec3
 uniform int rt_water_kind;            // 1 water, 2 glass / window
 uniform bool rt_water_copy;           // rt_water_scene holds this frame's opaque world
 uniform bool rt_water_traced;         // rt_refl holds the surface's traced reflection (rtMode 3)
+#if KN_RT
 uniform sampler2D rt_water_scene;     // the opaque frame (rt_pass.c rt_water_copy_scene)
 uniform sampler2D rt_water_depth;     // the world prepass depth (RT resolution, rt_inv_viewport lookups)
+#else
+#define rt_water_scene tex // variant 0: see rt_refl
+#define rt_water_depth tex
+#endif
 uniform vec2 rt_water_inv_size;       // 1 / the copy's size
 uniform vec2 rt_water_depth_ab;       // the camera projection's A, B: view depth = B / (ndc z + A)
 uniform float rt_water_refract;       // screen offset per unit of wave-normal deviation (fraction of the view height)
