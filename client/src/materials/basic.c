@@ -14,6 +14,9 @@
 #include <stdlib.h>
 
 static unsigned int shader_program = 0; // the Krunker variant (KN_RT 0): every material's program between draws
+static int g_basic_failed; // the Krunker variant did not build: tried once, materials keep program 0
+
+int basic_material_failed(void) { return g_basic_failed; }
 
 // basic.frag's compile-time variants (the header of basic.frag): [0] Krunker's path, every Box Office ray-tracing
 // block compiled out; [1] ray tracing without the Cinematic-only blocks; [2] everything. A draw inside the traced
@@ -49,6 +52,12 @@ static unsigned int basic_variant_program(const int variant) {
     }
     if (!g_basic_variant_tried[variant]) {
         g_basic_variant_tried[variant] = 1;
+        // shader_fail_e2e: the build a GPU refused (WebGL's 16 texture units, 2026-11-26), without such a GPU
+        const char *fail = variant == 0 ? getenv("KRUNKNATIVE_TEST_FAIL_BASIC_SHADER") : NULL;
+        if (fail && *fail && *fail != '0') {
+            fprintf(stderr, "basic.frag: variant 0 failed to compile (KRUNKNATIVE_TEST_FAIL_BASIC_SHADER)\n");
+            return 0;
+        }
         char *vert_shader = concat(assets_path(), "shaders/basic.vert");
         char *frag_shader = concat(assets_path(), "shaders/basic.frag");
         g_basic_variants[variant] = shader_compile_defines(vert_shader, frag_shader, BASIC_VARIANT_DEFINES[variant]);
@@ -875,12 +884,12 @@ BasicMaterial *basic_material_init() {
     material->fog_enabled = 1;
     material->flat_normal.y = 1.0f;
 
-    if (!shader_program) shader_program = basic_variant_program(0);
-
-    if (!shader_program) {
-        free(material);
-        return NULL;
-    }
+    if (!shader_program && !g_basic_failed) shader_program = basic_variant_program(0);
+    // The core program did not build (2026-11-26: a WebGL2 link refused over the GPU's texture unit limit). The 54
+    // callers dereference the material, and a NULL here ended in a "null function" trap a frame later: the material
+    // is kept with program 0, scene_render skips such draws, and client_frame leaves the game with the reason
+    // (basic_material_failed).
+    if (!shader_program) g_basic_failed = 1;
 
     material->base.program = shader_program;
     return material;

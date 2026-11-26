@@ -3258,6 +3258,7 @@ typedef struct {
 #define NET_ERROR_CODE_SHUTDOWN "004006" // the server stopped (restart / shutdown / console quit)
 #define NET_ERROR_CODE_PASSWORD "004005" // the server password (gameserver.password) is missing / wrong / locked out
 #define NET_ERROR_CODE_FLAVOR "004007"   // a cross-flavor peer (Krunker Strike vs Krunker Box Office); shown, not acted on
+#define NET_ERROR_CODE_GPU "004009"      // client only: the core shader did not build (basic_material_failed); shown, no retry
 #define NET_ERROR_CODE_CAPTCHA "004008"  // "CAPTCHA FAILED": the in-game captcha was refused or not answered (server_captcha.h); shown
 
 // NET_PACKET_BILLBOARD: the server's billboard ad (server.cfg billboard, the v3.1.1 init "bill":

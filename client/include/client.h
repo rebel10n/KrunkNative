@@ -381,6 +381,8 @@ typedef struct {
 
 extern const MaterialVTable basic_material_vtable;
 BasicMaterial *basic_material_init();
+// 1 once basic.frag's Krunker variant failed to build: every basic material then has program 0 and draws nothing
+int basic_material_failed(void);
 // Picks basic.frag's compile-time variant for this draw (materials/basic.c): scene_render calls it before using
 // material->program. No-op for other material types.
 void basic_material_select_program(Material*);

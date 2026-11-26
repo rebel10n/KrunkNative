@@ -1311,6 +1311,19 @@ void client_frame(Client *client) {
         return;
     }
 
+    static int shaders_failed_shown;
+    if (basic_material_failed() && !shaders_failed_shown) { // the game cannot draw: leave with the reason, no retry
+        shaders_failed_shown = 1;
+#ifdef __EMSCRIPTEN__
+        const char *why = "Your browser could not build the game's shaders (WebGL). Update your browser and graphics driver";
+#else
+        const char *why = "Your graphics driver could not build the game's shaders. Update your graphics driver";
+#endif
+        fprintf(stderr, "[render] %s\n", why);
+        client_net_disconnect(client, why, NET_ERROR_CODE_GPU);
+        client->net_hold_retry = 1;
+    }
+
     const double frame_time = glfwGetTime();
     const float now = (float) frame_time;
     const float delta = input_script_delta((float) (frame_time - client->last_frame_time)); // KRUNKNATIVE_FIXED_DELTA

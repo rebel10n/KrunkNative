@@ -983,6 +983,10 @@ auto-restart-e2e: build ## Auto-restart for updates: a server update (004004) re
 connect-ux-e2e: build ## Server switch / reconnect shows the loading spinner, not a lost connection; the disconnected screen with Retry only after the retry budget (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I server/tests/connect_ux_e2e.py $(DEBUG_DIR)
 
+.PHONY: shader-fail-e2e
+shader-fail-e2e: build ## A core shader that does not build (KRUNKNATIVE_TEST_FAIL_BASIC_SHADER) ends on the Lost Connection box with the reason, no crash (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 180 $(PYTHON) -I server/tests/shader_fail_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-reload-test
 console-reload-test: build ## Dev console kept in the window (off-screen save, resize, F11, drag, console_reset) + the console's full reload in place and its restart fallback (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/console_reload_e2e.py $(DEBUG_DIR)
@@ -1326,7 +1330,7 @@ E2E_DEBUG_TARGETS := strike-app-test viewer-diff frame-yield-test offline-dead-t
 	billboard-e2e idle-kick-e2e join-spawn-e2e nuke-e2e ruleset-e2e v10-settings-e2e settings-wiring-e2e \
 	pickup-chat-e2e junk-wallet-e2e v10-rewards-e2e reconnect-test mm-token-e2e server-tabs-e2e \
 	menu-sources-e2e games-window-e2e seek-region-e2e seek-cross-region-e2e quickplay-retry-e2e \
-	raid-play-e2e seek-servers-migrate-e2e client-proxy-e2e auto-restart-e2e connect-ux-e2e \
+	raid-play-e2e seek-servers-migrate-e2e client-proxy-e2e auto-restart-e2e connect-ux-e2e shader-fail-e2e \
 	console-reload-test console-give-autofill-test console-autofill-audit-test \
 	console-autofill-nondev-test console-visible-test console-end-paint-test download-screen-test \
 	strike-play-test strike-signedout-test strike-missions-timeout-test console-strike-test \

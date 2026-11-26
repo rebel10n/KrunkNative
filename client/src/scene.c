@@ -449,6 +449,7 @@ void scene_render(const Scene *scene, Camera *camera) {
 
         basic_material_select_program(mesh->material); // basic.frag's KN_RT variant (traced passes only)
         const unsigned int program = mesh->material->program;
+        if (!program) continue; // a shader that did not build (basic_material_failed): nothing to draw with
         if (g_active_shader != program) {
             glUseProgram(program);
             g_active_shader = program;
