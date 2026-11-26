@@ -168,7 +168,7 @@ void krunker_net_voucher_listen(KrunkerVoucherFn fn);
 // A window's request over the game socket for the krunker.io account, as the frame the window would
 // send kn_brain, in the shapes v10 sends them (krunker_net.c lists them): the reads (["bpdl"], ["vcln"],
 // ["cln", 3, value]), the Clans window's "cln" / "clnR" / "clnRA" writes, the claims, the Junkyard's
-// ["recps"] / ["crft", SID] once in the game, and the rpcs (["dsl"], ["clan-transfer-initiate" | "-cancel" |
+// ["recps"] / ["crft", SID] once in the game, FOLLOW_PLAYER ["fo", name, 1 | 0], and the rpcs (["dsl"], ["clan-transfer-initiate" | "-cancel" |
 // "-respond", ...], sent as v10's rpc(name, ...args), answered "_0" / "_1" with the name); 0 = not sent
 // (not open, or a frame outside the list).
 int krunker_net_send_account_frame(const cJSON *frame);

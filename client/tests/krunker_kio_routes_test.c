@@ -193,7 +193,7 @@ int main(void) {
         const char *method, *path;
     } mod_refused[] = {{"GET", "/moderation/chat"},          {"PUT", "/moderation/chat"},          {"POST", "/moderation/chat/x"},
                        {"DELETE", "/moderation/chat/x"},     {"GET", "/moderation/chat/"},         {"GET", "/moderation/chat/a/b"},
-                       {"GET", "/moderation/chat/a?x=1"},    {"POST", "/moderation/chat?x=1"},     {"POST", "/moderation/flag"},
+                       {"GET", "/moderation/chat/a?x=1"},    {"POST", "/moderation/chat?x=1"},     {"GET", "/moderation/flag"},
                        {"GET", "/moderation/chat/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}};
     for (size_t i = 0; i < sizeof(mod_refused) / sizeof(mod_refused[0]); i++)
         CHECK(!krunker_kio_gapi_write(mod_refused[i].method, mod_refused[i].path), "%s %s is not sent", mod_refused[i].method, mod_refused[i].path);
@@ -219,6 +219,24 @@ int main(void) {
                                         "/api/push/subscribe", "/webpush/subscription-changes"};
     for (size_t i = 0; i < sizeof(push_refused) / sizeof(push_refused[0]); i++)
         CHECK(!krunker_kio_gapi_write("POST", push_refused[i]), "POST %s is not sent", push_refused[i]);
+
+    // 6g. the Social hub's writes on gapi (deob-10.0.7.js:27219-27225, 27263-27311, 27384-27405): followPlayer, reportPlayer,
+    // giftKR, verifyPlayer, flagUser, createPost, votePost, commentPost; POSTs only, one name segment, a digits post id
+    const char *const social[] = {"/players/KioFriendAlpha/follow", "/players/KioFriendAlpha/report", "/players/KioFriendAlpha/gift",
+                                  "/players/a%20b/verify",          "/moderation/flag",               "/social/post",
+                                  "/social/post/123/vote",          "/social/post/123/comment"};
+    for (size_t i = 0; i < sizeof(social) / sizeof(social[0]); i++) {
+        CHECK(krunker_kio_gapi_write("POST", social[i]), "POST %s is a v10.0.7 social write", social[i]);
+        CHECK(!krunker_kio_gapi_write("GET", social[i]), "GET %s is not a write", social[i]);
+        CHECK(!krunker_kio_gapi_write("DELETE", social[i]), "DELETE %s is not sent", social[i]);
+    }
+    const char *const social_refused[] = {"/players//follow",          "/players/a/b/follow",       "/players/a?x=1/follow", "/players/a/follow/",
+                                          "/players/a/follow?x=1",     "/players/a/followers",      "/players/a",            "/players/a/sales",
+                                          "/social/post/abc/vote",     "/social/post//vote",        "/social/post/1/vote/",  "/social/post/1",
+                                          "/social/post/1/like",       "/social/feed",              "/moderation/flag/x",
+                                          "/players/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/follow"};
+    for (size_t i = 0; i < sizeof(social_refused) / sizeof(social_refused[0]); i++)
+        CHECK(!krunker_kio_gapi_write("POST", social_refused[i]), "POST %s is not sent", social_refused[i]);
 
     // 7. a mirror moves the data client: the webhooks and the streams follow KRUNKNATIVE_KRUNKER_DATA_API
     env_clear();

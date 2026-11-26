@@ -169,6 +169,28 @@ static const char *clan_tail(const char *path) {
     return tail == id || tail - id > 12 ? NULL : tail;
 }
 
+// The Social hub's POSTs (v10.0.7's players client, deob-10.0.7.js:27263-27311: followPlayer, verifyPlayer, reportPlayer,
+// giftKR; the moderation client's flagUser, :27219-27225; the social client's createPost, votePost, commentPost,
+// :27384-27405). A player name is one segment as v10 encodes it (encodeURIComponent: no '/', '?' or '#'), at most 64
+// characters; a post id is digits.
+static int social_write(const char *path) {
+    if (!strcmp(path, "/moderation/flag") || !strcmp(path, "/social/post")) return 1;
+    static const char players[] = "/players/", posts[] = "/social/post/";
+    if (!strncmp(path, players, sizeof(players) - 1)) {
+        const char *name = path + sizeof(players) - 1, *slash = strchr(name, '/');
+        if (!slash || slash == name || slash - name > 64 || memchr(name, '?', (size_t) (slash - name)) || memchr(name, '#', (size_t) (slash - name)))
+            return 0;
+        return !strcmp(slash, "/follow") || !strcmp(slash, "/report") || !strcmp(slash, "/gift") || !strcmp(slash, "/verify");
+    }
+    if (!strncmp(path, posts, sizeof(posts) - 1)) {
+        const char *id = path + sizeof(posts) - 1, *tail = id;
+        while (*tail >= '0' && *tail <= '9') tail++;
+        if (tail == id || tail - id > 19) return 0;
+        return !strcmp(tail, "/vote") || !strcmp(tail, "/comment");
+    }
+    return 0;
+}
+
 // v10.0.7's clan writes on gapi (the clans client, deob-10.0.7.js:26838-26924), each "<method> /clans/<id>/<tail>":
 // setMotd / deleteMotd, updateLootConfig, setBannerColor, removeLogo, createOrUpdateRecruitment / removeRecruitment,
 // applyToClan. uploadLogo (POST /clans/<id>/logo) is not here: v10 sends it as multipart FormData
@@ -194,6 +216,7 @@ int krunker_kio_gapi_write(const char *method, const char *path) {
         const size_t len = strlen(name);
         return len > 0 && len <= 64 && !strpbrk(name, "/?#");
     }
+    if (!strcmp(method, "POST") && social_write(path)) return 1;
     const char *tail = clan_tail(path);
     if (!tail) return 0;
     for (size_t i = 0; i < sizeof(writes) / sizeof(writes[0]); i++)

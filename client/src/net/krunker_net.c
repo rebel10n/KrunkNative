@@ -741,6 +741,7 @@ static int clan_frame_ok(const double action, const int n, const cJSON *a2, cons
 //   ["recps"], ["crft", SID]  the Junkyard's recipes and a craft (answered "recps" / "crftr"), once in the game
 //   ["uploadP", dataURL]  UPLOAD_PROFILE_PICTURE: a premium account's profile picture, the PNG as the FileReader's data
 //                     URL (deob-10.0.7.js:223508-223524); answered "upPR" (done) or "upR" [message, 1] (account_ui.c)
+//   ["fo", name, 1 | 0]  FOLLOW_PLAYER: window 5's Remove Friend (0) and the Inbox's Follow Back (1), deob-10.0.7.js:227034-227047
 //   ["fvM", kind, id, flag]  FAVORITE_MAPMOD: a map (0) or mod (1) starred (true) or not (deob-10.0.7.js:228236), no answer
 //   ["vo", code]      REDEEM_VOUCHER (v10 sends it straight, deob-10.0.4.js:221047): grants KR, answered "vr"
 //                     [funds | null, message] (kio_store_voucher_answer)
@@ -807,6 +808,11 @@ int krunker_net_send_account_frame(const cJSON *frame) {
     // FAVORITE_MAPMOD ["fvM", kind 0 map | 1 mod, id, flag]: the Games / Mods windows' star (favoriteM, deob-10.0.7.js:228236)
     if (!strcmp(name, "fvM") && n == 3 && cJSON_IsNumber(a1) && (a1->valuedouble == 0 || a1->valuedouble == 1) &&
         cJSON_IsNumber(a2) && a2->valuedouble >= 1 && cJSON_IsBool(cJSON_GetArrayItem(frame, 3)))
+        ok = 1;
+    // FOLLOW_PLAYER ["fo", name, 1 | 0]: window 5's Remove Friend and the Inbox's Follow Back (followPlayer / deleteFollower,
+    // deob-10.0.7.js:227034-227047), no answer
+    if (!strcmp(name, "fo") && n == 2 && cJSON_IsString(a1) && a1->valuestring[0] && strlen(a1->valuestring) <= 64 && cJSON_IsNumber(a2) &&
+        (a2->valuedouble == 0 || a2->valuedouble == 1))
         ok = 1;
     if (krunker_checkout_frame_ok(frame)) ok = 1; // the real-money purchase's requests, in v10's shapes (krunker_checkout.h)
     if (!ok || n > 10) return 0;

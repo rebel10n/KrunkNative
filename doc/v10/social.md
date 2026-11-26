@@ -87,10 +87,21 @@ v10 fetches it:
   colour, logo removal, recruitment) and game-socket writes (create, join, leave, kick, roles, funds,
   Discord, the ownership transfer, the logo upload), Turf Wars take-down, and the market's trades, list,
   buy, unlist and quick sell.
-* not ported (they change the krunker.io account or spend its KR): follow / unfollow, likes,
-  comments, posts, Gift KR, Report, window 5's Remove Friend. Their buttons are hidden as for a v10
-  guest, the handlers do nothing and `v10_gapi` does not send them. The Turf Wars popup's reads stay
-  kn_brain's.
+* the in-game Social hub's writes, sent as v10.0.7 sends them (since 2026-11-26): the hub acts as the
+  krunker.io account (`v10_social.c` `actor()`), so its buttons show as for a signed-in v10 player, and
+  `krunker_kio_gapi_write` lets these gapi POSTs through with the Bearer: follow / unfollow
+  (`/players/<name>/follow {follow}`: the profile, the follow list, a giveaway card), Gift KR
+  (`/players/<name>/gift {amount, message.trim()}`, "Sent <amount> KR to <name>!"), Report
+  (`/players/<name>/report {reason, text}`), the staff's Verify (`/players/<name>/verify`) and Flag
+  (`/moderation/flag`), New post (`/social/post`), likes (`/social/post/<id>/vote`) and comments
+  (`/social/post/<id>/comment`) (deob-10.0.7.js:27219-27225, 27263-27311, 27384-27405). Window 5's
+  Remove Friend and the Inbox's Follow Back are FOLLOW_PLAYER `["fo", name, 0 | 1]` on the game socket
+  (deob-10.0.7.js:227034-227047). The profile's Trade button opens nothing in either mode (KrunkNative
+  has no port of v10.0.7's trade popup, svelte-1lqen9w). The Turf Wars popup's reads stay kn_brain's.
+* not ported: the separate hub page (`social_ui.c`, krunker.io's social.html) talks to krunker.io's own
+  social socket (`<SOCIAL_URI>/ws?at=<token>&pat=<the /ws/ping token>`, the game socket's msgpack framing
+  and AHKEY, PAT_REFRESH every 20 s); KrunkNative has no client for it, so that page's frames are not sent
+  for the krunker.io account.
 * tests: `server/tests/krunker_social_e2e.py`.
 
 ## Player profile (v10.0.3)

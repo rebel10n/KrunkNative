@@ -7,8 +7,9 @@ While krunker.io is the active account backend (an official krunker.io game, bac
 Social hub fetches the krunker.io account's data the way v10 does: the friends event bus is v10's own
 socket (<EVENT_BUS_URI>/ws?at=<fresh access token>, krunker_eb.h) and the profile / clan / feed reads
 are gapi GETs with the account's Bearer token (v10_gapi.c, krunker_account_api(KRUNKER_SVC_API)).
-Writes are not ported for that account (follow, gift, report, clan apply, ...): their buttons are
-hidden and nothing is sent. Box Office (kn_brain) stays exactly as it was.
+The hub's writes are v10.0.7's own for that account: Follow, Gift KR and Report are gapi POSTs with the
+Bearer token (/players/<name>/follow | gift | report), window 5's Remove Friend is FOLLOW_PLAYER ["fo"]
+on the game socket. Box Office (kn_brain) stays exactly as it was.
 
 A real kn_brain (scratch sqlite database) with one account, krunker_account_e2e.py's krunker.io stubs
 (API / FRVR auth / matchmaker / game server) behind a front stub that adds krunker.io's gapi reads
@@ -17,8 +18,9 @@ A real kn_brain (scratch sqlite database) with one account, krunker_account_e2e.
   1. Box Office: the friends tab is kn_brain's (no krunker.io friends), a profile is kn_brain's
   2. an official game, signed in to krunker.io: the friends tab lists the event bus's friends (the
      socket carried the account's fresh token), a conversation loads its history, a profile and a
-     clan view show the gapi stub's krunker.io data (Bearer token), without Follow / Gift / Report, with
-     v10's Request to Join, and a scripted Follow sends nothing
+     clan view show the gapi stub's krunker.io data (Bearer token), with Follow / Gift KR / Report and
+     v10's Request to Join; Follow, a gift and a report reach the gapi stub as v10.0.7's POSTs, and
+     Remove Friend sends "fo" on the game socket
   3. leaving the game: the friends tab and a profile are Box Office's again, no krunker.io request
 Exit 0 when every check passed, 77 when it cannot run.
 """
@@ -129,13 +131,17 @@ class Front:
 
     def __init__(self, http_port, ws_port, stub):
         self.http_port, self.ws_port, self.stub = http_port, ws_port, stub
-        self.gapi = []        # (method, path, authorization)
+        self.gapi = []        # (method, path, authorization, time, JSON body | None)
         self.eb_paths = []
         self.eb_times = []
         self.eb_in = []       # the client's event bus messages
         self.loop = self.httpd = None
 
     def gapi_answer(self, path):
+        if path == "/api/players/%s/follow" % FRIEND_A:
+            return 200, {"data": {"following": True}}
+        if path in ("/api/players/%s/gift" % FRIEND_A, "/api/players/%s/report" % FRIEND_A):
+            return 200, {"data": {"success": True}}
         if path == "/api/players/" + FRIEND_A:
             return 200, {"data": PROFILE}
         if path.startswith("/api/players/%s/" % FRIEND_A):
@@ -160,8 +166,13 @@ class Front:
                 body = self.rfile.read(n) if n else None
                 path = urllib.parse.urlsplit(self.path).path
                 if path.startswith("/api/players/") or path.startswith("/api/clans/") or path.startswith("/api/social/"):
-                    front.gapi.append((method, path, self.headers.get("Authorization", ""), time.time()))
-                    status, obj = front.gapi_answer(path) if method == "GET" else (405, {"error": "read only stub"})
+                    try:
+                        sent = json.loads(body) if body else None
+                    except ValueError:
+                        sent = body
+                    front.gapi.append((method, path, self.headers.get("Authorization", ""), time.time(), sent))
+                    answer = front.gapi_answer(path) if method == "GET" or path.endswith(("/follow", "/gift", "/report")) else None
+                    status, obj = answer or (405, {"error": "not in the stub"})
                     data = json.dumps(obj).encode()
                     self.send_response(status)
                     self.send_header("Content-Type", "application/json")
@@ -292,15 +303,28 @@ def script():
           "34210 nodes @kiojoin [id=v10sClanJoin]",
           '34300 call v10s "back"',
           '34400 call openPlayerProfile "%s"' % FRIEND_A,
-          '35800 call v10s "follow"',  # scripted: the button is hidden; nothing may be sent
-          '36500 call v10s "back"',
-          "36600 call clearPops",
-          "36700 nodes @markleave body"]
+          '35800 call v10s "follow"',
+          '36000 call v10s "gift"',
+          '36200 call v10sInput "giftamt" "25"',
+          '36250 call v10sInput "giftmsg" "  thanks for the games  "',
+          '36400 call v10s "giftsend"',
+          "37400 text @kiogiftdone [id=v10sGiftWin] .gift-success",
+          '37500 call v10s "back"',
+          '37600 call v10s "report"',
+          '37700 call v10sInput "reason" "1"',
+          '37750 call v10sInput "reporttext" "wallhacks in every round"',
+          '37900 call v10s "reportsend"',
+          "38900 text @kioreportdone .report-success",
+          '39000 call v10s "back"',
+          '39100 call v10s "back"',
+          "39200 call clearPops",
+          '39300 call deleteFollower "%s" 0' % FRIEND_B,  # window 5's Remove Friend
+          "39800 nodes @markleave body"]
     # leave: Box Office again
-    s += ["37000 con disconnect",
-          "37200 down ESC", "37250 up ESC"]
-    s += hub_probe(38500, "back", DEV)
-    s += ["43000 quit"]
+    s += ["40000 con disconnect",
+          "40200 down ESC", "40250 up ESC"]
+    s += hub_probe(41500, "back", DEV)
+    s += ["46000 quit"]
     return "\n".join(s) + "\n"
 
 
@@ -377,8 +401,8 @@ def checks(text, stub, front, marks):
     prof = text_of(text, "kioprofile")
     stats = text_of(text, "kiostats")
     check("2. a profile shows krunker.io's data (gapi /players/<name>)", FRIEND_A in prof and CLAN in prof and "4,242" in stats, (prof[:120], stats[:160]))
-    check("2. ... without Follow / Gift KR / Report (not ported for the krunker.io account)",
-          nodes(text, "kiofollow") == 0 and nodes(text, "kiogift") == 0 and nodes(text, "kioreport") == 0,
+    check("2. ... with Follow / Gift KR / Report (v10.0.7's actions on another player's profile)",
+          nodes(text, "kiofollow") == 1 and nodes(text, "kiogift") == 1 and nodes(text, "kioreport") == 1,
           (nodes(text, "kiofollow"), nodes(text, "kiogift"), nodes(text, "kioreport")))
     clan = text_of(text, "kioclan")
     members = text_of(text, "kiomembers")
@@ -388,8 +412,22 @@ def checks(text, stub, front, marks):
     reads = [g for g in front.gapi if g[1] in ("/api/players/" + FRIEND_A, "/api/clans/by-name/" + CLAN)]
     check("2. the gapi reads carried the account's Bearer token", reads and all(g[2] == "Bearer " + stub.access2 for g in reads),
           [(g[1], g[2][:16]) for g in reads])
-    check("2. only GETs went to krunker.io (the scripted Follow sent nothing)", front.gapi and all(g[0] == "GET" for g in front.gapi),
-          [g[:2] for g in front.gapi if g[0] != "GET"])
+    writes = [(g[1], g[4]) for g in front.gapi if g[0] != "GET"]
+    base = "/api/players/" + FRIEND_A
+    check("2. Follow is followPlayer: POST /players/<name>/follow {follow: true}", (base + "/follow", {"follow": True}) in writes, writes)
+    check("2. Gift KR is giftKR: POST /players/<name>/gift {amount, message.trim()}",
+          (base + "/gift", {"amount": 25, "message": "thanks for the games"}) in writes, writes)
+    check("2. Report is reportPlayer: POST /players/<name>/report {reason, text}",
+          (base + "/report", {"reason": 1, "text": "wallhacks in every round"}) in writes, writes)
+    check("2. ... and nothing else was written to krunker.io's gapi", len(writes) == 3, writes)
+    posts = [g for g in front.gapi if g[0] == "POST"]
+    check("2. the writes carried the account's Bearer token", posts and all(g[2] == "Bearer " + stub.access2 for g in posts),
+          [(g[1], g[2][:16]) for g in posts])
+    gift = text_of(text, "kiogiftdone")
+    check("2. the gift view says v10.0.7's success line", "Sent 25 KR to %s!" % FRIEND_A in gift, gift[:160])
+    rep = text_of(text, "kioreportdone")
+    check("2. the report view says v10.0.7's success card", "Report submitted" in rep, rep[:160])
+    check("2. window 5's Remove Friend is FOLLOW_PLAYER on the game socket", "fo" in stub.ws_frames, stub.ws_frames[-12:])
 
     check("3. leaving switches back to Box Office", "[account] active account backend: krunk.io" in text, re.findall(r"\[account\] active.*", text)[:4])
     fr = text_of(text, "backfriends")

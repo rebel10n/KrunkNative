@@ -18,12 +18,13 @@
 // krunker.io's gapi with that account's token (v10_gapi.c), the friends event bus is v10's own
 // socket (krunker_eb.h: <EVENT_BUS_URI>/ws?at=<fresh token>, v10 _49718, v10:139770) instead of
 // kn_brain's ["eb"] frames, with v10's reconnect backoff (_49724: min(30 s, 2^n s)). Direct messages
-// and read receipts are what v10 sends from the Friends tab, so they go over that socket too. What
-// would change the krunker.io account or spend its KR is not ported here and reads as v10 shows it
-// to a guest (actor() = NULL): Follow / Unfollow (profile, follow list, giveaway card), Like,
-// comments, New post, Gift KR, Report and Trade are hidden or do nothing; v10_gapi.c does not send
-// their requests for that account either. The clan view's Request to Join is v10.0.7's own gapi write
-// there (POST /clans/<id>/apply, as the Turf Wars board's).
+// and read receipts are what v10 sends from the Friends tab, so they go over that socket too. The hub
+// acts as the krunker.io account (actor()), and its writes are v10.0.7's own gapi calls with that
+// account's token (krunker_kio_gapi_write): Follow / Unfollow (profile, follow list, giveaway card),
+// Like, comments, New post, Gift KR (POST /players/<name>/gift), Report (POST /players/<name>/report),
+// the staff's Flag and Verify, and the clan view's Request to Join (POST /clans/<id>/apply). Window 5's
+// Remove Friend and the Inbox's Follow Back are v10.0.7's FOLLOW_PLAYER ["fo", name, 0 | 1] on the
+// game socket (deob-10.0.7.js:227034-227047). Trade has no KrunkNative popup in either mode.
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_dom.h>
@@ -45,6 +46,7 @@
 #include <cpu_canvas.h> // the Sales tab's line chart (v10's Chart.js canvas)
 #include "../viewer/viewer_store.h" // the Creations tab's Skins: the store table and its rarities
 #include <ctype.h>
+#include <krunker_net.h> // FOLLOW_PLAYER on the krunker.io game socket (krunker_net_send_account_frame)
 #include <math.h>
 #include <stdint.h>
 #include <v10_party.h> // v10_party_join_game: a friend's "Join" (v10_party.c)
@@ -425,9 +427,8 @@ static int64_t my_id(void) {
 // krunker.io is the active account backend: the hub reads the krunker.io account's data
 static int kio(void) { return account_backend() == ACCOUNT_BACKEND_KRUNKER; }
 
-// The account the hub acts as: none for the krunker.io account (its writes are not ported: the
-// views show what v10 shows a guest for them), else the active account.
-static const AccountInfo *actor(void) { return kio() ? NULL : active_account(); }
+// The account the hub acts as: the active account (the krunker.io one while krunker.io is the backend), NULL for a guest.
+static const AccountInfo *actor(void) { return active_account(); }
 
 // The account the friends bus is for: kn_brain's id, or (krunker.io, whose account has no kn_brain
 // id) a negative key of the signed-in krunker.io account's name; 0 = none (guest).
@@ -692,11 +693,9 @@ char *v10_social_window_friends_html(void) {
                 sb_arg(&sb, url);
                 sb_append(&sb, ",1)\">Join</div>");
             }
-            if (!kio()) { // krunker.io account: unfollowing is not ported (it changes that account)
-                sb_append(&sb, "<div class='button buttonR' style='padding:10px;' onclick=\"deleteFollower(");
-                sb_arg(&sb, name);
-                sb_appendf(&sb, ",%d)\">Remove Friend</div>", i);
-            }
+            sb_append(&sb, "<div class='button buttonR' style='padding:10px;' onclick=\"deleteFollower(");
+            sb_arg(&sb, name);
+            sb_appendf(&sb, ",%d)\">Remove Friend</div>", i);
             i++;
             sb_append(&sb, "</div></div></div>");
         }
@@ -3941,6 +3940,7 @@ static void staff_http_done(void *user, const int status, const char *body, cons
 }
 
 static int staff_http(const char *method, const char *path, const cJSON *body, const DoneFn fn, const intptr_t tag) {
+    if (kio()) return gapi(method, path, body, fn, tag); // v10.0.7's own moderation / players calls on krunker.io's gapi
     if (S.scenario || !backend_url()[0]) return 0;
     StaffReq *r = malloc(sizeof(*r));
     if (!r) return 0;
@@ -3951,7 +3951,8 @@ static int staff_http(const char *method, const char *path, const cJSON *body, c
     backend_url_encode(token, sizeof(token), account_session_token());
     snprintf(url, sizeof(url), "%s%s?token=%s", backend_url(), path, token);
     char *text = body ? cJSON_PrintUnformatted(body) : NULL;
-    const int sent = backend_http_request(method, url, text, staff_http_done, r);    free(text);
+    const int sent = backend_http_request(method, url, text, staff_http_done, r);
+    free(text);
     if (!sent) free(r);
     return sent;
 }
@@ -4208,6 +4209,67 @@ static void gift_open(const char *who, const char *message) {
     render_views();
 }
 
+// krunker.io: v10.0.7's FOLLOW_PLAYER ["fo", name, 1 | 0] on the game socket (krunker_net_send_account_frame); no answer
+static void fo_send(const char *who, const int follow) {
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("fo"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(who));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(follow));
+    if (!krunker_net_send_account_frame(f)) printf("[social] FOLLOW_PLAYER not sent: no krunker.io game socket\n");
+    cJSON_Delete(f);
+}
+
+// krunker.io: POST /players/<the view's name>/<what> with the JSON body (v10_gapi -> krunker.io's gapi)
+static int kio_player_post(View *v, const char *what, const cJSON *body, const DoneFn fn) {
+    char enc[96], path[160];
+    backend_path_segment(enc, sizeof(enc), v->name);
+    snprintf(path, sizeof(path), "/players/%s/%s", enc, what);
+    return gapi("POST", path, body, fn, view_tag(v));
+}
+
+// v10's string.trim() of a message (ASCII whitespace; the copy is static, valid until the next call)
+static const char *trimmed(const char *text) {
+    static char out[sizeof(g_gift_msg)];
+    while (*text && isspace((unsigned char) *text)) text++;
+    size_t n = strlen(text);
+    while (n && isspace((unsigned char) text[n - 1])) n--;
+    snprintf(out, sizeof(out), "%.*s", (int) n, text);
+    return out;
+}
+
+// an answer's error as v10.0.7's catch shows it: iíiììiì(error) || fallback
+static void kio_view_failed(View *v, const cJSON *error, const char *fallback) {
+    snprintf(v->error, sizeof(v->error), "%s", v10_gapi_error_text(error, fallback));
+}
+
+// the gift's answer (deob-10.0.7.js:111683-111692): no error -> "Sent <amount> KR to <name>!"
+static void kio_gift_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    (void) data;
+    View *v = view_of(tag);
+    if (!v || v->type != V_GIFT) return;
+    v->loading = 0;
+    if (ok(status, error)) {
+        char amount[48];
+        fmt_js_num(amount, sizeof(amount), js_gift_amount(g_gift_amount)); // "Sent " + amount: the input's number
+        v->done = 1;
+        snprintf(v->message, sizeof(v->message), "Sent %s KR to %s!", amount, v->name);
+    } else {
+        kio_view_failed(v, error, "Failed to send gift");
+    }
+    render_views();
+}
+
+// the report's answer (:111766-111777): no error -> the success card
+static void kio_report_done(const int status, const cJSON *data, const cJSON *error, const intptr_t tag) {
+    (void) data;
+    View *v = view_of(tag);
+    if (!v || v->type != V_REPORT) return;
+    v->loading = 0;
+    if (ok(status, error)) v->done = 1;
+    else kio_view_failed(v, error, "Failed to submit report");
+    render_views();
+}
+
 static void gift_send(View *v) {
     const double amt = js_gift_amount(g_gift_amount);
     v->error[0] = 0;
@@ -4217,6 +4279,15 @@ static void gift_send(View *v) {
         return;
     }
     v->loading = 1;
+    if (kio()) { // v10.0.7's giftKR(playerName, amount, message.trim()): POST /players/<name>/gift (deob-10.0.7.js:111675-111692)
+        cJSON *body = cJSON_CreateObject();
+        cJSON_AddNumberToObject(body, "amount", amt);
+        cJSON_AddStringToObject(body, "message", trimmed(g_gift_msg));
+        if (!kio_player_post(v, "gift", body, kio_gift_done)) kio_gift_done(0, NULL, NULL, view_tag(v));
+        cJSON_Delete(body);
+        render_views();
+        return;
+    }
     // the economy's KR gift (services/brain/economy.c "kr"): v10 POST /players/<name>/gift
     // the amount is the number, the same one the button shows (deob-10.0.7.js giftKR)
     social_frame_send("kr", cJSON_CreateString(v->name), cJSON_CreateNumber(amt), cJSON_CreateString(g_gift_msg), cJSON_CreateNull());
@@ -4238,6 +4309,15 @@ static void report_send(View *v) {
     v->loading = 1;
     char text[sizeof(g_report_text)];
     snprintf(text, sizeof(text), "%.*s", (int) len, t);
+    if (kio()) { // v10.0.7's reportPlayer(playerName, reason, text): POST /players/<name>/report {reason, text} (:104523-104528)
+        cJSON *body = cJSON_CreateObject();
+        cJSON_AddNumberToObject(body, "reason", g_report_reason);
+        cJSON_AddStringToObject(body, "text", text);
+        if (!kio_player_post(v, "report", body, kio_report_done)) kio_report_done(0, NULL, NULL, view_tag(v));
+        cJSON_Delete(body);
+        render_views();
+        return;
+    }
     social_frame_send("rpt", cJSON_CreateString(v->name), cJSON_CreateNumber(g_report_reason), cJSON_CreateString(text), NULL);
     render_views();
 }
@@ -4406,7 +4486,9 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "deleteFollower")) { // window 5's Remove Friend: stop following them
         const char *who = arg_str(args, argc, 0);
-        if (who[0]) {
+        if (who[0] && kio()) {
+            fo_send(who, 0); // v10.0.7: send(FOLLOW_PLAYER, name, 0) (deob-10.0.7.js:227041-227047)
+        } else if (who[0]) {
             cJSON *body = cJSON_CreateObject();
             cJSON_AddFalseToObject(body, "follow");
             char enc[96], path[160];
@@ -4419,7 +4501,9 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "followPlayer")) { // the Inbox's Followers entry: Follow Back (v10 followPlayer)
         const char *who = arg_str(args, argc, 0);
-        if (who[0]) {
+        if (who[0] && kio()) {
+            fo_send(who, 1); // v10.0.7: send(FOLLOW_PLAYER, name, 1) (deob-10.0.7.js:227034-227040)
+        } else if (who[0]) {
             cJSON *body = cJSON_CreateObject();
             cJSON_AddTrueToObject(body, "follow");
             char enc[96], path[160];
@@ -4524,17 +4608,6 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (strcmp(name, "v10s") != 0) return -1;
     const char *op = arg_str(args, argc, 0);
     View *v = top_view();
-    // krunker.io account: the hub's writes are not ported (follow, like, comment, post, gift,
-    // report, trade): their buttons are hidden as for a v10 guest, and a stale or scripted click
-    // does nothing (the stop keeps a card click from opening its post). The clan view's apply is
-    // v10.0.7's gapi write (POST /clans/<id>/apply, krunker_kio_gapi_write).
-    static const char *const kio_writes[] = {"compose", "submit", "giveaway", "vote", "pfollow", "reply", "follow", "frow",
-                                             "trade", "gift", "giftsend", "report", "reportsend"};
-    for (size_t i = 0; kio() && i < sizeof(kio_writes) / sizeof(kio_writes[0]); i++)
-        if (!strcmp(op, kio_writes[i])) {
-            html_ui_stop_propagation();
-            return 1;
-        }
     if (!strcmp(op, "stop")) {
         html_ui_stop_propagation();
     } else if (!strcmp(op, "noop")) {

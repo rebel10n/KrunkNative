@@ -66,6 +66,11 @@ size_t krunker_kio_gapi_path(char *out, size_t n, const char *kn_path);
 //                                                                             encoded segment, at most 64 characters)
 // And the Notifications panel's web push (deob-10.0.7.js:26455-26483, web_push.c), exact:
 //   POST /webpush/subscribe   POST /webpush/unsubscribe   POST /webpush/status   POST /webpush/subscription-change
+// And the Social hub's player and post writes (the players and social clients, deob-10.0.7.js:27263-27311, 27384-27405):
+//   POST /players/<name>/follow {follow}       POST /players/<name>/report {reason, text}
+//   POST /players/<name>/gift {amount, message} POST /players/<name>/verify {featured}   POST /moderation/flag {player_name, flag}
+//   POST /social/post {..}                     POST /social/post/<id>/vote {value}   POST /social/post/<id>/comment {text}
+// <name> is one encoded segment (at most 64 characters); <id> is digits. No query.
 // Anything else is 0 (not sent).
 int krunker_kio_gapi_write(const char *method, const char *path);
 // 1 when "<method> <path>" is v10.0.7's one multipart gapi write: uploadLogo, POST /clans/<id>/logo with a FormData
