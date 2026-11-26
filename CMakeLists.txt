@@ -2041,6 +2041,10 @@ else ()
         # on Mesa's llvmpipe (EGL surfaceless), GLSL ES 3.00 and 4.50 core; skipped without llvmpipe
         add_test(NAME mod_shader_gl COMMAND python3 -I ${CMAKE_SOURCE_DIR}/tools/modshader/check_gl.py $<TARGET_FILE:mod_shader_test>)
         set_tests_properties(mod_shader_gl PROPERTIES SKIP_RETURN_CODE 77)
+        # web_shader_units: assets/shaders' programs as the web client links them, in headless Chromium's WebGL2
+        # (ANGLE): none may use more than 16 samplers, what Chrome allows on most GPUs; skipped without chromium
+        add_test(NAME web_shader_units COMMAND python3 -I ${CMAKE_SOURCE_DIR}/tools/modshader/check_web_units.py ${CMAKE_SOURCE_DIR})
+        set_tests_properties(web_shader_units PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240)
     endif ()
 
     # mod_pack_test: map resource packs (client/src/mod_pack.c, zip_read.c): the override applies on
