@@ -151,6 +151,9 @@ static const int OPTIONAL_C2S[] = {
     KRUNKER_C2S_SEND_TRADE_REQUEST, KRUNKER_C2S_SPEECH_BUBBLE, KRUNKER_C2S_TRADE_ACCEPT,
     KRUNKER_C2S_TRADE_CANCEL, KRUNKER_C2S_TRADE_CHAT, KRUNKER_C2S_TRADE_CURRENCY_UPDATE,
     KRUNKER_C2S_TRADE_DECLINE, KRUNKER_C2S_TRADE_UPDATE,
+    // the DEV row's Bot Debugging popup (botsPopup / debugBots, deob-10.0.7.js:224128-224157): sent only from that
+    // popup, which the server shows a developer. A build without them: the popup opens on nothing and its rows do nothing
+    KRUNKER_C2S_BOT_CONFIG, KRUNKER_C2S_BOTS,
     -1,
 };
 static const int OPTIONAL_S2C[] = {
