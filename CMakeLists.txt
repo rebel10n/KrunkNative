@@ -1347,6 +1347,13 @@ else ()
     target_link_libraries(krunker_link_test PRIVATE cJSON Threads::Threads m)
     target_compile_definitions(krunker_link_test PRIVATE KN_SOURCE_DIR="${CMAKE_SOURCE_DIR}") # tools/krunker/build.json (a live build)
     add_test(NAME krunker_link_test COMMAND krunker_link_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    # krunker_social_test (client/include/krunker_social.h): the hub page's krunker.io social socket framing (msgpack +
+    # ahNum, rpc, cpt / cptR) over the codec, no sockets
+    add_executable(krunker_social_test client/tests/krunker_social_test.c client/src/net/krunker_social_wire.c client/src/net/krunker_altcha.c
+                   shared/src/krunker_proto.c shared/src/krunker_build_live.c shared/src/auth_join.c)
+    target_include_directories(krunker_social_test PRIVATE client/include shared/include)
+    target_link_libraries(krunker_social_test PRIVATE cJSON Threads::Threads m)
+    add_test(NAME krunker_social_test COMMAND krunker_social_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     # kn_captcha_test (client/include/kn_captcha.h): Box Office's captcha in the client: the brain's ALTCHA challenge
     # fetched (a backend double), solved over frames by krunker_altcha.c, its payload the 1.0.6 widget's, the sign-in frame
     add_executable(kn_captcha_test client/tests/kn_captcha_test.c client/src/net/kn_captcha.c client/src/net/krunker_altcha.c
@@ -1660,6 +1667,11 @@ else ()
             add_test(NAME store_bundle_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/store_bundle_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
             set_tests_properties(store_bundle_e2e PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
+            # krunker_hub_social_e2e: the hub page of an official game on krunker.io's own social socket (krunker_social.h):
+            # /ws/ping, ?tc=&at=&pat=, msgpack + ahNum, cpt / cptR, "r" / "a" / "0" / "news", patR every 20 s, DISCONNECTED
+            add_test(NAME krunker_hub_social_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/krunker_hub_social_e2e.py
+                     ${CMAKE_BINARY_DIR} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set_tests_properties(krunker_hub_social_e2e PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "client;ui;e2e")
             # weap_nametag_e2e: a worn copy's m.name is .weapNametag on the HUD rack (deob-10.0.7.js:176440)
             add_test(NAME weap_nametag_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/weap_nametag_e2e.py
                      ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

@@ -824,6 +824,10 @@ kio-guest-e2e: build ## A krunker.io guest: FRVR's anonymous session (crucible /
 kio-pfp-e2e: build ## A premium krunker.io account's profile picture: user-assets /p<id>/profile.png, pfpPopup, the 250 kb check, "uploadP" on the official socket, "Uploaded!" on "upPR" (krunker.io stubs, a stub zenity, headless)
 	timeout 400 $(PYTHON) -I client/tests/kio_pfp_e2e.py $(DEBUG_DIR)
 
+.PHONY: kio-hub-social-e2e
+kio-hub-social-e2e: build ## The hub page of an official krunker.io game on krunker.io's own social socket (krunker_social.h): /ws/ping, ?tc=&at=&pat=, msgpack + ahNum, cpt / cptR, "r" / "a" / "0" / "news", patR every 20 s, DISCONNECTED (a social.krunker.io stub, headless)
+	timeout 300 $(PYTHON) -I server/tests/krunker_hub_social_e2e.py $(DEBUG_DIR)
+
 .PHONY: kio-store-e2e
 kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs; BUY, a spin and the ranked Buy send shop/purchase, spins/execute and ranked/purchase with the Bearer, a real-money card the checkout's "xpurchase"; Box Office's store again after leaving
 	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)
@@ -1325,7 +1329,7 @@ E2E_DEBUG_TARGETS := strike-app-test viewer-diff frame-yield-test offline-dead-t
 	console-settings-test crash-capture-test raw-mouse-test chat-globe-test bhop-setting-test \
 	fps-uncapped-test strike-vsync-test window-icon-test test-net krunker-official-e2e \
 	krunker-account-e2e krunker-challenges-e2e account-unify-e2e kio-spin-battlepass-e2e \
-	kio-battlepass-e2e kio-store-e2e kio-turf-e2e kio-clan-e2e kio-market-e2e ranked-krunker-e2e target-select-e2e \
+	kio-battlepass-e2e kio-hub-social-e2e kio-store-e2e kio-turf-e2e kio-clan-e2e kio-market-e2e ranked-krunker-e2e target-select-e2e \
 	bots-chat-e2e command-auth-e2e live-signin-e2e votekick-e2e playerlist-ui-e2e row-centre-e2e \
 	billboard-e2e idle-kick-e2e join-spawn-e2e nuke-e2e ruleset-e2e v10-settings-e2e settings-wiring-e2e \
 	pickup-chat-e2e junk-wallet-e2e v10-rewards-e2e reconnect-test mm-token-e2e server-tabs-e2e \

@@ -702,6 +702,11 @@ static void kio_frame(const char *label, const cJSON *frame) {
     }
 }
 
+void account_kio_hub_account(const cJSON *frame) {
+    const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
+    if (label && !strcmp(label, "a") && krunker_account_signed_in()) kio_frame(label, frame);
+}
+
 // The windows' frames while krunker.io is the active backend (backend_social_set_held_sender): the
 // read-only ones go over the official game socket, as v10 sends them (krunker_net.h)
 static int kio_held_send(const char *json) {

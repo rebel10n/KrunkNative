@@ -76,7 +76,7 @@ v10 fetches it:
   `_10449 = new _10077(GAPI_URI)`, v10:27600) with the account's fresh Bearer token, answers unwrapped
   as `_10067` (v10:26094). Only GETs of `/players/`, `/social/`, `/clans/`, `/territorial-wars/` are
   sent; the profile's Sales tab uses v10's `getSales(name, rangeIndex)` / `getListings(name)`.
-* the friends event bus is v10's own socket (`client/src/net/krunker_eb.c`:
+* the friends event bus is v10's own socket (`client/src/net/krunker_eb.c` over `krunker_ws.c`:
   `<EVENT_BUS_URI>/ws?at=<fresh token>`, natively through the client's proxy with Origin
   https://krunker.io, the browser's WebSocket on the web, none on Windows) with v10's reconnect
   backoff. Friends list, presence, history, direct messages and read receipts work as in v10.
@@ -98,11 +98,29 @@ v10 fetches it:
   Remove Friend and the Inbox's Follow Back are FOLLOW_PLAYER `["fo", name, 0 | 1]` on the game socket
   (deob-10.0.7.js:227034-227047). The profile's Trade button opens nothing in either mode (KrunkNative
   has no port of v10.0.7's trade popup, svelte-1lqen9w). The Turf Wars popup's reads stay kn_brain's.
-* not ported: the separate hub page (`social_ui.c`, krunker.io's social.html) talks to krunker.io's own
-  social socket (`<SOCIAL_URI>/ws?at=<token>&pat=<the /ws/ping token>`, the game socket's msgpack framing
-  and AHKEY, PAT_REFRESH every 20 s); KrunkNative has no client for it, so that page's frames are not sent
-  for the krunker.io account.
-* tests: `server/tests/krunker_social_e2e.py`.
+* the separate hub page (`social_ui.c`, krunker.io's social.html) talks to krunker.io's own social socket, as
+  the hub bundle does (since 2026-11-26; hub-10.0.7.js:7020-7110, `client/include/krunker_social.h`):
+  `at` = FRVR's fresh token (`krunker_account_frvr_token`), `pat` = `GET <SOCIAL_URI>/ws/ping`'s `token`
+  (none when that fails), `tc` = the saved `testCode`; the socket is `<SOCIAL_URI>/ws?tc=&at=&pat=` (each part only
+  when set), https -> wss, http -> ws. The framing is the game socket's (deob-10.0.7.js:98766-98980), from
+  `shared/src/krunker_proto.c`: msgpack `[type, ...args]` plus the ahNum trailer, `(ahNum + 0x43e1) & 0xff` before
+  every frame but `cptR`; `io-init`; the ALTCHA `cpt` solved in slices of 50000 numbers a frame (`krunker_altcha.c`)
+  and answered `cptR`, with v10's Security Challenge modal (`#captcha-holder`) until the server's `cptR`, or
+  "CAPTCHA FAILED" and the socket closed; `_0` / `_1` rpc answers. Every other frame goes to the page's handler
+  table, the same `handle_reply_frame` kn_brain's frames reach (`error` and `1` are showError with "Code: <code>").
+  On open the page asks for its view (`r`) at once (the socket is signed in by its `at=`; a signed-in FRVR session
+  shows "Logging in..." until the server's `a`, which also fills the krunker.io account's data,
+  `account_kio_hub_account`); every 20 s it fetches `/ws/ping` again and sends `patR` with the new token while
+  connected; a krunker.io sign-in while the page shows no account sends `rpc(LOGIN, token)` (the auth listener,
+  hub-10.0.7.js:7035-7039); a close shows DISCONNECTED. `ecfg` (kn_brain's economy rules) is not sent, and nothing
+  goes to kn_brain. The socket is `client/src/net/krunker_social.c` over `krunker_ws.c` (the WebSocket client the
+  event bus uses too, binary frames added), the framing `krunker_social_wire.c`. Natively the socket and `/ws/ping`
+  go through the client's proxy; on the web they are the browser's; the Windows build has no WebSocket client for
+  krunker.io and shows DISCONNECTED. Tests: `krunker_social_test` (the framing, rpc, cpt / cptR) and
+  `server/tests/krunker_hub_social_e2e.py` (a social.krunker.io stub: the URL, every trailer, cptR, the modal,
+  `r` / `a` / `0` / `news`, `patR` after 20 s, DISCONNECTED, nothing to kn_brain). The LOGIN rpc has no e2e: a
+  krunker.io sign-in from the hub page goes through the login card's Security Challenge.
+* tests: `server/tests/krunker_social_e2e.py`, `server/tests/krunker_hub_social_e2e.py`.
 
 ## Player profile (v10.0.3)
 

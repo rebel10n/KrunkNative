@@ -137,6 +137,9 @@ static const int OPTIONAL_C2S[] = {
     // the krunker.io account in the game (account-unify): the socket login after a sign-in, the ranked
     // join ("joinedRank"), and the account's RPC (v10 _33978.rpc). A build without them only loses the account
     KRUNKER_C2S_LOGIN, KRUNKER_C2S_RPC, KRUNKER_C2S_JOINED_RANK,
+    // the hub's social socket refreshes its pre-auth token every 20 s (krunker_social.c, hub-10.0.7.js:7067-7072). A build
+    // without it sends no refresh: the server may close the socket and the hub shows DISCONNECTED
+    KRUNKER_C2S_PAT_REFRESH,
     // the host's Kick / Ban on an official game (the player list's staff buttons, krunker_link_is_host): v10 sends
     // ADMIN_ACTIONS only from them, and the server checks the sender's right. A build without it: those buttons do nothing
     KRUNKER_C2S_ADMIN_ACTIONS,

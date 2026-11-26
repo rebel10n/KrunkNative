@@ -24,6 +24,7 @@
 #include <kn_captcha.h> // the hub login's captcha (doc/v10/captcha.md)
 #include <krunker_account.h> // krunker_host_url: the data client's webhooks (the hub's maps, mods and search)
 #include <krunker_kio_routes.h> // the webhook groups and URL of those requests (krunker_kio_routes.c)
+#include <krunker_social.h> // krunker.io's own social socket: the page's socket while krunker.io is the active backend
 #include <weapons.h>
 #include <cJSON.h>
 #include <html_dom.h>
@@ -176,7 +177,8 @@ typedef struct {
     SocialAssembly assembly;
 
     // brain (backend.h): the real social socket instead of the game connection
-    int brain;              // backend_enabled() when the page was entered
+    int brain;              // the page talks to a social socket (kn_brain's, or krunker.io's when kio)
+    int kio;                // krunker.io is the active backend: the socket is krunker.io's own (krunker_social.h)
     int fe;                 // fe: a silent token login is in flight (no success popup)
     int page_after_login;   // the connect's page request waits for that login (hub_connected)
     int logged_in;          // acc != null
@@ -282,6 +284,7 @@ static void hub_sound(const char *name, const float volume) {
 // ------------------------------------------------------------------ transport
 
 static int hub_connection_up(Client *client) {
+    if (g_hub.kio) return krunker_social_is_open();   // krunker.io's social socket
     if (g_hub.brain) return backend_social_is_open(); // the brain's social socket
     if (!client) return 0;
     if (client->offline) return 1;
@@ -304,6 +307,7 @@ static void hub_send(cJSON *frame) {
         // brain: socket frames go out as they are; the "api" stand-in is a real HTTP GET
         const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
         if (label && !strcmp(label, "api")) hub_brain_api(frame);
+        else if (g_hub.kio) krunker_social_send(frame);
         else backend_social_send(frame);
         cJSON_Delete(frame);
         return;
@@ -428,8 +432,11 @@ static void hide_all(const int keep_loading) {
     if (tip) html_dom_remove(tip);
 }
 
-// io_error(text, code): the error screen (DISCONNECTED)
-static void io_error(const char *text) {
+// io_error(text, code): the error screen (DISCONNECTED); code "" = none, else "Code: <code>"
+static void io_error_code(const char *text, const char *code);
+static void io_error(const char *text) { io_error_code(text, ""); }
+
+static void io_error_code(const char *text, const char *code_text) {
     if (g_hub.error_shown) return;
     g_hub.error_shown = 1;
     hide_all(0);
@@ -441,7 +448,11 @@ static void io_error(const char *text) {
     const HtmlElem title = el("errorTitle");
     if (title) html_dom_set_text(title, text);
     const HtmlElem code = el("errorCode");
-    if (code) html_dom_set_text(code, "");
+    if (code) {
+        char line[160] = "";
+        if (code_text && code_text[0]) snprintf(line, sizeof(line), "Code: %s", code_text);
+        html_dom_set_text(code, line);
+    }
 }
 
 // ------------------------------------------------------------------ settings
@@ -9267,7 +9278,18 @@ static void hub_connected(void) {
     g_hub.connected = 1;
     char name[64] = "";
     // the saved session: the alt vault's (account_ui.c), not the plain krunker_token key, which a cipher build empties
-    if (g_hub.brain && account_saved_name(name, sizeof(name)) && account_session_token()[0] && name[0]) {
+    if (g_hub.kio) {
+        // iïïîïïî (hub-10.0.7.js:2115-2126): a FRVR session that is not the anonymous one says "Logging in..." quietly;
+        // the socket signed it in from its at=, so its "a" answers and the page request goes now
+        if (krunker_account_signed_in()) {
+            set_display("profileLogin", "none");
+            set_html("profileName", I18N("social.login.proccessing", "Logging in..."));
+            g_hub.fe = 1;
+        } else {
+            set_display("profileLogin", "inline-block");
+            set_html("profileName", "");
+        }
+    } else if (g_hub.brain && account_saved_name(name, sizeof(name)) && account_session_token()[0] && name[0]) {
         if (active_account()) {
             // account_ui.c's restore already answered on this socket
             g_hub.fe = 1;
@@ -9283,7 +9305,7 @@ static void hub_connected(void) {
         set_display("profileLogin", "inline-block");
         set_html("profileName", "");
     }
-    if (g_hub.brain) { // the server's economy rules (fees, levels, limits): "ecfg"
+    if (g_hub.brain && !g_hub.kio) { // kn_brain's economy rules (fees, levels, limits): "ecfg"
         cJSON *f = cJSON_CreateArray();
         cJSON_AddItemToArray(f, cJSON_CreateString("ecfg"));
         hub_send(f);
@@ -9292,6 +9314,58 @@ static void hub_connected(void) {
     // index 1 is Featured
     api_request("/maps", 1, 0, NULL, NULL, NO_CATEGORY);
     if (!g_hub.page_after_login) request_page(); // Xa(v, b, K, q, k, V, x); else at io_a
+}
+
+// ------------------------------------------------------------------ krunker.io's social socket (kio)
+
+// The socket's showCaptcha (deob-10.0.7.js:98903-98967): #captcha-holder over the page with the "Security Challenge"
+// modal while the ALTCHA widget works; the proof of work is krunker_social.c's, so the widget's box is empty
+static void kio_captcha_modal(const int shown) {
+    const HtmlElem holder = el("captcha-holder");
+    if (!shown) {
+        if (holder) html_dom_remove(holder);
+        return;
+    }
+    if (holder) return;
+    const HtmlElem body = html_dom_body();
+    if (!body) return;
+    html_dom_insert_html(body, HTML_INSERT_BEFORE_END,
+                         "<div id='captcha-holder' style='background-color:rgba(0, 0, 0, 0.5);z-index:2147483647;position:fixed;top:0;"
+                         "left:0;bottom:0;right:0;pointer-events:all'><div style='background-color:white;z-index:999999;position:fixed;"
+                         "top:50%;left:50%;transform:translate(-50%, -50%);padding:20px;border-radius:6px;box-shadow:0px 9px 0px 0px "
+                         "#a6a6a6;width:450px;display:flex;text-align:center;flex-direction:column;justify-content:center;"
+                         "align-items:center;pointer-events:all'><div style='font-size:32px;text-transform:uppercase;"
+                         "margin-bottom:10px'>Security Challenge</div><div style='color:rgba(0, 0, 0, 0.6);font-size:20px;"
+                         "margin-bottom:10px'>Please complete the security challenge to continue.</div><div></div></div></div>");
+}
+
+// The connect callback and the handler table of hub-10.0.7.js:7053-7109 on krunker_social.h's events
+static void hub_on_kio(void *user, const KrunkerSocialEvent ev, const cJSON *frame, const char *text) {
+    (void) user;
+    if (!g_hub.entered) return;
+    if (ev == KRUNKER_SOCIAL_OPEN) {
+        hub_connected();
+    } else if (ev == KRUNKER_SOCIAL_CLOSED) {
+        io_error("DISCONNECTED"); // the callback's error (and the PAT_REFRESH interval ends with the socket)
+    } else if (ev == KRUNKER_SOCIAL_ERROR) {
+        kio_captcha_modal(0);
+        io_error(text ? text : "DISCONNECTED"); // the "error" event: showError
+    } else if (ev == KRUNKER_SOCIAL_FRAME) {
+        const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
+        if (!label) return;
+        if (!strcmp(label, "error") || !strcmp(label, "1")) { // error / 1: showError(text, code)
+            const cJSON *t = cJSON_GetArrayItem(frame, 1), *c = cJSON_GetArrayItem(frame, 2);
+            char msg[256], code[64] = "";
+            if (cJSON_IsString(t)) snprintf(msg, sizeof(msg), "%s", t->valuestring);
+            else js_num(msg, sizeof(msg), cJSON_GetNumberValue(t));
+            if (cJSON_IsString(c)) snprintf(code, sizeof(code), "%s", c->valuestring);
+            else if (cJSON_IsNumber(c)) js_num(code, sizeof(code), c->valuedouble);
+            io_error_code(msg, code);
+            return;
+        }
+        if (!strcmp(label, "a")) account_kio_hub_account(frame); // the account's data, as the game socket's "a"
+        handle_reply_frame(frame);
+    }
 }
 
 // URL parameter of "p=profile&q=x" (decoded: %XX and '+').
@@ -9360,8 +9434,12 @@ static void social_enter(Client *client, const char *query) {
     html_ui_set_listener(NULL, "click", l_document_click);
     html_ui_set_listener("searchPInput", "keyup", l_search_keyup);
     html_ui_set_listener("chatBoxInput", "keyup", l_chat_keyup);
-    g_hub.brain = backend_enabled();
-    if (g_hub.brain) {
+    // an official krunker.io game's hub talks to krunker.io's own social socket (iîíìiîî), never to kn_brain
+    g_hub.kio = account_backend() == ACCOUNT_BACKEND_KRUNKER;
+    g_hub.brain = g_hub.kio || backend_enabled();
+    if (g_hub.kio) {
+        if (!krunker_social_open()) g_hub.enter_time = -1; // refused at once: DISCONNECTED (social_tick)
+    } else if (g_hub.brain) {
         const int was_open = backend_social_is_open();
         backend_social_listen(hub_on_social, NULL);
         backend_social_open();
@@ -9395,6 +9473,12 @@ static void social_tick(Client *client, const float now, const float delta) {
     if (!g_hub.entered) return;
     vgrid_tick(&g_market_grid); // the card lists follow their scroll positions (ui_vgrid.h)
     vgrid_tick(&g_items.grid);
+    if (g_hub.kio) { // krunker.io's socket: its events drive the page (hub_on_kio), the 20 s PAT_REFRESH, LOGIN
+        krunker_social_tick(g_hub.logged_in, hub_on_kio, NULL);
+        if (g_hub.entered) kio_captcha_modal(krunker_social_captcha_shown());
+        if (g_hub.enter_time < 0 && !g_hub.error_shown) io_error("DISCONNECTED");
+        return;
+    }
     if (g_hub.brain && !g_hub.connected && backend_available() == 0) {
         // a default brain URL (local config / page origin) with no kn_brain behind it: the
         // guest page over the game connection, as without a backend
@@ -9417,6 +9501,7 @@ static void social_tick(Client *client, const float now, const float delta) {
 static void social_leave(Client *client) {
     (void) client;
     audio_stop("ambient_8"); // the Black Market's loop ends with the page, as a browser's does when it leaves social.html
+    if (g_hub.kio) krunker_social_close(); // the page's socket goes with it
     backend_social_unlisten(hub_on_social, NULL);
     v10_gapi_cancel(hub_news_loaded, NULL);
     if (g_delayed_timer) html_timer_cancel(g_delayed_timer);

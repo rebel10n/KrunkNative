@@ -200,6 +200,9 @@ double account_skin_wear(int skin);
 // krunker.io: the balances a market REST answer carries (data.funds / data.junk), set as the "uf" frame sets them.
 void account_kio_set_balances(int has_funds, double funds, int has_junk, double junk);
 void account_kio_set_clan(const char *tag); // the krunker.io account's acc.clan (player_clan; NULL / "" = none)
+// The hub page's krunker.io social socket's ACCOUNT_RESPONSE ["a", error, id, name, data, ...] (krunker_social.h): the
+// krunker.io account's data, as the game socket's "a" gives it (a hub window that never joined a game has no other)
+void account_kio_hub_account(const cJSON *frame);
 // acc.removeSkin: -1 of skin (a redeemed spin ticket, a spent paint). On krunker.io the account's own skins, as v10.0.7
 // takes a spent paint (an item paint, a clan banner colour): the first entry of the index with cnt ?? 1 > 0, gone at 0.
 void account_remove_skin(int skin_index);
