@@ -32,7 +32,7 @@
 #define P(i) (n > (i) ? p[i] : NULL)
 #define PI(i) pint(P(i))
 
-#define CHALLENGES_DAILY 3  /* daily challenges an account gets per UTC day */
+#define CHALLENGES_DAILY 5  /* daily challenges an account gets per UTC day: krunker.io listed five on 2026-11-25 (0410) */
 #define CHALLENGES_WEEKLY 3 /* weekly challenges per week (weeks start on Monday 00:00 UTC) */
 
 static int64_t pint(const char *s) { return s ? strtoll(s, NULL, 10) : 0; }

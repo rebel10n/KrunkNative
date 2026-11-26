@@ -376,7 +376,9 @@ def run(brain_port, game_port):
     bp = social.get("bpEnd", since_end)
     t = bp[-1][1] if bp else {}
     bpp1 = bpp_total(account_id)
-    check("BPP: bpEnd's cbp is the daily's %d" % DAILY_BPP, t.get("cbp") == DAILY_BPP == want_bpp, str(t)[:200])
+    # the match can complete more dailies than DAILY (0410's "Play 1 Burg Match" on this Burg match), each paying its BPP
+    check("BPP: bpEnd's cbp is every completed challenge's BPP (%d, the daily's %d included)" % (want_bpp, DAILY_BPP),
+          t.get("cbp") == want_bpp and want_bpp >= DAILY_BPP, str(t)[:200])
     check("BPP: battlepass_progress = before + gn + cbp", bpp1 == bpp0 + t.get("gn", -1) + t.get("cbp", -1), "%s -> %s %s" % (bpp0, bpp1, t))
     chlr = social.get("chlR", since_end)[-1]
     check("chlR [skins, funds, junk, jnk, kr, ...]: the skin and the KR", chlr[1] == [E2E_SKIN] and chlr[5] == want_kr, str(chlr))

@@ -316,7 +316,7 @@ def run():
     check("stats committed for the account", bool(rows))
     # WP-E part 2c: the commit carries the v7 progression fields; a partial (drained) commit is a
     # "quit" (no challenge progress) and the medal / badge tables exist (0107_progression)
-    check("0107_progression: the starting challenges", psql("SELECT count(*) FROM challenges").strip() == "26")
+    check("0107_progression + 0410: the starting challenges (26, then the 4 map dailies)", psql("SELECT count(*) FROM challenges").strip() == "30")
     check("partial commit: no challenge progress", psql(f"SELECT count(*) FROM player_challenges WHERE account_id = {alice}").strip() == "0")
     a.close()
     b.close()

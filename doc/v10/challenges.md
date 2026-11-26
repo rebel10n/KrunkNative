@@ -180,8 +180,10 @@ Against `~/jails/kru/src/Krunker_v10.0.7/deob/game.deob.js` (deob-10.0.7.js):
   junk), "Play 1 Burg Match" and "Play 1 SkyTemple Match" (+0 KR, +0.1 junk), "Get a 20 killstreak on Burg" (+70 KR,
   +0 junk). So every daily gives 50 BPP (0409 moves the spray and assist rows from 0397's 25), row 15 ("Get 15
   Headshots") and row 18 (5 headshots with one weapon) give 0 KR and 0.25 junk, and the rows with no official
-  counterpart in that read keep their KR. The map-scoped "Play 1 <map> Match" and killstreak dailies have no Box
-  Office row. For a krunker.io account KrunkNative draws the `REW` krunker.io sends (`battlepass_ui.c`
+  counterpart in that read keep their KR. Migration 0410 adds the other four as rows 27-30 (their DAT.mp,
+  "gp" and "kstk" keys, icons 4 / 2 / 7, the killstreak's Wood skin 3237) and gives row 15 krunker.io's name and icon
+  2, and the brain now hands each account five dailies a day (`CHALLENGES_DAILY`, `db_progress.c`), as krunker.io
+  listed five. For a krunker.io account KrunkNative draws the `REW` krunker.io sends (`battlepass_ui.c`
   `gen_daily_card` over the account's `activeChallenges`), so 0397 and 0409 only set Box Office's values.
 - **Weekly.** v10.0.7's Battle Pass Challenges tab draws the dailies only; KrunkNative keeps its weekly section
   there, since Box Office's weekly rows (23-26) are drawn nowhere else.

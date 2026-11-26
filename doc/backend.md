@@ -1467,7 +1467,7 @@ Other labels (request -> reply):
 | `["fkr"]` | `["spinKR", lastReward, randNum, freeKRIndex, funds]` / `["spinKR", null, null, null, null, err]`: the Free KR wheel (rarities 50/39/10/1 %, `store.freeKR` 5/10/20/500 KR, level 1), once per `reward_time_s`; `sfkr` / `lfkr` / `fkrf` (v7's ad events) are accepted |
 | `["clm"]` | `["clm", lastReward, funds]` / `["pRes", null, err]`: daily reward (level >= `reward_min_level`, `daily_reward_kr`, same clock as `fkr`); `["unbx"]` is accepted |
 | `["rpt", name, reason, details]` / `["grp", name]` | `["rpr", ok]` / `["rps", rows]` (staff) |
-| `["chg"]` | `["chgL", activeChallenges]`: `[{CI, T, DAT, REW, IC, N, PV, PT, TR?, PER}]` (v7 `account.activeChallenges`; TR = ms left of a daily / weekly one; 3 daily + 3 weekly rotate per account and UTC day / week) (WP-E part 2c, `progress.c`) |
+| `["chg"]` | `["chgL", activeChallenges]`: `[{CI, T, DAT, REW, IC, N, PV, PT, TR?, PER}]` (v7 `account.activeChallenges`; TR = ms left of a daily / weekly one; 5 daily (krunker.io's count, 0410) + 3 weekly rotate per account and UTC day / week) (WP-E part 2c, `progress.c`) |
 | `["bdg", badge]` | `["bdgr", badge]` / `["po", null, "You dont own this badge"]`: `player_stats.bdg` (-1 clears; v7 io_badgeUpdate) |
 | `["cbdg", badge]` | `["cbdgr", badge]` / `["po", null, err]` ("Badge not claimable", "Requirements not met", "Badge already claimed"): a claimable badge whose rule holds (Nuclear I-IV: `stats.n`) |
 | `["mdl"]` | `["mdl", {medal: count}]`: the account's medal counts (Krunker Box Office) |

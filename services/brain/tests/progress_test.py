@@ -219,7 +219,7 @@ async def scenario(port):
         types = {}
         for c in rows:
             types[c["T"]] = types.get(c["T"], 0) + 1
-        check(types.get("daily") == 3 and types.get("weekly") == 3, "3 daily + 3 weekly of the rotation: %s" % types)
+        check(types.get("daily") == 5 and types.get("weekly") == 3, "5 daily (krunker.io, 0410) + 3 weekly of the rotation: %s" % types)
         check(types.get("map") == 6 and types.get("weapon") == 6 and types.get("nightmare") == 2, "map / weapon / nightmare: %s" % types)
         c1 = by_ci(rows, 1)
         check(c1 and c1["DAT"] == {"ky": "k", "val": 25, "mp": 0} and c1["REW"] == {"kr": 10} and c1["PV"] == 0 and c1["PT"] == 0
