@@ -5,7 +5,7 @@
 
 While an official krunker.io game is joined, the Store shows krunker.io's own catalogue, loaded the way
 Krunker v10.0.2 loads it (its API client: shop/displays?tag=limited, ranked/shop, with the krunker.io
-account's token), and nothing that would spend the account's KR / RP is sent to krunker.io.
+account's token), and its writes go to krunker.io as v10.0.7 sends them.
 
 A real kn_brain (scratch sqlite database: the account service is enabled, as for a player), the
 krunker.io stubs of krunker_account_e2e.py (API with shop/displays and ranked/shop in v10's shapes,
@@ -16,7 +16,8 @@ FRVR auth, matchmaker, game server) and one headless client_bin (--offline):
   3. signed in to krunker.io: the same catalogue, its SOLD OUT card, the Global limit, the dynamic
      (quantity) card and the section; BUY on a card, BUY in the item view, a spin, a voucher, Purchase
      KR and the ranked shop's Buy (the ranked shop lists the account's krunker.io items, fetched with
-     its Bearer token) all show the read-only notice and send nothing to krunker.io
+     its Bearer token): BUY, the spin and the ranked Buy send v10's writes (shop/purchase, spins/execute,
+     ranked/purchase) with the account's Bearer token, and Redeem Keys opens v10's vouchPop
   4. leaving the game: the Box Office Eterno Shop again, exactly as in 1, and no further krunker.io
      shop request
 Exit 0 when every check passed, 77 when it cannot run.
@@ -147,8 +148,11 @@ def script():
           "20040 nodes @kbadge .badge-img",
           # BUY on a card (the last in the front grid)
           "20100 clicksel .shop-front-grid .buy-button",
-          "20600 text @kro .error-popup-content",
-          "20700 call knViewPop 0",
+          # a real-money card opens v10's payment selector; its Credit/Debit Card sends the checkout's request
+          "20300 vis @kpay purchaseHolder",
+          "20400 clickid xsollaPayB",
+          "20800 call cancelPurchase",
+                    "20700 call knViewPop 0",
           # the item view (the Eterno Mug's card, display 5) and its BUY
           "21000 call knKioShopItem 5",
           "21500 nodes @kview .item-showcase-container",
@@ -158,7 +162,7 @@ def script():
           "22200 call knViewPop 0", "22300 call knViewPop 0",
           # a voucher, Purchase KR
           "22500 call voucherPopup",
-          "22800 nodes @kvouch .error-popup-container",
+          "22800 nodes @kvouch [id=redVouch]",
           "22900 call knViewPop 0",
           "23000 call showPurchase 0",
           "23300 call knViewPop 0",
@@ -177,14 +181,14 @@ def script():
           "28510 nodes @rkitems .shop-grid .shop-item-wrapper",
           "28520 grep @rk_rhino Rhino [id=genericPop]", "28530 grep @rk_clan Clan [id=genericPop]",
           "28600 call knRkBuy 501",
-          "29000 nodes @rkro .error-popup-container",
-          "29100 call knViewPop 0",
-          "29300 call clearPops",
+          "29000 nodes @rkro .confirm-purchase-container",
+          "29100 call knViewPop 1",  # the confirm dialog's Buy: /ranked/purchase
+          "30800 call clearPops",
           # 4. leave: Box Office again
-          "29500 con disconnect",
-          "29700 down ESC", "29750 up ESC"]
-    s += eterno(30500, "bo2")
-    s += ["33000 quit"]
+          "31000 con disconnect",
+          "31200 down ESC", "31250 up ESC"]
+    s += eterno(32000, "bo2")
+    s += ["34500 quit"]
     return "\n".join(s) + "\n"
 
 
@@ -249,23 +253,32 @@ def checks(text, stub):
     check("3. the global purchase limit, the dynamic card, the section and the badge card are drawn",
           nodes(text, "kglobal") == 1 and nodes(text, "kdyn") == 1 and nodes(text, "ksection") == 1 and nodes(text, "kbadge") == 1,
           (nodes(text, "kglobal"), nodes(text, "kdyn"), nodes(text, "ksection"), nodes(text, "kbadge")))
-    check("3. BUY on a card: the read-only notice (Box Office)", "Box Office" in text_of(text, "kro"), text_of(text, "kro"))
+    buys = stub.find("POST", "/api/shop/purchase")
+    bearer = lambda r: r[3].get("authorization", "").startswith("Bearer ") and r[3]["authorization"] != "Bearer "
+    # the last front card is the $50 Contributor Badge (product 46): a real-money product goes to v10's checkout, whose
+    # request is the game socket's "xpurchase" (krunker_checkout_product, deob-10.0.4.js:212396), not shop/purchase
+    check("3. BUY on a real-money card opens v10's payment selector", vis(text, "kpay").get("purchaseHolder") == "1", vis(text, "kpay"))
+    check("3. ... whose Credit/Debit Card sends the checkout's \"xpurchase\" on the game socket", "xpurchase" in stub.ws_frames,
+          stub.ws_frames[-12:])
     check("3. the card opens v10's item view", nodes(text, "kview") == 1 and "Eterno Mug" in text_of(text, "kviewtext"), text_of(text, "kviewtext")[:120])
-    check("3. ... and its BUY gives the read-only notice", nodes(text, "kro2") == 1, nodes(text, "kro2"))
-    check("3. Redeem Keys gives the read-only notice", nodes(text, "kvouch") == 1, nodes(text, "kvouch"))
-    check("3. a spin gives the read-only notice", nodes(text, "kspin") == 1 and "[kio-store] read-only: spin not sent" in text, nodes(text, "kspin"))
+    check("3. ... and its KR BUY sends krunker.io's shop/purchase with the account's Bearer (kio_store_buy, v10 _38968)",
+          len(buys) == 1 and bearer(buys[0]), [(r[1], r[4]) for r in buys])
+    check("3. ... and the stub's refusal is shown (v10's Purchase failed popup)", nodes(text, "kro2") == 1, nodes(text, "kro2"))
+    check("3. Redeem Keys opens v10's vouchPop (its Redeem sends the game socket's \"vo\")", nodes(text, "kvouch") == 1, nodes(text, "kvouch"))
+    spins = stub.find("POST", "/api/spins/execute")
+    check("3. a spin sends krunker.io's spins/execute with the account's Bearer (kio_store_spin)", len(spins) == 1 and bearer(spins[0]),
+          [(r[1], r[4]) for r in spins])
     rk = stub.find("GET", "/api/ranked/shop")
     check("3. the ranked shop is krunker.io's ranked.getShop, with the account's Bearer token",
-          bool(rk) and rk[-1][3].get("authorization", "").startswith("Bearer ") and rk[-1][3]["authorization"] != "Bearer ",
-          [r[3].get("authorization", "")[:10] for r in rk])
+          bool(rk) and bearer(rk[-1]), [r[3].get("authorization", "")[:10] for r in rk])
     rkt = text_of(text, "rk")
     check("3. ... and lists the krunker.io ranked items", grep(text, "rk_rhino") > 0 and grep(text, "rk_clan") > 0 and nodes(text, "rkitems") == 2,
           (rkt[-200:], nodes(text, "rkitems")))
-    check("3. its Buy gives the read-only notice", nodes(text, "rkro") == 1 and "read-only: ranked/purchase" in text, nodes(text, "rkro"))
-    ro = re.findall(r"\[kio-store\] read-only: ([^\n]*)", text)
-    check("3. every purchase / spin / redeem was refused on the client", len(ro) >= 7, ro)
-    posts = [r for r in stub.requests if r[0] != "GET" and not r[1].startswith("/api/auth/") and not r[1].startswith("/frvr/")]
-    check("3. nothing but the sign-in was POSTed to krunker.io (no shop/purchase, ranked/purchase, ...)", not posts, [(r[0], r[1]) for r in posts])
+    rkb = stub.find("POST", "/api/ranked/purchase")
+    check("3. its Buy sends krunker.io's ranked/purchase with the account's Bearer", len(rkb) == 1 and bearer(rkb[0]), [(r[1], r[4]) for r in rkb])
+    posts = [r[1] for r in stub.requests if r[0] != "GET" and not r[1].startswith("/api/auth/") and not r[1].startswith("/frvr/")]
+    check("3. krunker.io got v10's writes and no other (shop/purchase, spins/execute, ranked/purchase)",
+          set(posts) == {"/api/shop/purchase", "/api/spins/execute", "/api/ranked/purchase"}, posts)
     check("3. kn_brain got no spin / voucher for the krunker.io account", not re.search(r'"(spin|fkr|vr)"', read_log(os.path.join(WORK, "brain.log"))), "")
 
     check("4. leaving switches back to Box Office", "[account] active account backend: krunk.io" in text, re.findall(r"\[account\] active.*", text)[:4])
@@ -295,6 +308,8 @@ def main():
     brain_log = os.path.join(WORK, "brain.log")
     http_port, ws_port = kn_proto.free_ports(2)
     stub = kae.Stub(http_port, ws_port)
+    # enough KR for the first wheel's spin, so the spin reaches spins/execute rather than v10's out-of-funds Purchase KR
+    stub.account_data = [{"player_funds": 50000}] * 4
     try:
         subprocess.run([f"{BUILD}/services/brain/kn_brain", "--migrate-only"], cwd=ROOT, env=env, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

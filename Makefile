@@ -825,7 +825,7 @@ kio-pfp-e2e: build ## A premium krunker.io account's profile picture: user-asset
 	timeout 400 $(PYTHON) -I client/tests/kio_pfp_e2e.py $(DEBUG_DIR)
 
 .PHONY: kio-store-e2e
-kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs, every purchase / spin / redeem read-only, Box Office's store again after leaving
+kio-store-e2e: build ## The Store as krunker.io's while it is the active backend (kio_store.h): shop/displays + ranked/shop from krunker.io stubs; BUY, a spin and the ranked Buy send shop/purchase, spins/execute and ranked/purchase with the Bearer, a real-money card the checkout's "xpurchase"; Box Office's store again after leaving
 	timeout 400 $(PYTHON) -I server/tests/kio_store_e2e.py $(DEBUG_DIR)
 
 .PHONY: kio-turf-e2e

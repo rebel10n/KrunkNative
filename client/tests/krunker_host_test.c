@@ -81,7 +81,7 @@ int main(void) {
     CHECK(!strcmp(url, "http://127.0.0.1:9001/api/player-profile/me/season/1/region/3"),
           "a data override wins over the API override (trailing slash dropped): %s", url);
     url_of(KRUNKER_HOST_GAPI, shop, url, sizeof(url));
-    CHECK(!strcmp(url, "https://gapi.svc.krunker.io/ranked/shop"), "the data override leaves the gapi client alone: %s", url);
+    CHECK(!strcmp(url, "http://127.0.0.1:9002/gapi/ranked/shop"), "the data override leaves the gapi client on the API mirror: %s", url);
 
     // 4. a mirror that sets only KRUNKNATIVE_KRUNKER_API serves the data client from it, as before
     env_clear();
@@ -89,6 +89,12 @@ int main(void) {
     url_of(KRUNKER_HOST_API, profile, url, sizeof(url));
     CHECK(!strcmp(url, "http://127.0.0.1:9003/api/player-profile/me/season/1/region/3"),
           "a mirror's API override serves the data client too: %s", url);
+    // ... and the gapi client: a stubbed run never reaches gapi.svc.krunker.io with the stub's token
+    url_of(KRUNKER_HOST_GAPI, shop, url, sizeof(url));
+    CHECK(!strcmp(url, "http://127.0.0.1:9003/api/ranked/shop"), "a mirror's API override serves the gapi client: %s", url);
+    setenv("KRUNKNATIVE_KRUNKER_GAPI", "http://127.0.0.1:9004/g/", 1);
+    url_of(KRUNKER_HOST_GAPI, shop, url, sizeof(url));
+    CHECK(!strcmp(url, "http://127.0.0.1:9004/g/ranked/shop"), "a gapi override wins over the API mirror: %s", url);
     env_clear();
 
     printf("krunker_host_test: %d/%d\n", g_pass, g_pass + g_fail);

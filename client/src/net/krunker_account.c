@@ -208,12 +208,21 @@ static void auth_url(char *out, const size_t n, const char *path) {
     snprintf(out, n, "%s%s", base, path);
 }
 
+// gapi's and gamefrontend's base: their own variable, else the API mirror when one is set, else the krunker.io host.
+// Without the mirror step a run against a stub (KRUNKNATIVE_KRUNKER_API only) sent its gapi requests, the ranked
+// purchase among them, to gapi.svc.krunker.io with the stub's token.
+static void mirrored_base(const char *env, const char *param, const char *fallback, char *base, const size_t n) {
+    char mirror[256];
+    endpoint("KRUNKNATIVE_KRUNKER_API", "krunkerApi", fallback, mirror, sizeof(mirror));
+    endpoint(env, param, mirror, base, n);
+}
+
 void krunker_host_url(const KrunkerHost host, const char *path, char *out, const size_t n) {
     char base[256];
     switch (host) {
-        case KRUNKER_HOST_GAPI: endpoint("KRUNKNATIVE_KRUNKER_GAPI", "krunkerGapi", KRUNKER_ACCOUNT_DEFAULT_GAPI, base, sizeof(base)); break;
+        case KRUNKER_HOST_GAPI: mirrored_base("KRUNKNATIVE_KRUNKER_GAPI", "krunkerGapi", KRUNKER_ACCOUNT_DEFAULT_GAPI, base, sizeof(base)); break;
         case KRUNKER_HOST_GAMEFRONTEND:
-            endpoint("KRUNKNATIVE_KRUNKER_GAMEFRONTEND", "krunkerGamefrontend", KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND, base, sizeof(base));
+            mirrored_base("KRUNKNATIVE_KRUNKER_GAMEFRONTEND", "krunkerGamefrontend", KRUNKER_ACCOUNT_DEFAULT_GAMEFRONTEND, base, sizeof(base));
             break;
         default: data_client_base(base, sizeof(base)); break; // the data client (v10 API_URI, not gapi)
     }
